@@ -1,0 +1,34 @@
+[package]
+name = "homerund"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "homerund"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum = "0.8"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = "0.5"
+toml = "0.8"
+octocrab = "0.44"
+sysinfo = "0.33"
+security-framework = "3"
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-stream = "0.1"
+futures = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"
