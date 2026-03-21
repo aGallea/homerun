@@ -255,4 +255,82 @@ mod tests {
         assert!(repo.private);
         assert!(!repo.is_org);
     }
+
+    #[test]
+    fn test_repo_info_is_org_true() {
+        use types::RepoInfo;
+        let repo = RepoInfo {
+            id: 1,
+            full_name: "myorg/tool".to_string(),
+            name: "tool".to_string(),
+            owner: "myorg".to_string(),
+            private: false,
+            html_url: "https://github.com/myorg/tool".to_string(),
+            is_org: true,
+        };
+        assert!(repo.is_org);
+        assert!(!repo.private);
+    }
+
+    #[test]
+    fn test_repo_info_serialization_roundtrip() {
+        use types::RepoInfo;
+        let repo = RepoInfo {
+            id: 99,
+            full_name: "a/b".to_string(),
+            name: "b".to_string(),
+            owner: "a".to_string(),
+            private: false,
+            html_url: "https://github.com/a/b".to_string(),
+            is_org: false,
+        };
+        let json = serde_json::to_string(&repo).unwrap();
+        let back: RepoInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, repo.id);
+        assert_eq!(back.full_name, repo.full_name);
+        assert_eq!(back.is_org, repo.is_org);
+    }
+
+    #[test]
+    fn test_runner_registration_serialization_roundtrip() {
+        use types::RunnerRegistration;
+        let reg = RunnerRegistration {
+            token: "abc123".to_string(),
+            expires_at: "2030-12-31T23:59:59Z".to_string(),
+        };
+        let json = serde_json::to_string(&reg).unwrap();
+        let back: RunnerRegistration = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.token, "abc123");
+        assert_eq!(back.expires_at, "2030-12-31T23:59:59Z");
+    }
+
+    #[tokio::test]
+    async fn test_github_client_builder_with_valid_token() {
+        // Creating a client with a valid-format token should succeed
+        let client = GitHubClient::new(Some("ghp_abcdefghij0123456789".to_string()));
+        assert!(
+            client.is_ok(),
+            "valid-format token should build client successfully"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_repos_with_empty_token_returns_err() {
+        // An empty string token will fail GitHub's API validation
+        let client = GitHubClient::new(Some(String::new())).unwrap();
+        let result = client.list_repos().await;
+        assert!(result.is_err(), "expected error with empty token");
+    }
+
+    #[tokio::test]
+    async fn test_list_self_hosted_workflows_empty_token_returns_empty() {
+        // Even with an empty token, the function should return Ok(empty vec)
+        // because it swallows directory-access errors.
+        let client = GitHubClient::new(Some(String::new())).unwrap();
+        let result = client
+            .list_self_hosted_workflows("any-owner", "any-repo")
+            .await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
 }

@@ -229,4 +229,44 @@ mod tests {
         assert_eq!(os1, os2);
         assert_eq!(arch1, arch2);
     }
+
+    /// The URL must always use HTTPS (not HTTP or any other scheme).
+    #[test]
+    fn test_download_url_is_https() {
+        let url = runner_download_url("2.321.0", "osx", "arm64");
+        assert!(url.starts_with("https://"), "URL must use HTTPS: {url}");
+    }
+
+    /// Ensure the URL embeds the version in both the release path and the filename.
+    #[test]
+    fn test_download_url_version_in_path_and_filename() {
+        let version = "2.400.1";
+        let url = runner_download_url(version, "osx", "arm64");
+        // The release tag part (e.g. /download/v2.400.1/)
+        assert!(
+            url.contains(&format!("v{version}")),
+            "release path missing v-prefix: {url}"
+        );
+        // The archive filename (e.g. actions-runner-osx-arm64-2.400.1.tar.gz)
+        assert!(
+            url.contains(&format!("actions-runner-osx-arm64-{version}.tar.gz")),
+            "filename missing version: {url}"
+        );
+    }
+
+    /// Validate URL format consistency across several version strings.
+    #[test]
+    fn test_download_url_format_consistency() {
+        for version in &["2.300.0", "2.321.0", "3.0.0", "10.0.100"] {
+            let url = runner_download_url(version, "osx", "arm64");
+            assert!(url.starts_with("https://github.com/actions/runner/releases/download/v"));
+            assert!(url.ends_with(".tar.gz"));
+        }
+    }
+
+    #[test]
+    fn test_detect_platform_arch_not_empty() {
+        let (_os, arch) = detect_platform();
+        assert!(!arch.is_empty(), "arch must not be empty");
+    }
 }

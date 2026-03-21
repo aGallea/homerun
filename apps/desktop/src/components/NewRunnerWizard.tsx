@@ -17,6 +17,17 @@ function generateName(repoName: string): string {
   return `${slug}-runner-${rand}`;
 }
 
+function generateBatchName(repoName: string, index: number): string {
+  const slug = repoName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  return `${slug}-runner-${index}`;
+}
+
+interface BatchResult {
+  name: string;
+  success: boolean;
+  error?: string;
+}
+
 export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunnerWizardProps) {
   const { repos, loading: reposLoading } = useRepos();
   const [step, setStep] = useState<0 | 1 | 2>(preselectedRepo ? 1 : 0);
@@ -38,9 +49,14 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
   const [name, setName] = useState("");
   const [labelsInput, setLabelsInput] = useState(DEFAULT_LABELS.join(", "));
   const [mode, setMode] = useState<"app" | "service">("app");
+  const [count, setCount] = useState(1);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launched, setLaunched] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(
+    null,
+  );
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
 
   const filteredRepos = useMemo(() => {
     const q = search.toLowerCase();
@@ -70,18 +86,43 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
       .split(",")
       .map((l) => l.trim())
       .filter(Boolean);
-    try {
-      await onCreate({
-        repo_full_name: selectedRepo.full_name,
-        name: name.trim() || undefined,
-        labels,
-        mode,
-      });
-      setLaunched(true);
-    } catch (e) {
-      setLaunchError(String(e));
-    } finally {
+
+    if (count === 1) {
+      try {
+        await onCreate({
+          repo_full_name: selectedRepo.full_name,
+          name: name.trim() || undefined,
+          labels,
+          mode,
+        });
+        setLaunched(true);
+      } catch (e) {
+        setLaunchError(String(e));
+      } finally {
+        setLaunching(false);
+      }
+    } else {
+      // Batch creation
+      const results: BatchResult[] = [];
+      for (let i = 1; i <= count; i++) {
+        setBatchProgress({ current: i, total: count });
+        const runnerName = generateBatchName(selectedRepo.name, i);
+        try {
+          await onCreate({
+            repo_full_name: selectedRepo.full_name,
+            name: runnerName,
+            labels,
+            mode,
+          });
+          results.push({ name: runnerName, success: true });
+        } catch (e) {
+          results.push({ name: runnerName, success: false, error: String(e) });
+        }
+      }
+      setBatchResults(results);
+      setBatchProgress(null);
       setLaunching(false);
+      setLaunched(true);
     }
   }
 
@@ -89,6 +130,8 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
     .split(",")
     .map((l) => l.trim())
     .filter(Boolean);
+
+  const isNextDisabled = count === 1 ? !name.trim() : false;
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
@@ -129,6 +172,8 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
               onLabelsInput={setLabelsInput}
               mode={mode}
               onMode={setMode}
+              count={count}
+              onCount={setCount}
             />
           )}
           {step === 2 && selectedRepo && !launched && (
@@ -137,10 +182,12 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
               name={name}
               labels={labels}
               mode={mode}
+              count={count}
               error={launchError}
+              batchProgress={batchProgress}
             />
           )}
-          {step === 2 && launched && (
+          {step === 2 && launched && count === 1 && (
             <div style={{ textAlign: "center", padding: "24px 0" }}>
               <div
                 style={{
@@ -157,6 +204,9 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
                 <strong className="text-primary">{selectedRepo?.full_name}</strong>.
               </p>
             </div>
+          )}
+          {step === 2 && launched && count > 1 && (
+            <BatchSummary results={batchResults} repo={selectedRepo!} />
           )}
         </div>
 
@@ -182,13 +232,19 @@ export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunne
               </button>
             )}
             {step === 1 && (
-              <button className="btn btn-primary" disabled={!name.trim()} onClick={handleNext}>
+              <button className="btn btn-primary" disabled={isNextDisabled} onClick={handleNext}>
                 Next
               </button>
             )}
             {step === 2 && (
               <button className="btn btn-primary" disabled={launching} onClick={handleLaunch}>
-                {launching ? "Launching..." : "Launch Runner"}
+                {launching
+                  ? batchProgress
+                    ? `Creating ${batchProgress.current} of ${batchProgress.total}...`
+                    : "Launching..."
+                  : count > 1
+                    ? `Launch ${count} Runners`
+                    : "Launch Runner"}
               </button>
             )}
           </div>
@@ -278,6 +334,8 @@ interface StepConfigureProps {
   onLabelsInput: (v: string) => void;
   mode: "app" | "service";
   onMode: (v: "app" | "service") => void;
+  count: number;
+  onCount: (v: number) => void;
 }
 
 function StepConfigure({
@@ -288,7 +346,11 @@ function StepConfigure({
   onLabelsInput,
   mode,
   onMode,
+  count,
+  onCount,
 }: StepConfigureProps) {
+  const slug = repo.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+
   return (
     <div>
       <div className="form-group">
@@ -314,12 +376,58 @@ function StepConfigure({
         <input
           id="runner-name"
           type="text"
-          value={name}
+          value={count > 1 ? "" : name}
           onChange={(e) => onName(e.target.value)}
           style={{ width: "100%" }}
-          placeholder="e.g. my-repo-runner-1234"
+          placeholder={
+            count > 1 ? `${slug}-runner-1 ... ${slug}-runner-${count}` : "e.g. my-repo-runner-1234"
+          }
+          disabled={count > 1}
         />
-        <p className="form-hint">Unique name for this runner instance (auto-generated).</p>
+        {count > 1 ? (
+          <p className="form-hint">
+            Will create: <strong>{slug}-runner-1</strong> through{" "}
+            <strong>
+              {slug}-runner-{count}
+            </strong>
+          </p>
+        ) : (
+          <p className="form-hint">Unique name for this runner instance (auto-generated).</p>
+        )}
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Number of Runners</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            className="btn"
+            onClick={() => onCount(Math.max(1, count - 1))}
+            disabled={count <= 1}
+            style={{ width: 32, padding: "4px 0", textAlign: "center" }}
+          >
+            −
+          </button>
+          <span
+            style={{
+              minWidth: 32,
+              textAlign: "center",
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+            }}
+          >
+            {count}
+          </span>
+          <button
+            className="btn"
+            onClick={() => onCount(Math.min(10, count + 1))}
+            disabled={count >= 10}
+            style={{ width: 32, padding: "4px 0", textAlign: "center" }}
+          >
+            +
+          </button>
+        </div>
+        <p className="form-hint">Number of runner instances to create (1–10).</p>
       </div>
 
       <div className="form-group">
@@ -367,10 +475,14 @@ interface StepLaunchProps {
   name: string;
   labels: string[];
   mode: string;
+  count: number;
   error: string | null;
+  batchProgress: { current: number; total: number } | null;
 }
 
-function StepLaunch({ repo, name, labels, mode, error }: StepLaunchProps) {
+function StepLaunch({ repo, name, labels, mode, count, error, batchProgress }: StepLaunchProps) {
+  const slug = repo.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+
   return (
     <div>
       <p className="text-muted" style={{ marginBottom: 16 }}>
@@ -379,6 +491,22 @@ function StepLaunch({ repo, name, labels, mode, error }: StepLaunchProps) {
 
       {error && <div className="error-banner">{error}</div>}
 
+      {batchProgress && (
+        <div
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            background: "rgba(56, 139, 253, 0.1)",
+            border: "1px solid rgba(56, 139, 253, 0.3)",
+            borderRadius: 6,
+            fontSize: 13,
+            color: "var(--text-primary)",
+          }}
+        >
+          Creating runner {batchProgress.current} of {batchProgress.total}...
+        </div>
+      )}
+
       <div className="launch-summary">
         <div className="launch-summary-row">
           <span className="launch-summary-key">Repository</span>
@@ -386,7 +514,13 @@ function StepLaunch({ repo, name, labels, mode, error }: StepLaunchProps) {
         </div>
         <div className="launch-summary-row">
           <span className="launch-summary-key">Name</span>
-          <span className="launch-summary-value font-mono">{name}</span>
+          <span className="launch-summary-value font-mono">
+            {count > 1 ? `${slug}-runner-1 ... ${slug}-runner-${count}` : name}
+          </span>
+        </div>
+        <div className="launch-summary-row">
+          <span className="launch-summary-key">Count</span>
+          <span className="launch-summary-value">{count}</span>
         </div>
         <div className="launch-summary-row">
           <span className="launch-summary-key">Labels</span>
@@ -398,6 +532,67 @@ function StepLaunch({ repo, name, labels, mode, error }: StepLaunchProps) {
             {mode}
           </span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface BatchSummaryProps {
+  results: BatchResult[];
+  repo: RepoInfo;
+}
+
+function BatchSummary({ results, repo }: BatchSummaryProps) {
+  const successCount = results.filter((r) => r.success).length;
+  const failCount = results.length - successCount;
+  const allSuccess = failCount === 0;
+
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: 16 }}>
+        <div
+          style={{
+            fontSize: 48,
+            marginBottom: 12,
+            color: allSuccess ? "var(--accent-green)" : "var(--accent-yellow)",
+          }}
+        >
+          {allSuccess ? "✓" : "!"}
+        </div>
+        <h3 style={{ margin: "0 0 8px", color: "var(--text-primary)" }}>
+          {allSuccess
+            ? `${successCount} runner${successCount !== 1 ? "s" : ""} created successfully`
+            : `${successCount} of ${results.length} runners created`}
+        </h3>
+        <p className="text-muted">
+          For <strong className="text-primary">{repo.full_name}</strong>
+        </p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {results.map((r) => (
+          <div
+            key={r.name}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 10px",
+              borderRadius: 6,
+              background: r.success ? "rgba(63, 185, 80, 0.08)" : "rgba(248, 81, 73, 0.08)",
+              border: `1px solid ${r.success ? "rgba(63, 185, 80, 0.2)" : "rgba(248, 81, 73, 0.2)"}`,
+              fontSize: 13,
+            }}
+          >
+            <span style={{ color: r.success ? "var(--accent-green)" : "var(--accent-red)" }}>
+              {r.success ? "✓" : "✗"}
+            </span>
+            <span className="font-mono" style={{ color: "var(--text-primary)", flex: 1 }}>
+              {r.name}
+            </span>
+            {r.error && <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{r.error}</span>}
+          </div>
+        ))}
       </div>
     </div>
   );

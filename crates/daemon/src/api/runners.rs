@@ -439,4 +439,240 @@ mod tests {
             );
         }
     }
+
+    /// Helper: create a runner and return its ID string.
+    async fn create_runner_and_get_id(state: &crate::server::AppState) -> String {
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"owner/repo"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        runner["config"]["id"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn test_stop_runner_conflict_when_not_online() {
+        // A newly created runner is in "creating" state → stop should return 409 CONFLICT
+        let state = AppState::new_test();
+        let id = create_runner_and_get_id(&state).await;
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/runners/{id}/stop"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn test_start_runner_conflict_when_not_offline_or_error() {
+        // A newly created runner is in "creating" state → start should return 409 CONFLICT
+        // because start only accepts Offline or Error states.
+        let state = AppState::new_test();
+        let id = create_runner_and_get_id(&state).await;
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/runners/{id}/start"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn test_restart_runner_in_offline_state_spawns_ok() {
+        // A runner that is Offline can be restarted (200 OK) – the actual registration
+        // is async and we don't wait for it.  We just verify the HTTP response.
+        use crate::runner::state::RunnerState;
+
+        let state = AppState::new_test();
+        let id = create_runner_and_get_id(&state).await;
+
+        // Manually transition to Offline so restart is valid.
+        state
+            .runner_manager
+            .update_state(&id, RunnerState::Registering)
+            .await
+            .unwrap();
+        state
+            .runner_manager
+            .update_state(&id, RunnerState::Online)
+            .await
+            .unwrap();
+        state
+            .runner_manager
+            .update_state(&id, RunnerState::Offline)
+            .await
+            .unwrap();
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/runners/{id}/restart"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Offline runner can be restarted (it goes through start path, not stop)
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_delete_runner_not_found() {
+        let state = AppState::new_test();
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/runners/nonexistent-id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_name_and_labels() {
+        let state = AppState::new_test();
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"repo_full_name":"owner/myrepo","name":"custom-name","labels":["gpu"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(runner["config"]["name"], "custom-name");
+        let labels = runner["config"]["labels"].as_array().unwrap();
+        assert!(labels.iter().any(|l| l.as_str() == Some("gpu")));
+        assert!(labels.iter().any(|l| l.as_str() == Some("self-hosted")));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_invalid_repo_name() {
+        // Repo name without '/' is invalid
+        let state = AppState::new_test();
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"nodash"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_update_runner_not_found() {
+        let state = AppState::new_test();
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/runners/nonexistent-id")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"labels":["self-hosted"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_update_runner_mode() {
+        let state = AppState::new_test();
+        let id = create_runner_and_get_id(&state).await;
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/runners/{id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"mode":"service"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let updated: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(updated["config"]["mode"], "service");
+    }
+
+    #[tokio::test]
+    async fn test_get_runner_returns_correct_id() {
+        let state = AppState::new_test();
+        let id = create_runner_and_get_id(&state).await;
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/runners/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(runner["config"]["id"].as_str().unwrap(), id);
+    }
 }
