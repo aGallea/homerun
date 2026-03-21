@@ -95,7 +95,7 @@ jobs:
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
-          gistID: homerun-coverage
+          gistID: 77f18f115b500bdc5d6df52f95d399b9
           filename: coverage.json
           label: coverage
           message: "${{ steps.coverage.outputs.percentage }}%"
