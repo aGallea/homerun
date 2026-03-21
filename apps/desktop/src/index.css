@@ -704,6 +704,10 @@ p {
   color: var(--accent-red);
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Runner actions dropdown */
 .runner-actions {
   position: relative;
