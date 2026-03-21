@@ -10,6 +10,7 @@ export function Dashboard() {
     useRunners();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
+  const [filter, setFilter] = useState("");
 
   const online = runners.filter((r) => r.state === "online" || r.state === "busy").length;
   const busy = runners.filter((r) => r.state === "busy").length;
@@ -20,6 +21,12 @@ export function Dashboard() {
     metrics && metrics.runners.length > 0
       ? metrics.runners.reduce((sum, r) => sum + r.cpu_percent, 0) / metrics.runners.length
       : 0;
+
+  const filtered = runners.filter(
+    (r) =>
+      r.config.name.toLowerCase().includes(filter.toLowerCase()) ||
+      `${r.config.repo_owner}/${r.config.repo_name}`.toLowerCase().includes(filter.toLowerCase()),
+  );
 
   if (loading) {
     return (
@@ -33,9 +40,17 @@ export function Dashboard() {
     <div className="page">
       <div className="page-header">
         <h1 className="page-title">Dashboard</h1>
-        <button className="btn btn-primary" onClick={() => setShowWizard(true)}>
-          + New Runner
-        </button>
+        <div className="flex items-center gap-8">
+          <input
+            className="input"
+            placeholder="Filter runners..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <button className="btn btn-primary" onClick={() => setShowWizard(true)}>
+            + New Runner
+          </button>
+        </div>
       </div>
 
       <div className="stats-grid">
@@ -46,7 +61,7 @@ export function Dashboard() {
       </div>
 
       <RunnerTable
-        runners={runners}
+        runners={filtered}
         onStart={startRunner}
         onStop={stopRunner}
         onRestart={restartRunner}
