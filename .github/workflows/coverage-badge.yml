@@ -1,0 +1,44 @@
+name: Coverage Badge
+
+on:
+  push:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  update-badge:
+    name: Update coverage badge
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install cargo-llvm-cov
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
+
+      - name: Run tests with coverage
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | tee coverage-summary.txt
+
+      - name: Extract coverage percentage
+        id: coverage
+        run: |
+          COVERAGE=$(grep "^TOTAL" coverage-summary.txt | awk '{print $NF}' | sed 's/%//')
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Coverage: $COVERAGE%"
+
+      - name: Update badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 77f18f115b500bdc5d6df52f95d399b9
+          filename: coverage.json
+          label: coverage
+          message: "${{ steps.coverage.outputs.percentage }}%"
+          valColorRange: ${{ steps.coverage.outputs.percentage }}
+          minColorRange: 50
+          maxColorRange: 95
