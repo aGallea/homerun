@@ -25,8 +25,7 @@ pub async fn scan_remote_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<DiscoveredRepo>>, (StatusCode, String)> {
     let token = state.auth.token().await;
-    let client =
-        GitHubClient::new(token).map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+    let client = GitHubClient::new(token).map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
     let repos = scan_remote(&client)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

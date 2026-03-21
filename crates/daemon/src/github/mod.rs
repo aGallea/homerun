@@ -59,11 +59,7 @@ impl GitHubClient {
 
     /// Fetch `.github/workflows/` contents for `owner/repo` and return the
     /// relative file paths of workflow files that contain `runs-on: self-hosted`.
-    pub async fn list_self_hosted_workflows(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<Vec<String>> {
+    pub async fn list_self_hosted_workflows(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
         #[derive(Deserialize)]
         struct ContentItem {
             name: String,
