@@ -1,8 +1,8 @@
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::Frame;
 
 use crate::app::App;
 use crate::client::RunnerInfo;
@@ -74,8 +74,8 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
         None => " No runner selected.\n\n Press 'a' to add a new runner.".to_string(),
     };
 
-    let paragraph = Paragraph::new(content)
-        .block(Block::default().borders(Borders::ALL).title(" Detail "));
+    let paragraph =
+        Paragraph::new(content).block(Block::default().borders(Borders::ALL).title(" Detail "));
 
     f.render_widget(paragraph, area);
 }

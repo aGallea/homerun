@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::client::{AuthStatus, MetricsResponse, RunnerInfo, RepoInfo};
+use crate::client::{AuthStatus, MetricsResponse, RepoInfo, RunnerInfo};
 
 /// Actions that require async daemon calls — returned from handle_key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +66,12 @@ pub struct App {
     pub daemon_connected: bool,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         Self {
@@ -100,8 +106,7 @@ impl App {
 
     pub fn select_next_repo(&mut self) {
         if !self.repos.is_empty() {
-            self.selected_repo_index =
-                (self.selected_repo_index + 1).min(self.repos.len() - 1);
+            self.selected_repo_index = (self.selected_repo_index + 1).min(self.repos.len() - 1);
         }
     }
 

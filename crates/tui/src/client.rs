@@ -253,8 +253,7 @@ impl DaemonClient {
     ) -> Result<SplitStream<WebSocketStream<tokio::net::UnixStream>>> {
         let stream = tokio::net::UnixStream::connect(&self.socket_path).await?;
         let uri = "ws://localhost/events";
-        let (ws_stream, _response) =
-            tokio_tungstenite::client_async(uri, stream).await?;
+        let (ws_stream, _response) = tokio_tungstenite::client_async(uri, stream).await?;
         let (_write, read) = ws_stream.split();
         Ok(read)
     }

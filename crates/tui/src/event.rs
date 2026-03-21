@@ -20,7 +20,10 @@ pub enum AppEvent {
 /// Returns the receiver and the sender so callers can attach WebSocket forwarders.
 pub fn start_event_loop(
     tick_rate: Duration,
-) -> Result<(mpsc::UnboundedSender<AppEvent>, mpsc::UnboundedReceiver<AppEvent>)> {
+) -> Result<(
+    mpsc::UnboundedSender<AppEvent>,
+    mpsc::UnboundedReceiver<AppEvent>,
+)> {
     let (tx, rx) = mpsc::unbounded_channel();
 
     let key_tx = tx.clone();

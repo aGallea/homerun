@@ -17,7 +17,10 @@ use homerun::event::{start_event_loop, start_ws_forwarding, AppEvent};
 use homerun::ui;
 
 #[derive(Parser)]
-#[command(name = "homerun", about = "HomeRun — GitHub Actions self-hosted runner manager")]
+#[command(
+    name = "homerun",
+    about = "HomeRun — GitHub Actions self-hosted runner manager"
+)]
 struct Cli {
     /// Disable TUI, use plain CLI output
     #[arg(long)]
@@ -116,14 +119,13 @@ async fn run_tui() -> Result<()> {
                     if let Ok(runners) = client.list_runners().await {
                         app.runners = runners;
                         // Clamp selection
-                        if app.selected_runner_index >= app.runners.len()
-                            && !app.runners.is_empty()
+                        if app.selected_runner_index >= app.runners.len() && !app.runners.is_empty()
                         {
                             app.selected_runner_index = app.runners.len() - 1;
                         }
                     }
                     // Refresh metrics every 5 ticks (~10 seconds)
-                    if poll_counter % 5 == 0 {
+                    if poll_counter.is_multiple_of(5) {
                         if let Ok(metrics) = client.get_metrics().await {
                             app.metrics = Some(metrics);
                         }
@@ -188,8 +190,7 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
                 | Action::DeleteRunner(_) => {
                     if let Ok(runners) = client.list_runners().await {
                         app.runners = runners;
-                        if app.selected_runner_index >= app.runners.len()
-                            && !app.runners.is_empty()
+                        if app.selected_runner_index >= app.runners.len() && !app.runners.is_empty()
                         {
                             app.selected_runner_index = app.runners.len() - 1;
                         }

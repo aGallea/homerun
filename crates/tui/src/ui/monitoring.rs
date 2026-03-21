@@ -1,8 +1,8 @@
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
+use ratatui::Frame;
 
 use crate::app::App;
 
@@ -103,8 +103,8 @@ fn draw_runner_metrics(f: &mut Frame, app: &App, area: Rect) {
         _ => vec![Line::from(" No active runner processes.")],
     };
 
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Per-Runner "));
+    let paragraph =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Per-Runner "));
     f.render_widget(paragraph, area);
 }
 

@@ -1,8 +1,8 @@
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::Frame;
 
 use crate::app::App;
 
@@ -68,9 +68,7 @@ fn draw_repo_detail(f: &mut Frame, app: &App, area: Rect) {
             let runner_count = app
                 .runners
                 .iter()
-                .filter(|r| {
-                    r.config.repo_owner == repo.owner && r.config.repo_name == repo.name
-                })
+                .filter(|r| r.config.repo_owner == repo.owner && r.config.repo_name == repo.name)
                 .count();
             format!(
                 " Repository: {}\n\
@@ -91,8 +89,8 @@ fn draw_repo_detail(f: &mut Frame, app: &App, area: Rect) {
         None => " No repos loaded.\n\n Authenticate first, then repos will appear.".to_string(),
     };
 
-    let paragraph = Paragraph::new(content)
-        .block(Block::default().borders(Borders::ALL).title(" Detail "));
+    let paragraph =
+        Paragraph::new(content).block(Block::default().borders(Borders::ALL).title(" Detail "));
 
     f.render_widget(paragraph, area);
 }
