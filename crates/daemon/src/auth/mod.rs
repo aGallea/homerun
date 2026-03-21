@@ -97,9 +97,12 @@ impl AuthManager {
 
     /// Remove the token from keychain and clear in-memory state.
     pub async fn logout(&self) -> Result<()> {
-        keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?;
+        // Clear in-memory state first, then try keychain cleanup
         let mut state = self.state.write().await;
         *state = None;
+        drop(state);
+        // Best-effort keychain cleanup — don't fail if token wasn't in keychain
+        let _ = keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
         Ok(())
     }
 
@@ -174,7 +177,11 @@ impl AuthManager {
 
             if let Some(token) = poll.access_token {
                 let user = self.validate_token(&token).await?;
-                keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token)?;
+                if let Err(e) = keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token) {
+                    tracing::error!("Failed to store token in keychain: {e}");
+                } else {
+                    tracing::info!("Token stored in macOS Keychain");
+                }
                 let mut state = self.state.write().await;
                 *state = Some(AuthState {
                     token,

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { listen } from "@tauri-apps/api/event";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
 import { api } from "../api/commands";
+import type { LogEntry } from "../api/types";
 import { StatusBadge } from "../components/StatusBadge";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
@@ -22,32 +22,25 @@ export function RunnerDetail() {
   const { metrics } = useMetrics();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<{ timestamp: string; line: string; stream: string }[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const logContainerRef = useRef<HTMLDivElement>(null);
-  const subscribedRef = useRef(false);
 
-  // Subscribe to log stream
+  // Poll for recent logs every 2 seconds
   useEffect(() => {
-    if (!id || subscribedRef.current) return;
-    subscribedRef.current = true;
+    if (!id) return;
 
-    api.subscribeRunnerLogs(id).catch(() => {});
-
-    const unlisten = listen<string>(`runner-log-${id}`, (event) => {
+    async function fetchLogs() {
       try {
-        const entry = JSON.parse(event.payload);
-        setLogs((prev) => {
-          const next = [...prev, entry];
-          return next.length > 500 ? next.slice(-500) : next;
-        });
+        const entries = await api.getRunnerLogs(id!);
+        setLogs(entries);
       } catch {
-        // ignore parse errors
+        // ignore errors (runner may be offline)
       }
-    });
+    }
 
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    fetchLogs();
+    const timer = setInterval(fetchLogs, 2000);
+    return () => clearInterval(timer);
   }, [id]);
 
   // Auto-scroll logs
@@ -81,7 +74,7 @@ export function RunnerDetail() {
     );
   }
 
-  const { config, state, uptime_secs, jobs_completed, jobs_failed } = runner;
+  const { config, state, uptime_secs, jobs_completed, jobs_failed, current_job } = runner;
   const isRunning = state === "online" || state === "busy";
   const isStopped = state === "offline" || state === "error";
 
@@ -121,7 +114,7 @@ export function RunnerDetail() {
               <h1 className="page-title" style={{ fontSize: 20 }}>
                 {config.name}
               </h1>
-              <StatusBadge state={state} />
+              <StatusBadge state={state} currentJob={current_job ?? undefined} />
             </div>
             <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
               {config.repo_owner}/{config.repo_name}
@@ -180,6 +173,35 @@ export function RunnerDetail() {
         <InfoCard label="Mode">
           <span style={{ textTransform: "capitalize" }}>{config.mode}</span>
         </InfoCard>
+
+        {current_job && (
+          <InfoCard label="Current Job">
+            <div className="flex items-center gap-8">
+              <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
+              <a
+                href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 11, color: "var(--accent-blue)" }}
+              >
+                View on GitHub →
+              </a>
+            </div>
+          </InfoCard>
+        )}
+
+        {!current_job && (
+          <InfoCard label="Workflows">
+            <a
+              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent-blue)" }}
+            >
+              View Actions →
+            </a>
+          </InfoCard>
+        )}
 
         <InfoCard label="Labels">
           <div className="flex" style={{ flexWrap: "wrap", gap: 4 }}>

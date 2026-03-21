@@ -36,7 +36,7 @@ pub fn run() {
             commands::service_status,
             commands::install_service,
             commands::uninstall_service,
-            commands::subscribe_runner_logs,
+            commands::get_runner_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
