@@ -50,6 +50,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth/token", post(api::auth::login_with_token))
         .route("/auth", delete(api::auth::logout))
         .route("/auth/status", get(api::auth::status))
+        .route("/auth/device", post(api::auth::start_device_flow))
+        .route("/auth/device/poll", post(api::auth::poll_device_flow))
         .route("/repos", get(api::repos::list_repos))
         .route(
             "/runners",

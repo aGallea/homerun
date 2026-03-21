@@ -1,17 +1,40 @@
 pub mod keychain;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 const KEYCHAIN_SERVICE: &str = "com.homerun.daemon";
 const KEYCHAIN_ACCOUNT: &str = "github-token";
+const GITHUB_CLIENT_ID: &str = "Ov23liUGCrUgXVf9nTRd";
+const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
+const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
+const DEVICE_FLOW_TIMEOUT_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubUser {
     pub login: String,
     pub avatar_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceFlowResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+/// Internal response from GitHub's device flow access token poll endpoint.
+#[derive(Debug, Deserialize)]
+struct PollResponse {
+    access_token: Option<String>,
+    error: Option<String>,
+    #[allow(dead_code)]
+    error_description: Option<String>,
+    interval: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +120,101 @@ impl AuthManager {
     pub async fn token(&self) -> Option<String> {
         let state = self.state.read().await;
         state.as_ref().map(|s| s.token.clone())
+    }
+
+    /// Initiate a GitHub Device Flow. Returns the user_code and verification_uri
+    /// that should be shown to the user.
+    pub async fn start_device_flow(&self) -> Result<DeviceFlowResponse> {
+        let client = reqwest::Client::new();
+        let response = client
+            .post(DEVICE_CODE_URL)
+            .header("Accept", "application/json")
+            .form(&[
+                ("client_id", GITHUB_CLIENT_ID),
+                ("scope", "repo"),
+            ])
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "GitHub device flow initiation failed: {}",
+                response.status()
+            ));
+        }
+
+        let flow: DeviceFlowResponse = response.json().await?;
+        Ok(flow)
+    }
+
+    /// Poll GitHub until the device is authorized or until timeout.
+    /// On success, stores the token in the keychain and returns the GitHubUser.
+    pub async fn poll_device_flow(
+        &self,
+        device_code: &str,
+        interval: u64,
+    ) -> Result<GitHubUser> {
+        let client = reqwest::Client::new();
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(DEVICE_FLOW_TIMEOUT_SECS);
+        let mut poll_interval = interval;
+
+        loop {
+            if std::time::Instant::now() > deadline {
+                return Err(anyhow!("Device flow authorization timed out"));
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
+
+            let response = client
+                .post(ACCESS_TOKEN_URL)
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", GITHUB_CLIENT_ID),
+                    ("device_code", device_code),
+                    (
+                        "grant_type",
+                        "urn:ietf:params:oauth:grant-type:device_code",
+                    ),
+                ])
+                .send()
+                .await?;
+
+            let poll: PollResponse = response.json().await?;
+
+            if let Some(token) = poll.access_token {
+                let user = self.validate_token(&token).await?;
+                keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token)?;
+                let mut state = self.state.write().await;
+                *state = Some(AuthState {
+                    token,
+                    user: user.clone(),
+                });
+                return Ok(user);
+            }
+
+            match poll.error.as_deref() {
+                Some("authorization_pending") => {
+                    // Normal — keep polling
+                }
+                Some("slow_down") => {
+                    // GitHub wants us to poll slower
+                    poll_interval = poll.interval.unwrap_or(poll_interval + 5);
+                }
+                Some("expired_token") => {
+                    return Err(anyhow!("Device flow code expired. Please start again."));
+                }
+                Some("access_denied") => {
+                    return Err(anyhow!("Authorization denied by user."));
+                }
+                Some(other) => {
+                    return Err(anyhow!("Device flow error: {other}"));
+                }
+                None => {
+                    return Err(anyhow!("Unexpected empty response from GitHub"));
+                }
+            }
+        }
     }
 
     async fn validate_token(&self, token: &str) -> Result<GitHubUser> {

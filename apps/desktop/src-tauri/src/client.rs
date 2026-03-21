@@ -41,6 +41,15 @@ pub struct AuthStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceFlowResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
     pub cpu_percent: f64,
     pub memory_used_bytes: u64,
@@ -244,6 +253,27 @@ impl DaemonClient {
         self.request("POST", &format!("/runners/{id}/restart"), None)
             .await?;
         Ok(())
+    }
+
+    pub async fn start_device_flow(&self) -> Result<DeviceFlowResponse, String> {
+        let body = self.request("POST", "/auth/device", None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn poll_device_flow(
+        &self,
+        device_code: &str,
+        interval: u64,
+    ) -> Result<AuthStatus, String> {
+        let payload = serde_json::json!({
+            "device_code": device_code,
+            "interval": interval,
+        })
+        .to_string();
+        let body = self
+            .request("POST", "/auth/device/poll", Some(payload))
+            .await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
     pub async fn list_repos(&self) -> Result<Vec<RepoInfo>, String> {

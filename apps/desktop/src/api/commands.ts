@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AuthStatus,
+  DeviceFlowResponse,
   RunnerInfo,
   RepoInfo,
   MetricsResponse,
@@ -13,6 +14,12 @@ export const api = {
   loginWithToken: (token: string) =>
     invoke<AuthStatus>("login_with_token", { token }),
   logout: () => invoke<void>("logout"),
+  startDeviceFlow: () => invoke<DeviceFlowResponse>("start_device_flow"),
+  pollDeviceFlow: (deviceCode: string, interval: number) =>
+    invoke<AuthStatus>("poll_device_flow", {
+      device_code: deviceCode,
+      interval,
+    }),
 
   // Runners
   listRunners: () => invoke<RunnerInfo[]>("list_runners"),

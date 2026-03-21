@@ -29,6 +29,8 @@ pub fn run() {
             commands::auth_status,
             commands::login_with_token,
             commands::logout,
+            commands::start_device_flow,
+            commands::poll_device_flow,
             commands::list_repos,
             commands::get_metrics,
         ])

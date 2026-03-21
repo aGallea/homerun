@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::client::{
-    AuthStatus, CreateRunnerRequest, MetricsResponse, RepoInfo, RunnerInfo,
+    AuthStatus, CreateRunnerRequest, DeviceFlowResponse, MetricsResponse, RepoInfo, RunnerInfo,
 };
 use crate::AppState;
 
@@ -84,6 +84,24 @@ pub async fn list_repos(state: State<'_, AppState>) -> Result<Vec<RepoInfo>, Str
 pub async fn get_metrics(state: State<'_, AppState>) -> Result<MetricsResponse, String> {
     let client = state.client.lock().await;
     client.get_metrics().await
+}
+
+#[tauri::command]
+pub async fn start_device_flow(
+    state: State<'_, AppState>,
+) -> Result<DeviceFlowResponse, String> {
+    let client = state.client.lock().await;
+    client.start_device_flow().await
+}
+
+#[tauri::command]
+pub async fn poll_device_flow(
+    state: State<'_, AppState>,
+    device_code: String,
+    interval: u64,
+) -> Result<AuthStatus, String> {
+    let client = state.client.lock().await;
+    client.poll_device_flow(&device_code, interval).await
 }
 
 /// Check whether the daemon socket file exists (fast, no network call).

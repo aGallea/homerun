@@ -37,6 +37,14 @@ export interface AuthStatus {
   user: GitHubUser | null;
 }
 
+export interface DeviceFlowResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
 export interface SystemMetrics {
   cpu_percent: number;
   memory_used_bytes: number;

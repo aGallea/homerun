@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Deserialize;
 
-use crate::auth::AuthStatus;
+use crate::auth::{AuthStatus, DeviceFlowResponse};
 use crate::server::AppState;
 
 #[derive(Deserialize)]
@@ -31,6 +31,35 @@ pub async fn logout(State(state): State<AppState>) -> Result<StatusCode, (Status
 
 pub async fn status(State(state): State<AppState>) -> Json<AuthStatus> {
     Json(state.auth.status().await)
+}
+
+pub async fn start_device_flow(
+    State(state): State<AppState>,
+) -> Result<Json<DeviceFlowResponse>, (StatusCode, String)> {
+    match state.auth.start_device_flow().await {
+        Ok(flow) => Ok(Json(flow)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PollDeviceRequest {
+    pub device_code: String,
+    pub interval: Option<u64>,
+}
+
+pub async fn poll_device_flow(
+    State(state): State<AppState>,
+    Json(body): Json<PollDeviceRequest>,
+) -> Result<Json<AuthStatus>, (StatusCode, String)> {
+    let interval = body.interval.unwrap_or(5);
+    match state.auth.poll_device_flow(&body.device_code, interval).await {
+        Ok(user) => Ok(Json(AuthStatus {
+            authenticated: true,
+            user: Some(user),
+        })),
+        Err(e) => Err((StatusCode::UNAUTHORIZED, e.to_string())),
+    }
 }
 
 #[cfg(test)]
