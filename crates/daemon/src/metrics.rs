@@ -93,25 +93,26 @@ impl MetricsCollector {
         // Check the root process exists
         sys.process(root_pid)?;
 
-        // Collect all PIDs in the tree rooted at root_pid
-        let mut tree_pids = HashSet::new();
-        tree_pids.insert(root_pid);
+        // Build a parent→children index in one pass
+        let mut children: std::collections::HashMap<Pid, Vec<Pid>> =
+            std::collections::HashMap::new();
+        for (pid, process) in sys.processes() {
+            if let Some(parent) = process.parent() {
+                children.entry(parent).or_default().push(*pid);
+            }
+        }
 
-        // Iterate until no new children are found
-        loop {
-            let mut found_new = false;
-            for (pid, process) in sys.processes() {
-                if !tree_pids.contains(pid) {
-                    if let Some(parent) = process.parent() {
-                        if tree_pids.contains(&parent) {
-                            tree_pids.insert(*pid);
-                            found_new = true;
-                        }
+        // BFS from root_pid to collect all PIDs in the tree
+        let mut tree_pids = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(root_pid);
+        while let Some(current) = queue.pop_front() {
+            if tree_pids.insert(current) {
+                if let Some(kids) = children.get(&current) {
+                    for &child in kids {
+                        queue.push_back(child);
                     }
                 }
-            }
-            if !found_new {
-                break;
             }
         }
 
