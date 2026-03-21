@@ -12,14 +12,19 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
 ## Features
 
 - **One-click runner setup** — no shell scripts, no copy-pasting tokens
+- **Device Flow authentication** — log in with your GitHub account via browser; no PAT required
+- **Batch runner creation** — spin up multiple runners for the same repo in one step with live progress
 - **Unified dashboard** — monitor all runners across all repos in one place
-- **Real-time logs & metrics** — CPU/RAM per runner with live streaming
+- **Live log streaming** — tail runner output in real time from the runner detail view
+- **Job tracking** — see current job name, busy state, and completed/failed job counters per runner
+- **Real-time metrics** — CPU/RAM per runner via live WebSocket updates
 - **Two run modes** — app-managed (daemon child) or background service (launchd)
 - **Auto-restart** — crashed runners recover automatically (up to 3 attempts)
-- **Smart repo discovery** — scan your workspace or GitHub for repos that need self-hosted runners
+- **Smart repo discovery** — scan local workspace directories or your GitHub account for repos that use self-hosted runners
 - **Terminal UI** — full keyboard-driven TUI with the same capabilities as the GUI
 - **CLI mode** — scriptable `homerun --no-tui` commands for automation
 - **macOS native** — Keychain token storage, launchd auto-start, native notifications
+- **Pre-commit hooks** — enforces `cargo fmt`, `cargo clippy`, conventional commits, and Prettier on every commit
 
 ## Architecture
 
@@ -96,7 +101,10 @@ homerun --no-tui scan ~/workspace
 # Scan GitHub repos remotely
 homerun --no-tui scan --remote
 
-# Login with a Personal Access Token
+# Login via GitHub Device Flow (no PAT needed)
+homerun --no-tui login
+
+# Or login with a Personal Access Token
 homerun --no-tui login --token <PAT>
 ```
 
