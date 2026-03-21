@@ -13,6 +13,14 @@ use types::{RunnerConfig, RunnerInfo, RunnerMode};
 use crate::config::Config;
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RunnerEvent {
+    pub runner_id: String,
+    pub event_type: String, // "state_changed", "job_started", "job_completed"
+    pub data: serde_json::Value,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct LogEntry {
     pub runner_id: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
@@ -25,15 +33,18 @@ pub struct RunnerManager {
     config: Arc<Config>,
     runners: Arc<RwLock<HashMap<String, RunnerInfo>>>,
     log_tx: Arc<broadcast::Sender<LogEntry>>,
+    event_tx: Arc<broadcast::Sender<RunnerEvent>>,
 }
 
 impl RunnerManager {
     pub fn new(config: Config) -> Self {
         let (log_tx, _) = broadcast::channel(1024);
+        let (event_tx, _) = broadcast::channel(256);
         Self {
             config: Arc::new(config),
             runners: Arc::new(RwLock::new(HashMap::new())),
             log_tx: Arc::new(log_tx),
+            event_tx: Arc::new(event_tx),
         }
     }
 
@@ -43,6 +54,14 @@ impl RunnerManager {
 
     pub fn log_sender(&self) -> &broadcast::Sender<LogEntry> {
         &self.log_tx
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<RunnerEvent> {
+        self.event_tx.subscribe()
+    }
+
+    pub fn event_sender(&self) -> &broadcast::Sender<RunnerEvent> {
+        &self.event_tx
     }
 
     pub async fn create(
@@ -144,6 +163,26 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use state::RunnerState;
+
+    #[tokio::test]
+    async fn test_event_broadcast() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+        let mut rx = manager.subscribe_events();
+
+        manager.event_sender().send(RunnerEvent {
+            runner_id: "test".to_string(),
+            event_type: "state_changed".to_string(),
+            data: serde_json::json!({"state": "online"}),
+            timestamp: chrono::Utc::now(),
+        }).unwrap();
+
+        let event = rx.recv().await.unwrap();
+        assert_eq!(event.event_type, "state_changed");
+        assert_eq!(event.runner_id, "test");
+    }
 
     #[tokio::test]
     async fn test_log_broadcast() {

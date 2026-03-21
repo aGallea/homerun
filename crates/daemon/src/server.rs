@@ -7,6 +7,7 @@ use tokio::net::UnixListener;
 use crate::api;
 use crate::auth::AuthManager;
 use crate::config::Config;
+use crate::metrics::MetricsCollector;
 use crate::runner::RunnerManager;
 
 #[derive(Clone)]
@@ -14,6 +15,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub auth: AuthManager,
     pub runner_manager: RunnerManager,
+    pub metrics: Arc<MetricsCollector>,
 }
 
 impl AppState {
@@ -23,6 +25,7 @@ impl AppState {
             config: Arc::new(config),
             auth: AuthManager::new(),
             runner_manager,
+            metrics: Arc::new(MetricsCollector::new()),
         }
     }
 
@@ -49,6 +52,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/runners/{id}/stop", post(api::runners::stop_runner))
         .route("/runners/{id}/restart", post(api::runners::restart_runner))
         .route("/runners/{id}/logs", get(api::logs::stream_logs))
+        .route("/events", get(api::events::events_ws))
+        .route("/metrics", get(api::metrics::get_metrics))
         .with_state(state)
 }
 
