@@ -24,21 +24,21 @@ jobs:
           source "$HOME/.cargo/env" 2>/dev/null || true
           cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | tee coverage-summary.txt
 
-      - name: Extract coverage percentage
-        id: coverage
+      - name: Update badge
+        env:
+          GIST_SECRET: ${{ secrets.GIST_SECRET }}
         run: |
           COVERAGE=$(grep "^TOTAL" coverage-summary.txt | grep -oE '[0-9]+\.[0-9]+%' | sed -n '3p' | sed 's/%//')
-          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
           echo "Coverage: $COVERAGE%"
-
-      - name: Update badge
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: 77f18f115b500bdc5d6df52f95d399b9
-          filename: coverage.json
-          label: coverage
-          message: "${{ steps.coverage.outputs.percentage }}%"
-          valColorRange: ${{ steps.coverage.outputs.percentage }}
-          minColorRange: 50
-          maxColorRange: 95
+          # Map 50-95% to hue 0(red)-120(green)
+          HUE=$(awk "BEGIN {h=($COVERAGE-50)/(95-50)*120; if(h<0)h=0; if(h>120)h=120; printf \"%.0f\", h}")
+          # Build badge JSON and gist payload with jq
+          BADGE=$(jq -n --arg cov "${COVERAGE}%" --arg color "hsl($HUE, 100%, 40%)" \
+            '{schemaVersion:1, label:"coverage", message:$cov, color:$color}')
+          PAYLOAD=$(jq -n --arg content "$BADGE" \
+            '{files:{"coverage.json":{content:$content}}}')
+          curl -sf -X PATCH \
+            -H "Authorization: token $GIST_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            https://api.github.com/gists/77f18f115b500bdc5d6df52f95d399b9
