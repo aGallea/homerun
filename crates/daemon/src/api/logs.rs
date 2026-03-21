@@ -1,7 +1,9 @@
+use crate::runner::LogEntry;
 use crate::server::AppState;
 use axum::{
     extract::{Path, State},
     response::sse::{Event, Sse},
+    Json,
 };
 use futures::stream::Stream;
 use std::convert::Infallible;
@@ -21,6 +23,14 @@ pub async fn stream_logs(
         _ => None,
     });
     Sse::new(stream)
+}
+
+pub async fn recent_logs(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Vec<LogEntry>> {
+    let logs = state.runner_manager.get_recent_logs(&id).await;
+    Json(logs)
 }
 
 #[cfg(test)]

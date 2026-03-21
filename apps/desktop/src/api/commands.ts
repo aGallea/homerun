@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AuthStatus,
   DeviceFlowResponse,
+  LogEntry,
   RunnerInfo,
   RepoInfo,
   MetricsResponse,
@@ -35,8 +36,8 @@ export const api = {
   getMetrics: () => invoke<MetricsResponse>("get_metrics"),
 
   // Logs
-  subscribeRunnerLogs: (runnerId: string) =>
-    invoke<void>("subscribe_runner_logs", { runner_id: runnerId }),
+  getRunnerLogs: (runnerId: string) =>
+    invoke<LogEntry[]>("get_runner_logs", { runner_id: runnerId }),
 
   // Health
   healthCheck: () => invoke<boolean>("health_check"),

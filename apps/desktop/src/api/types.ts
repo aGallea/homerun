@@ -25,6 +25,14 @@ export interface RunnerInfo {
   uptime_secs: number | null;
   jobs_completed: number;
   jobs_failed: number;
+  current_job?: string | null;
+}
+
+export interface LogEntry {
+  runner_id: string;
+  timestamp: string;
+  line: string;
+  stream: string;
 }
 
 export interface GitHubUser {

@@ -11,7 +11,7 @@ use crate::runner::state::RunnerState;
 use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::{broadcast, RwLock};
@@ -32,6 +32,8 @@ pub struct LogEntry {
     pub stream: String, // "stdout" or "stderr"
 }
 
+const RECENT_LOGS_MAX: usize = 500;
+
 #[derive(Clone)]
 pub struct RunnerManager {
     config: Arc<Config>,
@@ -39,6 +41,7 @@ pub struct RunnerManager {
     processes: Arc<RwLock<HashMap<String, Arc<RwLock<Child>>>>>,
     log_tx: Arc<broadcast::Sender<LogEntry>>,
     event_tx: Arc<broadcast::Sender<RunnerEvent>>,
+    recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -82,6 +85,7 @@ impl RunnerManager {
             processes: Arc::new(RwLock::new(HashMap::new())),
             log_tx: Arc::new(log_tx),
             event_tx: Arc::new(event_tx),
+            recent_logs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -91,6 +95,15 @@ impl RunnerManager {
 
     pub fn log_sender(&self) -> &broadcast::Sender<LogEntry> {
         &self.log_tx
+    }
+
+    pub async fn get_recent_logs(&self, runner_id: &str) -> Vec<LogEntry> {
+        self.recent_logs
+            .read()
+            .await
+            .get(runner_id)
+            .map(|dq| dq.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     pub fn subscribe_events(&self) -> broadcast::Receiver<RunnerEvent> {
@@ -145,6 +158,7 @@ impl RunnerManager {
                     started_at: None,
                     jobs_completed: 0,
                     jobs_failed: 0,
+                    current_job: None,
                 },
             );
         }
@@ -204,6 +218,7 @@ impl RunnerManager {
             started_at: None,
             jobs_completed: 0,
             jobs_failed: 0,
+            current_job: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -378,35 +393,80 @@ impl RunnerManager {
         // 5c. Spawn log reader tasks
         if let Some(stdout) = stdout {
             let log_tx = self.log_tx.clone();
+            let recent_logs = self.recent_logs.clone();
+            let runners = self.runners.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    let _ = log_tx.send(LogEntry {
+                    let entry = LogEntry {
                         runner_id: rid.clone(),
                         timestamp: chrono::Utc::now(),
-                        line,
+                        line: line.clone(),
                         stream: "stdout".to_string(),
-                    });
+                    };
+                    let _ = log_tx.send(entry.clone());
+                    // Store in ring buffer
+                    {
+                        let mut map = recent_logs.write().await;
+                        let dq = map.entry(rid.clone()).or_insert_with(VecDeque::new);
+                        dq.push_back(entry);
+                        if dq.len() > RECENT_LOGS_MAX {
+                            dq.pop_front();
+                        }
+                    }
+                    // Parse job events from stdout
+                    if let Some(job_name) = line.strip_prefix("Running job: ") {
+                        let job_name = job_name.to_string();
+                        let mut map = runners.write().await;
+                        if let Some(r) = map.get_mut(&rid) {
+                            r.state = RunnerState::Busy;
+                            r.current_job = Some(job_name);
+                        }
+                    } else if line.contains("completed with result:") {
+                        // "Job <name> completed with result: Succeeded/Failed"
+                        let succeeded = line.contains("Succeeded");
+                        let mut map = runners.write().await;
+                        if let Some(r) = map.get_mut(&rid) {
+                            if succeeded {
+                                r.jobs_completed += 1;
+                            } else {
+                                r.jobs_failed += 1;
+                            }
+                            r.state = RunnerState::Online;
+                            r.current_job = None;
+                        }
+                    }
                 }
             });
         }
         if let Some(stderr) = stderr {
             let log_tx = self.log_tx.clone();
+            let recent_logs = self.recent_logs.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    let _ = log_tx.send(LogEntry {
+                    let entry = LogEntry {
                         runner_id: rid.clone(),
                         timestamp: chrono::Utc::now(),
                         line,
                         stream: "stderr".to_string(),
-                    });
+                    };
+                    let _ = log_tx.send(entry.clone());
+                    // Store in ring buffer
+                    {
+                        let mut map = recent_logs.write().await;
+                        let dq = map.entry(rid.clone()).or_insert_with(VecDeque::new);
+                        dq.push_back(entry);
+                        if dq.len() > RECENT_LOGS_MAX {
+                            dq.pop_front();
+                        }
+                    }
                 }
             });
         }

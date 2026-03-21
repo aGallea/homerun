@@ -29,6 +29,8 @@ pub struct RunnerInfo {
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub jobs_completed: u32,
     pub jobs_failed: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_job: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

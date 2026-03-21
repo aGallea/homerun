@@ -26,6 +26,15 @@ pub struct RunnerInfo {
     pub uptime_secs: Option<u64>,
     pub jobs_completed: u32,
     pub jobs_failed: u32,
+    pub current_job: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub runner_id: String,
+    pub timestamp: String,
+    pub line: String,
+    pub stream: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,9 +210,7 @@ impl DaemonClient {
 
     pub async fn login_with_token(&self, token: &str) -> Result<AuthStatus, String> {
         let payload = serde_json::json!({ "token": token }).to_string();
-        let body = self
-            .request("POST", "/auth/login", Some(payload))
-            .await?;
+        let body = self.request("POST", "/auth/login", Some(payload)).await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
@@ -217,10 +224,7 @@ impl DaemonClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    pub async fn create_runner(
-        &self,
-        req: &CreateRunnerRequest,
-    ) -> Result<RunnerInfo, String> {
+    pub async fn create_runner(&self, req: &CreateRunnerRequest) -> Result<RunnerInfo, String> {
         let body = self
             .request(
                 "POST",
@@ -299,5 +303,12 @@ impl DaemonClient {
     pub async fn uninstall_service(&self) -> Result<(), String> {
         self.request("POST", "/service/uninstall", None).await?;
         Ok(())
+    }
+
+    pub async fn get_runner_logs(&self, runner_id: &str) -> Result<Vec<LogEntry>, String> {
+        let body = self
+            .request("GET", &format!("/runners/{runner_id}/logs/recent"), None)
+            .await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 }

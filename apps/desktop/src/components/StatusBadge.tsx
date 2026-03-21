@@ -18,13 +18,14 @@ const transientStates: Set<RunnerState> = new Set([
   "deleting",
 ]);
 
-export function StatusBadge({ state }: { state: RunnerState }) {
+export function StatusBadge({ state, currentJob }: { state: RunnerState; currentJob?: string }) {
   const config = stateConfig[state] ?? {
     color: "var(--text-secondary)",
     label: state,
   };
 
   const isLoading = transientStates.has(state);
+  const label = state === "busy" && currentJob ? `Busy: ${currentJob}` : config.label;
 
   return (
     <span className="status-badge" style={{ color: config.color }}>
@@ -44,7 +45,7 @@ export function StatusBadge({ state }: { state: RunnerState }) {
       ) : (
         <span className="status-dot" style={{ background: config.color }} />
       )}
-      {config.label}
+      {label}
     </span>
   );
 }
