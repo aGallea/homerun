@@ -188,10 +188,14 @@ export function RunnerDetail() {
             </div>
             <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
               <a
-                href={`https://github.com/${config.repo_owner}/${config.repo_name}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "var(--accent-blue)" }}
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  import("@tauri-apps/plugin-shell").then(({ open }) => {
+                    open(`https://github.com/${config.repo_owner}/${config.repo_name}`);
+                  });
+                }}
+                style={{ color: "var(--accent-blue)", cursor: "pointer" }}
               >
                 {config.repo_owner}/{config.repo_name}
               </a>
@@ -244,11 +248,17 @@ export function RunnerDetail() {
             <div className="flex items-center gap-8">
               <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
               <a
-                href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                style={{ fontSize: 11, color: "var(--accent-blue)" }}
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  import("@tauri-apps/plugin-shell").then(({ open }) => {
+                    open(
+                      `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`,
+                    );
+                  });
+                }}
+                style={{ fontSize: 11, color: "var(--accent-blue)", cursor: "pointer" }}
               >
                 View →
               </a>
@@ -257,10 +267,14 @@ export function RunnerDetail() {
         ) : (
           <InfoCard label="Actions">
             <a
-              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: "var(--accent-blue)" }}
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                import("@tauri-apps/plugin-shell").then(({ open }) => {
+                  open(`https://github.com/${config.repo_owner}/${config.repo_name}/actions`);
+                });
+              }}
+              style={{ color: "var(--accent-blue)", cursor: "pointer" }}
             >
               View on GitHub →
             </a>
