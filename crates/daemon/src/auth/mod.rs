@@ -71,12 +71,23 @@ impl AuthManager {
         if let Some(token) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)? {
             match self.validate_token(&token).await {
                 Ok(user) => {
+                    tracing::info!("Restored GitHub authentication from keychain");
                     let mut state = self.state.write().await;
                     *state = Some(AuthState { token, user });
                 }
                 Err(e) => {
-                    tracing::warn!("Stored token is no longer valid, clearing: {e}");
-                    let _ = keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+                    // Don't delete the token — it might be a transient network error.
+                    // Just log it and leave the token in keychain for next restart.
+                    tracing::warn!("Could not validate stored token (keeping it): {e}");
+                    // Still load the token into memory so API calls can try it
+                    let mut state = self.state.write().await;
+                    *state = Some(AuthState {
+                        token,
+                        user: GitHubUser {
+                            login: "unknown".to_string(),
+                            avatar_url: String::new(),
+                        },
+                    });
                 }
             }
         }
