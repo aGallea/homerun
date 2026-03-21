@@ -5,6 +5,8 @@ use crate::server::AppState;
 pub async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
     let system = state.metrics.system_snapshot();
     let runners = state.runner_manager.list().await;
+    // Refresh process list once so all runners read from the same snapshot
+    state.metrics.refresh_processes();
     let runner_metrics: Vec<_> = runners
         .iter()
         .filter_map(|r| {

@@ -79,16 +79,22 @@ impl MetricsCollector {
         }
     }
 
-    pub fn runner_metrics(&self, pid: u32) -> Option<RunnerMetrics> {
+    /// Refresh the process list. Call once before querying individual runners
+    /// to avoid resetting CPU baselines between runners.
+    pub fn refresh_processes(&self) {
         let mut sys = self.system.lock().unwrap();
-        let root_pid = Pid::from_u32(pid);
-
-        // Refresh all processes (CPU + memory only) so children are visible
         sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
             ProcessRefreshKind::nothing().with_cpu().with_memory(),
         );
+    }
+
+    /// Collect metrics for a runner by aggregating its process tree.
+    /// Call `refresh_processes()` once before calling this for each runner.
+    pub fn runner_metrics(&self, pid: u32) -> Option<RunnerMetrics> {
+        let sys = self.system.lock().unwrap();
+        let root_pid = Pid::from_u32(pid);
 
         // Check the root process exists
         sys.process(root_pid)?;
@@ -233,6 +239,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         let collector = MetricsCollector::new();
+        collector.refresh_processes();
         let metrics = collector.runner_metrics(parent_pid);
 
         // Kill parent and orphaned children via pkill
