@@ -19,7 +19,7 @@ jobs:
 
   rust-fmt:
     name: Rust / fmt
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -29,13 +29,11 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
-        run: |
-          source "$HOME/.cargo/env"
-          cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
 
   rust-clippy:
     name: Rust / clippy
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -45,13 +43,11 @@ jobs:
           components: clippy
 
       - name: Run clippy
-        run: |
-          source "$HOME/.cargo/env"
-          cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   rust-test:
     name: Rust / test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -59,23 +55,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-llvm-cov
-        run: |
-          source "$HOME/.cargo/env"
-          cargo install cargo-llvm-cov --quiet
+        run: cargo install cargo-llvm-cov --quiet
 
       - name: Run tests with coverage (daemon)
-        run: |
-          source "$HOME/.cargo/env"
-          cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
+        run: cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
 
       - name: Run tests with coverage (tui)
-        run: |
-          source "$HOME/.cargo/env"
-          cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
+        run: cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
 
       - name: Merge coverage
-        run: |
-          cat daemon-lcov.info tui-lcov.info > lcov.info
+        run: cat daemon-lcov.info tui-lcov.info > lcov.info
 
       - name: Coverage Report
         if: github.event_name == 'pull_request'
@@ -92,25 +81,21 @@ jobs:
 
   rust-audit:
     name: Rust / audit
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install cargo-audit
-        run: |
-          source "$HOME/.cargo/env"
-          cargo install cargo-audit --quiet
+        run: cargo install cargo-audit --quiet
 
       - name: Audit dependencies
-        run: |
-          source "$HOME/.cargo/env"
-          cargo audit
+        run: cargo audit
 
   # ── TypeScript ────────────────────────────────────────────────────────────
 
   ts-typecheck:
     name: TypeScript / type check
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/desktop
@@ -132,7 +117,7 @@ jobs:
 
   ts-build:
     name: TypeScript / build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/desktop
