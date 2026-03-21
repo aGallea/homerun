@@ -81,7 +81,7 @@ jobs:
       - name: Coverage Report
         if: always()
         continue-on-error: true
-        uses: aGallea/tests-coverage-report@1.3.11
+        uses: aGallea/tests-coverage-report@1.3.12
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           lcov-path: ./lcov.info
