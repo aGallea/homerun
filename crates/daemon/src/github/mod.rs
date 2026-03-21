@@ -57,6 +57,65 @@ impl GitHubClient {
         Ok(result)
     }
 
+    /// Fetch `.github/workflows/` contents for `owner/repo` and return the
+    /// relative file paths of workflow files that contain `runs-on: self-hosted`.
+    pub async fn list_self_hosted_workflows(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct ContentItem {
+            name: String,
+            download_url: Option<String>,
+            #[serde(rename = "type")]
+            item_type: String,
+        }
+
+        let route = format!("/repos/{owner}/{repo}/contents/.github/workflows");
+        let items: Vec<ContentItem> = match self.octocrab.get(route, None::<&()>).await {
+            Ok(v) => v,
+            Err(_) => return Ok(Vec::new()), // directory missing or no access
+        };
+
+        let mut matching: Vec<String> = Vec::new();
+
+        for item in items {
+            if item.item_type != "file" {
+                continue;
+            }
+            let ext = std::path::Path::new(&item.name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            if ext != "yml" && ext != "yaml" {
+                continue;
+            }
+
+            let download_url = match item.download_url {
+                Some(u) => u,
+                None => continue,
+            };
+
+            // _get fetches a URL; body_to_string reads the response body
+            let response = match self.octocrab._get(download_url).await {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let content = match self.octocrab.body_to_string(response).await {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            if content.contains("runs-on: self-hosted") {
+                matching.push(format!(".github/workflows/{}", item.name));
+            }
+        }
+
+        matching.sort();
+        Ok(matching)
+    }
+
     pub async fn get_runner_registration_token(
         &self,
         owner: &str,

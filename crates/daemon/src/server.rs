@@ -63,6 +63,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/runners/{id}/logs", get(api::logs::stream_logs))
         .route("/events", get(api::events::events_ws))
         .route("/metrics", get(api::metrics::get_metrics))
+        .route("/scan/local", post(api::scanner::scan_local_handler))
+        .route("/scan/remote", post(api::scanner::scan_remote_handler))
         .with_state(state)
 }
 

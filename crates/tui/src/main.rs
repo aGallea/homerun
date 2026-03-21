@@ -37,6 +37,19 @@ enum Commands {
     List,
     /// Show runner and system status
     Status,
+    /// Scan for repos that use self-hosted runners
+    ///
+    /// Examples:
+    ///   homerun --no-tui scan ~/workspace
+    ///   homerun --no-tui scan --remote
+    ///   homerun --no-tui scan ~/workspace --remote
+    Scan {
+        /// Local workspace directory to scan for self-hosted workflows
+        path: Option<String>,
+        /// Also scan GitHub repos via the API (requires authentication)
+        #[arg(long)]
+        remote: bool,
+    },
 }
 
 #[tokio::main]
@@ -47,6 +60,7 @@ async fn main() -> Result<()> {
         return homerun::cli::run(cli.command.map(|c| match c {
             Commands::List => homerun::cli::CliCommand::List,
             Commands::Status => homerun::cli::CliCommand::Status,
+            Commands::Scan { path, remote } => homerun::cli::CliCommand::Scan { path, remote },
         }))
         .await;
     }

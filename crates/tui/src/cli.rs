@@ -6,6 +6,12 @@ use crate::client::DaemonClient;
 pub enum CliCommand {
     List,
     Status,
+    Scan {
+        /// Local workspace path to scan (None = skip local scan)
+        path: Option<String>,
+        /// Also scan GitHub repos via API
+        remote: bool,
+    },
 }
 
 pub async fn run(command: Option<CliCommand>) -> Result<()> {
@@ -24,6 +30,7 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
     match command {
         Some(CliCommand::List) => cmd_list(&client).await,
         Some(CliCommand::Status) => cmd_status(&client).await,
+        Some(CliCommand::Scan { path, remote }) => cmd_scan(&client, path, remote).await,
         None => {
             eprintln!(
                 "No command specified. Use `homerun --no-tui list` or `homerun --no-tui status`."
@@ -113,6 +120,69 @@ async fn cmd_status(client: &DaemonClient) -> Result<()> {
             "  CPU: {:.0}%  Memory: {:.1} GB / {:.1} GB",
             m.system.cpu_percent, mem_used_gb, mem_total_gb,
         );
+    }
+
+    Ok(())
+}
+
+async fn cmd_scan(client: &DaemonClient, path: Option<String>, remote: bool) -> Result<()> {
+    use crate::client::DiscoveredRepo;
+    use std::collections::HashMap;
+
+    let mut all: HashMap<String, DiscoveredRepo> = HashMap::new();
+
+    if let Some(ref p) = path {
+        println!("Scanning local workspace: {p}");
+        match client.scan_local(p).await {
+            Ok(repos) => {
+                for repo in repos {
+                    all.insert(repo.full_name.clone(), repo);
+                }
+            }
+            Err(e) => eprintln!("Local scan error: {e}"),
+        }
+    }
+
+    if remote {
+        println!("Scanning GitHub repos via API…");
+        match client.scan_remote().await {
+            Ok(repos) => {
+                for repo in repos {
+                    all.entry(repo.full_name.clone())
+                        .and_modify(|existing| {
+                            existing.source = "both".to_string();
+                            for wf in &repo.workflow_files {
+                                if !existing.workflow_files.contains(wf) {
+                                    existing.workflow_files.push(wf.clone());
+                                }
+                            }
+                            existing.workflow_files.sort();
+                        })
+                        .or_insert(repo);
+                }
+            }
+            Err(e) => eprintln!("Remote scan error: {e}"),
+        }
+    }
+
+    if all.is_empty() {
+        println!("No repos with self-hosted runners found.");
+        return Ok(());
+    }
+
+    let mut sorted: Vec<&DiscoveredRepo> = all.values().collect();
+    sorted.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+
+    println!("\nRepos using self-hosted runners:");
+    println!("{:-<60}", "");
+    for repo in sorted {
+        println!("  {} [{}]", repo.full_name, repo.source);
+        for wf in &repo.workflow_files {
+            println!("    - {wf}");
+        }
+        if let Some(ref p) = repo.local_path {
+            println!("    path: {}", p.display());
+        }
     }
 
     Ok(())

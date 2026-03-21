@@ -78,6 +78,19 @@ pub struct RepoInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredRepo {
+    pub full_name: String,
+    pub source: String,
+    pub workflow_files: Vec<String>,
+    pub local_path: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalScanRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateRunnerRequest {
     pub repo_full_name: String,
     pub name: Option<String>,
@@ -243,6 +256,21 @@ impl DaemonClient {
 
     pub async fn get_metrics(&self) -> Result<MetricsResponse> {
         let body = self.request("GET", "/metrics", None).await?;
+        Ok(serde_json::from_str(&body)?)
+    }
+
+    pub async fn scan_local(&self, path: &str) -> Result<Vec<DiscoveredRepo>> {
+        let req = LocalScanRequest {
+            path: path.to_string(),
+        };
+        let body = self
+            .request("POST", "/scan/local", Some(serde_json::to_string(&req)?))
+            .await?;
+        Ok(serde_json::from_str(&body)?)
+    }
+
+    pub async fn scan_remote(&self) -> Result<Vec<DiscoveredRepo>> {
+        let body = self.request("POST", "/scan/remote", None).await?;
         Ok(serde_json::from_str(&body)?)
     }
 
