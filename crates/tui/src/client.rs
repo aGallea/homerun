@@ -1,6 +1,9 @@
 use anyhow::{bail, Context, Result};
+use futures::stream::SplitStream;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tokio_tungstenite::WebSocketStream;
 
 use hyper::Request;
 use hyper_util::client::legacy::Client;
@@ -241,6 +244,19 @@ impl DaemonClient {
     pub async fn get_metrics(&self) -> Result<MetricsResponse> {
         let body = self.request("GET", "/metrics", None).await?;
         Ok(serde_json::from_str(&body)?)
+    }
+
+    /// Connect to the daemon's WebSocket endpoint for real-time events.
+    /// Returns a stream of incoming WebSocket messages.
+    pub async fn connect_events(
+        &self,
+    ) -> Result<SplitStream<WebSocketStream<tokio::net::UnixStream>>> {
+        let stream = tokio::net::UnixStream::connect(&self.socket_path).await?;
+        let uri = "ws://localhost/events";
+        let (ws_stream, _response) =
+            tokio_tungstenite::client_async(uri, stream).await?;
+        let (_write, read) = ws_stream.split();
+        Ok(read)
     }
 }
 
