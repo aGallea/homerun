@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { MetricsResponse } from "../api/types";
 import { api } from "../api/commands";
 
-export function useMetrics(pollInterval = 5000) {
+export function useMetrics(pollInterval = 2000) {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
