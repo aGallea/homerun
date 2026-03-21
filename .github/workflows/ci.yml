@@ -3,8 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [master]
-  push:
-    branches: [master]
 
 permissions:
   contents: read
@@ -103,7 +101,7 @@ jobs:
           echo "Coverage: $COVERAGE%"
 
       - name: Update coverage badge
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        if: always()
         continue-on-error: true
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
