@@ -97,9 +97,12 @@ impl AuthManager {
 
     /// Remove the token from keychain and clear in-memory state.
     pub async fn logout(&self) -> Result<()> {
-        keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?;
+        // Clear in-memory state first, then try keychain cleanup
         let mut state = self.state.write().await;
         *state = None;
+        drop(state);
+        // Best-effort keychain cleanup — don't fail if token wasn't in keychain
+        let _ = keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
         Ok(())
     }
 

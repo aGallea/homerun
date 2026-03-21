@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { RunnerInfo, CreateRunnerRequest } from "../api/types";
 import { api } from "../api/commands";
 
@@ -6,16 +6,20 @@ export function useRunners() {
   const [runners, setRunners] = useState<RunnerInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const initialFetch = useRef(true);
 
   const refresh = useCallback(async () => {
     try {
-      setError(null);
       const data = await api.listRunners();
       setRunners(data);
+      setError(null);
     } catch (e) {
       setError(String(e));
     } finally {
-      setLoading(false);
+      if (initialFetch.current) {
+        initialFetch.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
