@@ -94,7 +94,7 @@ pub async fn start_device_flow(
     client.start_device_flow().await
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn poll_device_flow(
     state: State<'_, AppState>,
     device_code: String,
@@ -109,4 +109,22 @@ pub async fn poll_device_flow(
 pub async fn daemon_available(state: State<'_, AppState>) -> Result<bool, String> {
     let client = state.client.lock().await;
     Ok(client.socket_exists())
+}
+
+#[tauri::command]
+pub async fn service_status(state: State<'_, AppState>) -> Result<bool, String> {
+    let client = state.client.lock().await;
+    client.service_status().await
+}
+
+#[tauri::command]
+pub async fn install_service(state: State<'_, AppState>) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.install_service().await
+}
+
+#[tauri::command]
+pub async fn uninstall_service(state: State<'_, AppState>) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.uninstall_service().await
 }

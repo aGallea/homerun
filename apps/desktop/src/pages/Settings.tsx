@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
+import { invoke } from "@tauri-apps/api/core";
 import type { DeviceFlowResponse } from "../api/types";
 
 type DeviceFlowState =
@@ -23,6 +24,17 @@ export function Settings() {
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [tokenSuccess, setTokenSuccess] = useState(false);
 
+  // Settings toggles
+  const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [startRunnersOnLaunch, setStartRunnersOnLaunch] = useState(false);
+  const [notifyStatusChanges, setNotifyStatusChanges] = useState(true);
+  const [notifyJobCompletions, setNotifyJobCompletions] = useState(true);
+
+  // Check launch-at-login status on mount
+  useEffect(() => {
+    invoke<boolean>("service_status").then(setLaunchAtLogin).catch(() => {});
+  }, []);
+
   async function handleStartDeviceFlow() {
     setDeviceFlowStarting(true);
     setDeviceFlow({ stage: "idle" });
@@ -31,8 +43,8 @@ export function Settings() {
       setDeviceFlow({ stage: "pending", flow });
       // Open the verification URL in the system browser
       try {
-        const { Command } = await import("@tauri-apps/plugin-shell");
-        await Command.create("open", [flow.verification_uri]).execute();
+        const { open } = await import("@tauri-apps/plugin-shell");
+        await open(flow.verification_uri);
       } catch {
         // Best-effort; user can navigate manually
       }
@@ -201,12 +213,10 @@ export function Settings() {
                         style={{ color: "var(--accent-blue, #58a6ff)" }}
                         onClick={(e) => {
                           e.preventDefault();
-                          import("@tauri-apps/plugin-shell").then(({ Command }) => {
-                            Command.create("open", [
-                              deviceFlow.stage === "pending"
-                                ? deviceFlow.flow.verification_uri
-                                : "",
-                            ]).execute();
+                          import("@tauri-apps/plugin-shell").then(({ open }) => {
+                            if (deviceFlow.stage === "pending") {
+                              open(deviceFlow.flow.verification_uri);
+                            }
                           });
                         }}
                       >
@@ -377,34 +387,53 @@ export function Settings() {
         </div>
       </section>
 
-      {/* Auto-start (placeholder) */}
+      {/* Startup */}
       <section style={{ marginBottom: 32 }}>
         <SectionHeader title="Startup" />
         <div className="card">
-          <PlaceholderSetting
+          <ToggleSetting
             label="Launch at login"
             description="Automatically start the HomeRun daemon when you log in to macOS."
+            checked={launchAtLogin}
+            onChange={async (checked) => {
+              try {
+                if (checked) {
+                  await invoke("install_service");
+                } else {
+                  await invoke("uninstall_service");
+                }
+                setLaunchAtLogin(checked);
+              } catch (e) {
+                console.error("Failed to toggle launch at login:", e);
+              }
+            }}
           />
           <Divider />
-          <PlaceholderSetting
+          <ToggleSetting
             label="Start runners on launch"
             description="Resume all runners that were running when the app was last closed."
+            checked={startRunnersOnLaunch}
+            onChange={(checked) => setStartRunnersOnLaunch(checked)}
           />
         </div>
       </section>
 
-      {/* Notifications (placeholder) */}
+      {/* Notifications */}
       <section style={{ marginBottom: 32 }}>
         <SectionHeader title="Notifications" />
         <div className="card">
-          <PlaceholderSetting
+          <ToggleSetting
             label="Runner status changes"
             description="Notify when a runner goes online, offline, or encounters an error."
+            checked={notifyStatusChanges}
+            onChange={(checked) => setNotifyStatusChanges(checked)}
           />
           <Divider />
-          <PlaceholderSetting
+          <ToggleSetting
             label="Job completions"
             description="Notify when a job completes or fails on a self-hosted runner."
+            checked={notifyJobCompletions}
+            onChange={(checked) => setNotifyJobCompletions(checked)}
           />
         </div>
       </section>
@@ -489,12 +518,16 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-function PlaceholderSetting({
+function ToggleSetting({
   label,
   description,
+  checked,
+  onChange,
 }: {
   label: string;
   description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between" style={{ padding: "8px 0" }}>
@@ -507,18 +540,32 @@ function PlaceholderSetting({
         </p>
       </div>
       <div
+        onClick={() => onChange(!checked)}
         style={{
-          width: 36,
-          height: 20,
-          background: "var(--bg-tertiary)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          opacity: 0.5,
-          cursor: "not-allowed",
+          width: 40,
+          height: 22,
+          background: checked ? "var(--accent-green)" : "var(--bg-tertiary)",
+          border: `1px solid ${checked ? "var(--accent-green)" : "var(--border)"}`,
+          borderRadius: 11,
+          cursor: "pointer",
           flexShrink: 0,
+          position: "relative",
+          transition: "background 0.2s, border-color 0.2s",
         }}
-        title="Coming soon"
-      />
+      >
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            background: checked ? "white" : "var(--text-secondary)",
+            borderRadius: "50%",
+            position: "absolute",
+            top: 1,
+            left: checked ? 19 : 1,
+            transition: "left 0.2s, background 0.2s",
+          }}
+        />
+      </div>
     </div>
   );
 }

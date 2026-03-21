@@ -33,6 +33,9 @@ pub fn run() {
             commands::poll_device_flow,
             commands::list_repos,
             commands::get_metrics,
+            commands::service_status,
+            commands::install_service,
+            commands::uninstall_service,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

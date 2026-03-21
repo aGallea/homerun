@@ -102,6 +102,12 @@ pub async fn serve(config: Config) -> Result<()> {
     tracing::info!("Listening on Unix socket: {}", socket_path.display());
 
     let state = AppState::new(config);
+
+    // Load persisted runner configs from disk
+    if let Err(e) = state.runner_manager.load_from_disk().await {
+        tracing::warn!("Failed to load runners from disk: {}", e);
+    }
+
     let app = create_router(state);
 
     axum::serve(listener, app).await?;

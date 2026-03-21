@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    homerun_desktop_lib::run();
+    homerun_app_lib::run();
 }

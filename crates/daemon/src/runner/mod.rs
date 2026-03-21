@@ -4,13 +4,17 @@ pub mod state;
 pub mod types;
 
 use crate::config::Config;
-use anyhow::{bail, Result};
+use crate::github::GitHubClient;
+use crate::runner::binary::ensure_runner_binary;
+use crate::runner::process::{configure_runner, remove_runner, start_runner};
+use crate::runner::state::RunnerState;
+use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use state::RunnerState;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::process::Child;
 use tokio::sync::{broadcast, RwLock};
-use types::{RunnerConfig, RunnerInfo, RunnerMode};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunnerEvent {
@@ -32,8 +36,40 @@ pub struct LogEntry {
 pub struct RunnerManager {
     config: Arc<Config>,
     runners: Arc<RwLock<HashMap<String, RunnerInfo>>>,
+    processes: Arc<RwLock<HashMap<String, Arc<RwLock<Child>>>>>,
     log_tx: Arc<broadcast::Sender<LogEntry>>,
     event_tx: Arc<broadcast::Sender<RunnerEvent>>,
+}
+
+/// Recursively copy the contents of `src` directory into `dst` directory.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src).with_context(|| format!("reading dir {:?}", src))? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+            // Preserve executable permission
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = std::fs::metadata(&src_path)?;
+                let permissions = metadata.permissions();
+                std::fs::set_permissions(&dst_path, permissions.clone())?;
+                // If the source is executable, ensure the copy is too
+                if permissions.mode() & 0o111 != 0 {
+                    let mut dst_perms = std::fs::metadata(&dst_path)?.permissions();
+                    dst_perms.set_mode(permissions.mode());
+                    std::fs::set_permissions(&dst_path, dst_perms)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 impl RunnerManager {
@@ -43,6 +79,7 @@ impl RunnerManager {
         Self {
             config: Arc::new(config),
             runners: Arc::new(RwLock::new(HashMap::new())),
+            processes: Arc::new(RwLock::new(HashMap::new())),
             log_tx: Arc::new(log_tx),
             event_tx: Arc::new(event_tx),
         }
@@ -63,6 +100,49 @@ impl RunnerManager {
     pub fn event_sender(&self) -> &broadcast::Sender<RunnerEvent> {
         &self.event_tx
     }
+
+    // ── Persistence ────────────────────────────────────────────────
+
+    /// Save all runner configs to disk as JSON.
+    pub async fn save_to_disk(&self) -> Result<()> {
+        let runners = self.runners.read().await;
+        let configs: Vec<&RunnerConfig> = runners.values().map(|r| &r.config).collect();
+        let json = serde_json::to_string_pretty(&configs)?;
+        let path = self.config.runners_json_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, json)?;
+        Ok(())
+    }
+
+    /// Load runner configs from disk, creating entries in Offline state.
+    pub async fn load_from_disk(&self) -> Result<()> {
+        let path = self.config.runners_json_path();
+        if !path.exists() {
+            return Ok(());
+        }
+        let json = std::fs::read_to_string(&path)?;
+        let configs: Vec<RunnerConfig> = serde_json::from_str(&json)?;
+        let mut runners = self.runners.write().await;
+        for config in configs {
+            let id = config.id.clone();
+            runners.insert(
+                id,
+                RunnerInfo {
+                    config,
+                    state: RunnerState::Offline,
+                    pid: None,
+                    uptime_secs: None,
+                    jobs_completed: 0,
+                    jobs_failed: 0,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    // ── CRUD ───────────────────────────────────────────────────────
 
     pub async fn create(
         &self,
@@ -117,6 +197,7 @@ impl RunnerManager {
         };
 
         self.runners.write().await.insert(id, runner.clone());
+        self.save_to_disk().await?;
         Ok(runner)
     }
 
@@ -133,6 +214,10 @@ impl RunnerManager {
         if let Some(runner) = runners.remove(id) {
             let _ = std::fs::remove_dir_all(&runner.config.work_dir);
         }
+        drop(runners);
+        // Also remove any tracked process handle
+        self.processes.write().await.remove(id);
+        self.save_to_disk().await?;
         Ok(())
     }
 
@@ -164,6 +249,208 @@ impl RunnerManager {
         }
         runner.state = state;
         Ok(())
+    }
+
+    // ── Lifecycle ──────────────────────────────────────────────────
+
+    /// Full register-and-start flow:
+    /// 1. Creating -> Registering
+    /// 2. Download / cache runner binary
+    /// 3. Copy binary files to runner work_dir
+    /// 4. Get registration token from GitHub
+    /// 5. Run config.sh
+    /// 6. Spawn run.sh
+    /// 7. Store PID, update state to Online
+    /// 8. Spawn background monitor task
+    pub async fn register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
+        // 1. Transition Creating -> Registering
+        self.update_state(id, RunnerState::Registering).await?;
+        self.emit_state_event(id, "registering");
+
+        // Continue with the common flow
+        self.do_register_and_start(id, auth_token).await
+    }
+
+    /// Start a runner that is already in the Registering state.
+    /// Used by the start/restart API endpoints.
+    pub async fn register_and_start_from_registering(
+        &self,
+        id: &str,
+        auth_token: &str,
+    ) -> Result<()> {
+        self.emit_state_event(id, "registering");
+        self.do_register_and_start(id, auth_token).await
+    }
+
+    /// Common register-and-start flow (assumes already in Registering state):
+    /// 1. Download / cache runner binary
+    /// 2. Copy binary files to runner work_dir
+    /// 3. Get registration token from GitHub
+    /// 4. Run config.sh
+    /// 5. Spawn run.sh
+    /// 6. Store PID, update state to Online
+    /// 7. Spawn background monitor task
+    async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
+        let runner = self
+            .get(id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        let config = &runner.config;
+
+        // 1. Download / cache runner binary
+        let cached_runner_dir = ensure_runner_binary(&self.config.cache_dir())
+            .await
+            .context("Failed to download runner binary")?;
+
+        // 2. Copy binary files to runner work_dir
+        copy_dir_recursive(&cached_runner_dir, &config.work_dir)
+            .context("Failed to copy runner binary to work dir")?;
+
+        // 3. Get registration token
+        let gh = GitHubClient::new(Some(auth_token.to_string()))?;
+        let reg = gh
+            .get_runner_registration_token(&config.repo_owner, &config.repo_name)
+            .await
+            .context("Failed to get registration token")?;
+
+        // 4. Run config.sh
+        let repo_url = format!(
+            "https://github.com/{}/{}",
+            config.repo_owner, config.repo_name
+        );
+        configure_runner(
+            &config.work_dir,
+            &repo_url,
+            &reg.token,
+            &config.name,
+            &config.labels,
+        )
+        .await
+        .context("Failed to configure runner")?;
+
+        // 5. Spawn run.sh
+        let child = start_runner(&config.work_dir)
+            .await
+            .context("Failed to start runner process")?;
+
+        // 6. Store PID, update state to Online
+        let pid = child.id();
+        {
+            let mut runners = self.runners.write().await;
+            if let Some(r) = runners.get_mut(id) {
+                r.state = RunnerState::Online;
+                r.pid = pid;
+            }
+        }
+        self.emit_state_event(id, "online");
+
+        // Store process handle
+        let child_arc = Arc::new(RwLock::new(child));
+        self.processes
+            .write()
+            .await
+            .insert(id.to_string(), child_arc.clone());
+
+        // 7. Spawn background monitor task
+        let manager = self.clone();
+        let runner_id = id.to_string();
+        tokio::spawn(async move {
+            // Wait for child to exit
+            let exit_status = {
+                let mut child_guard = child_arc.write().await;
+                child_guard.wait().await
+            };
+            tracing::info!("Runner {} exited with status: {:?}", runner_id, exit_status);
+
+            // Update state to Offline
+            let mut runners = manager.runners.write().await;
+            if let Some(r) = runners.get_mut(&runner_id) {
+                // Only transition if still Online or Busy (not if already Stopping/Deleting)
+                if r.state == RunnerState::Online || r.state == RunnerState::Busy {
+                    r.state = RunnerState::Offline;
+                    r.pid = None;
+                }
+            }
+            drop(runners);
+            manager.processes.write().await.remove(&runner_id);
+            manager.emit_state_event(&runner_id, "offline");
+        });
+
+        Ok(())
+    }
+
+    /// Stop a running runner process.
+    pub async fn stop_process(&self, id: &str) -> Result<()> {
+        // Transition to Stopping
+        self.update_state(id, RunnerState::Stopping).await?;
+        self.emit_state_event(id, "stopping");
+
+        // Kill the child process
+        if let Some(child_arc) = self.processes.read().await.get(id).cloned() {
+            let mut child = child_arc.write().await;
+            let _ = child.kill().await;
+            // Wait for the process to fully exit
+            let _ = child.wait().await;
+        }
+
+        // Update to Offline
+        {
+            let mut runners = self.runners.write().await;
+            if let Some(r) = runners.get_mut(id) {
+                r.state = RunnerState::Offline;
+                r.pid = None;
+            }
+        }
+        self.processes.write().await.remove(id);
+        self.emit_state_event(id, "offline");
+        Ok(())
+    }
+
+    /// Full delete flow: stop process, deregister from GitHub, remove work dir.
+    pub async fn full_delete(&self, id: &str, auth_token: &str) -> Result<()> {
+        let runner = self
+            .get(id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+
+        // Stop if running
+        if runner.state == RunnerState::Online || runner.state == RunnerState::Busy {
+            let _ = self.stop_process(id).await;
+        }
+
+        // Try to transition to Deleting
+        {
+            let mut runners = self.runners.write().await;
+            if let Some(r) = runners.get_mut(id) {
+                // Force the state for deletion
+                r.state = RunnerState::Deleting;
+            }
+        }
+        self.emit_state_event(id, "deleting");
+
+        // Deregister from GitHub
+        let config = &runner.config;
+        if let Ok(gh) = GitHubClient::new(Some(auth_token.to_string())) {
+            if let Ok(reg) = gh
+                .get_runner_registration_token(&config.repo_owner, &config.repo_name)
+                .await
+            {
+                let _ = remove_runner(&config.work_dir, &reg.token).await;
+            }
+        }
+
+        // Remove runner entry and work dir
+        self.delete(id).await?;
+        Ok(())
+    }
+
+    fn emit_state_event(&self, runner_id: &str, state: &str) {
+        let _ = self.event_tx.send(RunnerEvent {
+            runner_id: runner_id.to_string(),
+            event_type: "state_changed".to_string(),
+            data: serde_json::json!({"state": state}),
+            timestamp: chrono::Utc::now(),
+        });
     }
 }
 
@@ -308,5 +595,71 @@ mod tests {
             .update_state(&runner.config.id, RunnerState::Creating)
             .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_persistence_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+
+        // Create runners and save
+        let manager = RunnerManager::new(config.clone());
+        manager
+            .create("owner/repo1", None, None, None)
+            .await
+            .unwrap();
+        manager
+            .create("owner/repo2", None, None, None)
+            .await
+            .unwrap();
+        manager.save_to_disk().await.unwrap();
+
+        // Load into a fresh manager
+        let manager2 = RunnerManager::new(config);
+        manager2.load_from_disk().await.unwrap();
+        let runners = manager2.list().await;
+        assert_eq!(runners.len(), 2);
+
+        // All loaded runners should be Offline
+        for r in &runners {
+            assert_eq!(r.state, RunnerState::Offline);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_from_disk_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        // Should succeed even when no file exists
+        manager.load_from_disk().await.unwrap();
+        assert!(manager.list().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_copy_dir_recursive() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+
+        // Create some files in src
+        std::fs::write(src.path().join("file1.txt"), "hello").unwrap();
+        std::fs::create_dir_all(src.path().join("subdir")).unwrap();
+        std::fs::write(src.path().join("subdir/file2.txt"), "world").unwrap();
+
+        copy_dir_recursive(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("file1.txt").exists());
+        assert!(dst.path().join("subdir/file2.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(dst.path().join("file1.txt")).unwrap(),
+            "hello"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.path().join("subdir/file2.txt")).unwrap(),
+            "world"
+        );
     }
 }

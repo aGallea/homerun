@@ -285,4 +285,19 @@ impl DaemonClient {
         let body = self.request("GET", "/metrics", None).await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
+
+    pub async fn service_status(&self) -> Result<bool, String> {
+        let body = self.request("GET", "/service/status", None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn install_service(&self) -> Result<(), String> {
+        self.request("POST", "/service/install", None).await?;
+        Ok(())
+    }
+
+    pub async fn uninstall_service(&self) -> Result<(), String> {
+        self.request("POST", "/service/uninstall", None).await?;
+        Ok(())
+    }
 }

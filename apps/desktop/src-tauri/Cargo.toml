@@ -2,18 +2,18 @@
 [workspace]
 
 [package]
-name = "homerun-desktop"
+name = "homerun-app"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "homerun_desktop_lib"
+name = "homerun_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "homerun-desktop"
+name = "homerun-app"
 path = "src/main.rs"
 
 [build-dependencies]
