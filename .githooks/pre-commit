@@ -1,0 +1,42 @@
+#!/bin/bash
+set -e
+
+source "$HOME/.cargo/env" 2>/dev/null || true
+
+echo "🔍 Running pre-commit checks..."
+
+# ── Rust ──────────────────────────────────────────────────────────────────
+
+echo "  → cargo fmt --check"
+cargo fmt --all -- --check
+if [ $? -ne 0 ]; then
+  echo "❌ Rust formatting failed. Run: cargo fmt --all"
+  exit 1
+fi
+
+echo "  → cargo clippy"
+cargo clippy --all-targets --all-features -- -D warnings 2>&1
+if [ $? -ne 0 ]; then
+  echo "❌ Clippy failed. Fix the warnings above."
+  exit 1
+fi
+
+echo "  → cargo test"
+cargo test -p homerund -p homerun --quiet 2>&1
+if [ $? -ne 0 ]; then
+  echo "❌ Rust tests failed."
+  exit 1
+fi
+
+# ── TypeScript ────────────────────────────────────────────────────────────
+
+if git diff --cached --name-only | grep -q "apps/desktop/src/"; then
+  echo "  → tsc --noEmit"
+  (cd apps/desktop && npx tsc --noEmit)
+  if [ $? -ne 0 ]; then
+    echo "❌ TypeScript type check failed."
+    exit 1
+  fi
+fi
+
+echo "✅ All pre-commit checks passed."

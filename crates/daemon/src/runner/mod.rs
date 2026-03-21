@@ -344,10 +344,13 @@ impl RunnerManager {
                 &config.name,
                 &config.labels,
             )
-        .await
-        .context("Failed to configure runner")?;
+            .await
+            .context("Failed to configure runner")?;
         } else {
-            tracing::info!("Runner {} already configured, skipping download + config", id);
+            tracing::info!(
+                "Runner {} already configured, skipping download + config",
+                id
+            );
         }
 
         // 5. Spawn run.sh
