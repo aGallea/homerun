@@ -19,6 +19,22 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  pre-commit:
+    name: Pre-commit checks
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pre-commit
+        run: pip3 install pre-commit --quiet 2>/dev/null || pip install pre-commit --quiet
+
+      - name: Run pre-commit
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          pre-commit run --all-files --show-diff-on-failure
+        env:
+          SKIP: cargo-test,cargo-clippy
+
   rust:
     name: Rust (fmt + clippy + test + coverage)
     runs-on: self-hosted
