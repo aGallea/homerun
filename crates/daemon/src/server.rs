@@ -107,8 +107,6 @@ pub async fn serve(config: Config) -> Result<()> {
     // Restore auth token from macOS Keychain
     if let Err(e) = state.auth.try_restore().await {
         tracing::warn!("Failed to restore auth from keychain: {}", e);
-    } else if state.auth.token().await.is_some() {
-        tracing::info!("Restored GitHub authentication from keychain");
     }
 
     // Load persisted runner configs from disk
