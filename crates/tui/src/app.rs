@@ -1,4 +1,18 @@
+use crossterm::event::{KeyCode, KeyModifiers};
+
 use crate::client::{AuthStatus, MetricsResponse, RunnerInfo, RepoInfo};
+
+/// Actions that require async daemon calls — returned from handle_key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    StartRunner(String),
+    StopRunner(String),
+    RestartRunner(String),
+    DeleteRunner(String),
+    RefreshRunners,
+    RefreshRepos,
+    RefreshMetrics,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -94,6 +108,86 @@ impl App {
     pub fn select_prev_repo(&mut self) {
         self.selected_repo_index = self.selected_repo_index.saturating_sub(1);
     }
+
+    /// Handle a key event. Returns an optional Action requiring a daemon call.
+    pub fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<Action> {
+        // Help overlay captures all keys except ? and Esc
+        if self.show_help {
+            match code {
+                KeyCode::Char('?') | KeyCode::Esc => self.show_help = false,
+                _ => {}
+            }
+            return None;
+        }
+
+        match code {
+            KeyCode::Char('q') => {
+                self.should_quit = true;
+                None
+            }
+            KeyCode::Char('?') => {
+                self.show_help = true;
+                None
+            }
+            KeyCode::Char('1') => {
+                self.active_tab = Tab::Runners;
+                None
+            }
+            KeyCode::Char('2') => {
+                self.active_tab = Tab::Repos;
+                if self.repos.is_empty() {
+                    Some(Action::RefreshRepos)
+                } else {
+                    None
+                }
+            }
+            KeyCode::Char('3') => {
+                self.active_tab = Tab::Monitoring;
+                None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                match self.active_tab {
+                    Tab::Runners => self.select_next_runner(),
+                    Tab::Repos => self.select_next_repo(),
+                    _ => {}
+                }
+                None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                match self.active_tab {
+                    Tab::Runners => self.select_prev_runner(),
+                    Tab::Repos => self.select_prev_repo(),
+                    _ => {}
+                }
+                None
+            }
+            KeyCode::Char('s') => {
+                if let Some(runner) = self.selected_runner() {
+                    let id = runner.config.id.clone();
+                    let action = if runner.state == "online" || runner.state == "busy" {
+                        Action::StopRunner(id)
+                    } else {
+                        Action::StartRunner(id)
+                    };
+                    return Some(action);
+                }
+                None
+            }
+            KeyCode::Char('r') => {
+                if let Some(runner) = self.selected_runner() {
+                    return Some(Action::RestartRunner(runner.config.id.clone()));
+                }
+                None
+            }
+            KeyCode::Char('d') => {
+                if let Some(runner) = self.selected_runner() {
+                    return Some(Action::DeleteRunner(runner.config.id.clone()));
+                }
+                None
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +220,85 @@ mod tests {
         app.select_next_runner();
         assert_eq!(app.selected_runner_index, 0);
         app.select_prev_runner();
+        assert_eq!(app.selected_runner_index, 0);
+    }
+
+    fn make_test_runner(id: &str, state: &str) -> crate::client::RunnerInfo {
+        crate::client::RunnerInfo {
+            config: crate::client::RunnerConfig {
+                id: id.to_string(),
+                name: format!("runner-{id}"),
+                repo_owner: "test".to_string(),
+                repo_name: "repo".to_string(),
+                labels: vec!["self-hosted".to_string()],
+                mode: "app".to_string(),
+                work_dir: std::path::PathBuf::from("/tmp"),
+            },
+            state: state.to_string(),
+            pid: None,
+            uptime_secs: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+        }
+    }
+
+    #[test]
+    fn test_handle_key_quit() {
+        let mut app = App::new();
+        app.handle_key(KeyCode::Char('q'), KeyModifiers::NONE);
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_handle_key_tab_switch() {
+        let mut app = App::new();
+        app.handle_key(KeyCode::Char('2'), KeyModifiers::NONE);
+        assert_eq!(app.active_tab, Tab::Repos);
+        app.handle_key(KeyCode::Char('3'), KeyModifiers::NONE);
+        assert_eq!(app.active_tab, Tab::Monitoring);
+        app.handle_key(KeyCode::Char('1'), KeyModifiers::NONE);
+        assert_eq!(app.active_tab, Tab::Runners);
+    }
+
+    #[test]
+    fn test_handle_key_help_toggle() {
+        let mut app = App::new();
+        assert!(!app.show_help);
+        app.handle_key(KeyCode::Char('?'), KeyModifiers::NONE);
+        assert!(app.show_help);
+        app.handle_key(KeyCode::Char('?'), KeyModifiers::NONE);
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn test_handle_key_navigation() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_test_runner("r1", "online"),
+            make_test_runner("r2", "busy"),
+            make_test_runner("r3", "offline"),
+        ];
+        assert_eq!(app.selected_runner_index, 0);
+        app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(app.selected_runner_index, 1);
+        app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(app.selected_runner_index, 2);
+        app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(app.selected_runner_index, 2); // stays at end
+        app.handle_key(KeyCode::Up, KeyModifiers::NONE);
+        assert_eq!(app.selected_runner_index, 1);
+    }
+
+    #[test]
+    fn test_handle_key_vim_navigation() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_test_runner("r1", "online"),
+            make_test_runner("r2", "busy"),
+        ];
+        app.handle_key(KeyCode::Char('j'), KeyModifiers::NONE);
+        assert_eq!(app.selected_runner_index, 1);
+        app.handle_key(KeyCode::Char('k'), KeyModifiers::NONE);
         assert_eq!(app.selected_runner_index, 0);
     }
 }
