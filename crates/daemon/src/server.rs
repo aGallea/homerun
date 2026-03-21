@@ -7,26 +7,32 @@ use tokio::net::UnixListener;
 use crate::api;
 use crate::auth::AuthManager;
 use crate::config::Config;
+use crate::runner::RunnerManager;
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub auth: AuthManager,
+    pub runner_manager: RunnerManager,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
+        let runner_manager = RunnerManager::new(config.clone());
         Self {
             config: Arc::new(config),
             auth: AuthManager::new(),
+            runner_manager,
         }
     }
 
     #[cfg(test)]
     pub fn new_test() -> Self {
-        Self::new(Config::with_base_dir(
+        let config = Config::with_base_dir(
             tempfile::tempdir().unwrap().keep().join(".homerun"),
-        ))
+        );
+        config.ensure_dirs().unwrap();
+        Self::new(config)
     }
 }
 
