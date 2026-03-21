@@ -1,0 +1,43 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'source "$HOME/.cargo/env" 2>/dev/null; cargo fmt --all -- --check'
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: bash -c 'source "$HOME/.cargo/env" 2>/dev/null; cargo clippy --all-targets --all-features -- -D warnings'
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test
+        entry: bash -c 'source "$HOME/.cargo/env" 2>/dev/null; cargo test -p homerund -p homerun --quiet'
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: typescript-check
+        name: tsc --noEmit
+        entry: bash -c 'cd apps/desktop && npx tsc --noEmit'
+        language: system
+        files: 'apps/desktop/src/.*\.(ts|tsx)$'
+        pass_filenames: false
