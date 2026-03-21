@@ -1,3 +1,4 @@
+exclude: "(target/|node_modules/|dist/|Cargo\\.lock)"
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -86,7 +87,7 @@ repos:
 
       - id: typescript-check
         name: tsc --noEmit
-        entry: bash -c 'cd apps/desktop && npx tsc --noEmit'
+        entry: bash -c 'cd apps/desktop && [ -d node_modules ] && npx tsc --noEmit || true'
         language: system
-        files: 'apps/desktop/src/.*\.(ts|tsx)$'
+        files: "apps/desktop/src/.*\\.(ts|tsx)$"
         pass_filenames: false

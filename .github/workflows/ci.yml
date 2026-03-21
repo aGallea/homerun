@@ -28,6 +28,9 @@ jobs:
       - name: Install pre-commit
         run: pip3 install pre-commit --quiet 2>/dev/null || pip install pre-commit --quiet
 
+      - name: Install Node dependencies
+        run: cd apps/desktop && npm ci
+
       - name: Run pre-commit
         run: |
           source "$HOME/.cargo/env" 2>/dev/null || true
