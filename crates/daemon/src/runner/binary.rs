@@ -120,9 +120,48 @@ mod tests {
     }
 
     #[test]
+    fn test_download_url_macos_x64() {
+        let url = runner_download_url("2.321.0", "osx", "x64");
+        assert_eq!(
+            url,
+            "https://github.com/actions/runner/releases/download/v2.321.0/actions-runner-osx-x64-2.321.0.tar.gz"
+        );
+    }
+
+    #[test]
+    fn test_download_url_different_version() {
+        let url = runner_download_url("2.300.0", "osx", "arm64");
+        assert!(url.contains("v2.300.0"));
+        assert!(url.contains("arm64"));
+        assert!(url.ends_with(".tar.gz"));
+    }
+
+    #[test]
+    fn test_download_url_contains_github_actions_runner() {
+        let url = runner_download_url("2.321.0", "osx", "arm64");
+        assert!(url.starts_with("https://github.com/actions/runner/releases/download/"));
+    }
+
+    #[test]
     fn test_detect_platform() {
         let (os, arch) = detect_platform();
         assert_eq!(os, "osx");
         assert!(arch == "arm64" || arch == "x64");
+    }
+
+    #[test]
+    fn test_detect_platform_os_is_always_osx() {
+        // HomeRun only supports macOS
+        let (os, _arch) = detect_platform();
+        assert_eq!(os, "osx");
+    }
+
+    #[test]
+    fn test_detect_platform_arch_is_valid() {
+        let (_os, arch) = detect_platform();
+        assert!(
+            arch == "arm64" || arch == "x64",
+            "unexpected arch: {arch}"
+        );
     }
 }

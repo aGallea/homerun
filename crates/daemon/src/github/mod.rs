@@ -143,9 +143,22 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_github_client_none_error_message() {
+        let err = GitHubClient::new(None).err().unwrap();
+        assert!(err.to_string().contains("Not authenticated") || err.to_string().contains("login"));
+    }
+
     #[tokio::test]
     async fn test_github_client_with_token() {
         let client = GitHubClient::new(Some("ghp_test".to_string()));
+        assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_github_client_with_some_token_creates_ok() {
+        // Any non-empty token string should create a client (validation happens on API call)
+        let client = GitHubClient::new(Some("fake-token-value".to_string()));
         assert!(client.is_ok());
     }
 }

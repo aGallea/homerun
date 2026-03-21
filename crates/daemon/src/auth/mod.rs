@@ -110,3 +110,123 @@ impl AuthManager {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    /// Helper to create an AuthManager that is already in an authenticated state,
+    /// bypassing the GitHub API call.
+    fn authenticated_manager(login: &str) -> AuthManager {
+        let user = GitHubUser {
+            login: login.to_string(),
+            avatar_url: "https://example.com/avatar.png".to_string(),
+        };
+        AuthManager {
+            state: Arc::new(RwLock::new(Some(AuthState {
+                token: "ghp_fake_test_token".to_string(),
+                user,
+            }))),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_auth_manager_new_is_not_authenticated() {
+        let manager = AuthManager::new();
+        let status = manager.status().await;
+        assert!(!status.authenticated);
+        assert!(status.user.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_auth_manager_default_is_not_authenticated() {
+        let manager = AuthManager::default();
+        let status = manager.status().await;
+        assert!(!status.authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_token_returns_none_when_not_logged_in() {
+        let manager = AuthManager::new();
+        let token = manager.token().await;
+        assert!(token.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_login_with_invalid_pat_fails() {
+        let manager = AuthManager::new();
+        let result = manager.login_with_pat("ghp_invalidtoken_for_testing").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_logout_when_not_logged_in() {
+        // Logout should either succeed or fail due to keychain — not panic
+        let manager = AuthManager::new();
+        let result = manager.logout().await;
+        // Accept both ok (no entry to delete) and err (keychain can vary)
+        let _ = result;
+    }
+
+    #[tokio::test]
+    async fn test_status_returns_correct_structure_when_unauthenticated() {
+        let manager = AuthManager::new();
+        let status = manager.status().await;
+        assert_eq!(status.authenticated, false);
+        assert!(status.user.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_status_authenticated_returns_true_and_user() {
+        let manager = authenticated_manager("octocat");
+        let status = manager.status().await;
+        assert!(status.authenticated);
+        let user = status.user.unwrap();
+        assert_eq!(user.login, "octocat");
+    }
+
+    #[tokio::test]
+    async fn test_token_returns_some_when_authenticated() {
+        let manager = authenticated_manager("octocat");
+        let token = manager.token().await;
+        assert_eq!(token, Some("ghp_fake_test_token".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_logout_clears_state_when_authenticated() {
+        let manager = authenticated_manager("octocat");
+        // Verify authenticated first
+        assert!(manager.status().await.authenticated);
+        // Logout — may fail on keychain, but state should still be cleared
+        let _ = manager.logout().await;
+        let status = manager.status().await;
+        assert!(!status.authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_github_user_clone() {
+        let user = GitHubUser {
+            login: "testuser".to_string(),
+            avatar_url: "https://example.com/avatar.png".to_string(),
+        };
+        let cloned = user.clone();
+        assert_eq!(cloned.login, "testuser");
+        assert_eq!(cloned.avatar_url, "https://example.com/avatar.png");
+    }
+
+    #[tokio::test]
+    async fn test_auth_status_serialization() {
+        let status = AuthStatus {
+            authenticated: true,
+            user: Some(GitHubUser {
+                login: "testuser".to_string(),
+                avatar_url: "https://example.com/avatar.png".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"authenticated\":true"));
+        assert!(json.contains("testuser"));
+    }
+}

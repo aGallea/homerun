@@ -78,4 +78,39 @@ mod tests {
         // Should fail because config.sh doesn't exist
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_start_runner_fails_without_run_sh() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = start_runner(dir.path()).await;
+        // Should fail because run.sh doesn't exist in the temp dir
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_remove_runner_fails_without_config_sh() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = remove_runner(dir.path(), "fake-token").await;
+        // Should fail because config.sh doesn't exist
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_configure_runner_with_multiple_labels() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = configure_runner(
+            dir.path(),
+            "https://github.com/owner/repo",
+            "token123",
+            "runner-name",
+            &[
+                "self-hosted".to_string(),
+                "macOS".to_string(),
+                "arm64".to_string(),
+            ],
+        )
+        .await;
+        // Still fails without script, but we verify the call compiles and runs
+        assert!(result.is_err());
+    }
 }

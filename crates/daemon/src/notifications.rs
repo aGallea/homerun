@@ -145,4 +145,41 @@ mod tests {
         let result = mgr.send(NotificationType::HighResourceUsage { cpu_percent: 95.5 });
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_notification_manager_with_enabled_true() {
+        // On macOS the notification system should be available; if not, the error is accepted.
+        let mgr = NotificationManager::with_enabled(true);
+        // Attempting to send exercises the format + show path. Ignore send errors (e.g. headless).
+        let _ = mgr.send(NotificationType::JobCompleted {
+            runner_name: "test-runner".to_string(),
+            job_name: "build".to_string(),
+            duration: "30s".to_string(),
+        });
+    }
+
+    #[test]
+    fn test_notification_enabled_true_job_failed() {
+        let mgr = NotificationManager::with_enabled(true);
+        let _ = mgr.send(NotificationType::JobFailed {
+            runner_name: "test-runner".to_string(),
+            job_name: "deploy".to_string(),
+        });
+    }
+
+    #[test]
+    fn test_notification_enabled_true_runner_crashed() {
+        let mgr = NotificationManager::with_enabled(true);
+        let _ = mgr.send(NotificationType::RunnerCrashed {
+            runner_name: "test-runner".to_string(),
+            attempt: 1,
+            max_attempts: 3,
+        });
+    }
+
+    #[test]
+    fn test_notification_enabled_true_high_resource_usage() {
+        let mgr = NotificationManager::with_enabled(true);
+        let _ = mgr.send(NotificationType::HighResourceUsage { cpu_percent: 85.0 });
+    }
 }

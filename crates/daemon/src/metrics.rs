@@ -117,10 +117,93 @@ mod tests {
     }
 
     #[test]
+    fn test_ring_buffer_empty() {
+        let buffer: RingBuffer<f64> = RingBuffer::new(5);
+        let values: Vec<f64> = buffer.iter().collect();
+        assert!(values.is_empty());
+    }
+
+    #[test]
+    fn test_ring_buffer_under_capacity() {
+        let mut buffer = RingBuffer::new(5);
+        buffer.push(10_i32);
+        buffer.push(20_i32);
+        let values: Vec<i32> = buffer.iter().collect();
+        assert_eq!(values, vec![10, 20]);
+    }
+
+    #[test]
+    fn test_ring_buffer_exactly_at_capacity() {
+        let mut buffer = RingBuffer::new(3);
+        buffer.push(1_i32);
+        buffer.push(2_i32);
+        buffer.push(3_i32);
+        let values: Vec<i32> = buffer.iter().collect();
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_ring_buffer_overwrites_oldest() {
+        let mut buffer = RingBuffer::new(2);
+        buffer.push("a");
+        buffer.push("b");
+        buffer.push("c");
+        let values: Vec<&str> = buffer.iter().collect();
+        assert_eq!(values, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn test_ring_buffer_capacity_one() {
+        let mut buffer = RingBuffer::new(1);
+        buffer.push(42_i32);
+        buffer.push(99_i32);
+        let values: Vec<i32> = buffer.iter().collect();
+        assert_eq!(values, vec![99]);
+    }
+
+    #[test]
     fn test_system_metrics_snapshot() {
         let collector = MetricsCollector::new();
         let metrics = collector.system_snapshot();
         assert!(metrics.cpu_percent >= 0.0);
         assert!(metrics.memory_total_bytes > 0);
+    }
+
+    #[test]
+    fn test_metrics_collector_default() {
+        let collector = MetricsCollector::default();
+        let metrics = collector.system_snapshot();
+        assert!(metrics.memory_total_bytes > 0);
+    }
+
+    #[test]
+    fn test_runner_metrics_nonexistent_pid_returns_none() {
+        let collector = MetricsCollector::new();
+        // PID 0 should never be a valid user process
+        let result = collector.runner_metrics(0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_runner_metrics_very_large_pid_returns_none() {
+        let collector = MetricsCollector::new();
+        // Use a very large PID that almost certainly doesn't exist
+        let result = collector.runner_metrics(u32::MAX);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_system_metrics_disk_bytes_are_sane() {
+        let collector = MetricsCollector::new();
+        let metrics = collector.system_snapshot();
+        // disk_used_bytes should not exceed disk_total_bytes
+        assert!(metrics.disk_used_bytes <= metrics.disk_total_bytes);
+    }
+
+    #[test]
+    fn test_system_metrics_memory_used_not_exceeds_total() {
+        let collector = MetricsCollector::new();
+        let metrics = collector.system_snapshot();
+        assert!(metrics.memory_used_bytes <= metrics.memory_total_bytes);
     }
 }
