@@ -1,7 +1,7 @@
 use axum::{
-    Json,
     extract::{Path, State},
     http::StatusCode,
+    Json,
 };
 
 use crate::runner::types::{CreateRunnerRequest, RunnerInfo, UpdateRunnerRequest};
@@ -19,9 +19,7 @@ pub async fn create_runner(
     Ok((StatusCode::CREATED, Json(runner)))
 }
 
-pub async fn list_runners(
-    State(state): State<AppState>,
-) -> Json<Vec<RunnerInfo>> {
+pub async fn list_runners(State(state): State<AppState>) -> Json<Vec<RunnerInfo>> {
     Json(state.runner_manager.list().await)
 }
 
@@ -50,10 +48,7 @@ pub async fn update_runner(
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))
 }
 
-pub async fn delete_runner(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> StatusCode {
+pub async fn delete_runner(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
     let _ = state.runner_manager.delete(&id).await;
     StatusCode::NO_CONTENT
 }
@@ -99,10 +94,10 @@ pub async fn restart_runner(
 
 #[cfg(test)]
 mod tests {
+    use crate::server::{create_router, AppState};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
-    use crate::server::{create_router, AppState};
 
     #[tokio::test]
     async fn test_create_and_list_runners() {
@@ -136,7 +131,9 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let runners: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(runners.len(), 1);
     }
@@ -158,7 +155,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let id = runner["config"]["id"].as_str().unwrap();
 
@@ -187,7 +186,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let runners: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(runners.len(), 0);
     }
@@ -225,7 +226,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let id = runner["config"]["id"].as_str().unwrap();
 
@@ -244,7 +247,9 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let updated: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let labels = updated["config"]["labels"].as_array().unwrap();
         assert!(labels.iter().any(|l| l.as_str() == Some("custom-label")));
@@ -267,7 +272,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let id = runner["config"]["id"].as_str().unwrap();
 

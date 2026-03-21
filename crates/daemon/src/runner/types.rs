@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::runner::state::RunnerState;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

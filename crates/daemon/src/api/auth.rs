@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode, Json};
 use serde::Deserialize;
 
 use crate::auth::AuthStatus;
@@ -26,9 +22,7 @@ pub async fn login_with_token(
     }
 }
 
-pub async fn logout(
-    State(state): State<AppState>,
-) -> Result<StatusCode, (StatusCode, String)> {
+pub async fn logout(State(state): State<AppState>) -> Result<StatusCode, (StatusCode, String)> {
     match state.auth.logout().await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),

@@ -1,6 +1,6 @@
 use axum::{
-    extract::{State, WebSocketUpgrade},
     extract::ws::{Message, WebSocket},
+    extract::{State, WebSocketUpgrade},
     response::Response,
 };
 use tokio_stream::wrappers::BroadcastStream;
@@ -8,10 +8,7 @@ use tokio_stream::StreamExt;
 
 use crate::server::AppState;
 
-pub async fn events_ws(
-    State(state): State<AppState>,
-    ws: WebSocketUpgrade,
-) -> Response {
+pub async fn events_ws(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 

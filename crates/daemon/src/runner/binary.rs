@@ -68,10 +68,7 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
         .with_context(|| format!("Failed to download runner from {url}"))?;
 
     if !response.status().is_success() {
-        anyhow::bail!(
-            "Failed to download runner: HTTP {}",
-            response.status()
-        );
+        anyhow::bail!("Failed to download runner: HTTP {}", response.status());
     }
 
     let archive_path = runner_dir.join(format!("actions-runner-{os}-{arch}-{version}.tar.gz"));

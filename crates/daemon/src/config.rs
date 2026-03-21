@@ -70,10 +70,22 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.socket_path(), dirs::home_dir().unwrap().join(".homerun/daemon.sock"));
-        assert_eq!(config.runners_dir(), dirs::home_dir().unwrap().join(".homerun/runners"));
-        assert_eq!(config.cache_dir(), dirs::home_dir().unwrap().join(".homerun/cache"));
-        assert_eq!(config.log_dir(), dirs::home_dir().unwrap().join(".homerun/logs"));
+        assert_eq!(
+            config.socket_path(),
+            dirs::home_dir().unwrap().join(".homerun/daemon.sock")
+        );
+        assert_eq!(
+            config.runners_dir(),
+            dirs::home_dir().unwrap().join(".homerun/runners")
+        );
+        assert_eq!(
+            config.cache_dir(),
+            dirs::home_dir().unwrap().join(".homerun/cache")
+        );
+        assert_eq!(
+            config.log_dir(),
+            dirs::home_dir().unwrap().join(".homerun/logs")
+        );
     }
 
     #[test]

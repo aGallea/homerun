@@ -1,4 +1,4 @@
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 
 use crate::server::AppState;
 

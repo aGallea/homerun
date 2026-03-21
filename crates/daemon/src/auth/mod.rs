@@ -30,6 +30,12 @@ pub struct AuthManager {
     state: Arc<RwLock<Option<AuthState>>>,
 }
 
+impl Default for AuthManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthManager {
     pub fn new() -> Self {
         Self {

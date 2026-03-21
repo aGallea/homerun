@@ -37,9 +37,10 @@ impl GitHubClient {
                 let is_org = owner.r#type == "Organization";
                 Some(RepoInfo {
                     id: repo.id.0,
-                    full_name: repo.full_name.clone().unwrap_or_else(|| {
-                        format!("{}/{}", owner.login, repo.name)
-                    }),
+                    full_name: repo
+                        .full_name
+                        .clone()
+                        .unwrap_or_else(|| format!("{}/{}", owner.login, repo.name)),
                     name: repo.name.clone(),
                     owner: owner.login.clone(),
                     private: repo.private.unwrap_or(false),
@@ -68,8 +69,7 @@ impl GitHubClient {
         }
 
         let route = format!("/repos/{owner}/{repo}/actions/runners/registration-token");
-        let response: RegistrationTokenResponse =
-            self.octocrab.post(route, None::<&()>).await?;
+        let response: RegistrationTokenResponse = self.octocrab.post(route, None::<&()>).await?;
 
         Ok(RunnerRegistration {
             token: response.token,

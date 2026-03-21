@@ -3,6 +3,7 @@ pub mod process;
 pub mod state;
 pub mod types;
 
+use crate::config::Config;
 use anyhow::{bail, Result};
 use serde::Serialize;
 use state::RunnerState;
@@ -10,7 +11,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use types::{RunnerConfig, RunnerInfo, RunnerMode};
-use crate::config::Config;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunnerEvent {
@@ -78,17 +78,18 @@ impl RunnerManager {
         let (owner, repo) = (parts[0], parts[1]);
 
         let id = uuid::Uuid::new_v4().to_string();
-        let count = self.runners.read().await.values()
+        let count = self
+            .runners
+            .read()
+            .await
+            .values()
             .filter(|r| r.config.repo_name == repo)
             .count();
         let name = name.unwrap_or_else(|| format!("{repo}-runner-{}", count + 1));
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
-        let mut default_labels = vec![
-            "self-hosted".to_string(),
-            "macOS".to_string(),
-        ];
+        let mut default_labels = vec!["self-hosted".to_string(), "macOS".to_string()];
         if cfg!(target_arch = "aarch64") {
             default_labels.push("ARM64".to_string());
         } else {
@@ -137,7 +138,9 @@ impl RunnerManager {
 
     pub async fn update(&self, id: &str, req: types::UpdateRunnerRequest) -> Result<RunnerInfo> {
         let mut runners = self.runners.write().await;
-        let runner = runners.get_mut(id).ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        let runner = runners
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
         if let Some(labels) = req.labels {
             runner.config.labels = labels;
         }
@@ -149,9 +152,15 @@ impl RunnerManager {
 
     pub async fn update_state(&self, id: &str, state: RunnerState) -> Result<()> {
         let mut runners = self.runners.write().await;
-        let runner = runners.get_mut(id).ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        let runner = runners
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
         if !runner.state.can_transition_to(&state) {
-            bail!("Invalid state transition: {:?} -> {:?}", runner.state, state);
+            bail!(
+                "Invalid state transition: {:?} -> {:?}",
+                runner.state,
+                state
+            );
         }
         runner.state = state;
         Ok(())
@@ -172,12 +181,15 @@ mod tests {
         let manager = RunnerManager::new(config);
         let mut rx = manager.subscribe_events();
 
-        manager.event_sender().send(RunnerEvent {
-            runner_id: "test".to_string(),
-            event_type: "state_changed".to_string(),
-            data: serde_json::json!({"state": "online"}),
-            timestamp: chrono::Utc::now(),
-        }).unwrap();
+        manager
+            .event_sender()
+            .send(RunnerEvent {
+                runner_id: "test".to_string(),
+                event_type: "state_changed".to_string(),
+                data: serde_json::json!({"state": "online"}),
+                timestamp: chrono::Utc::now(),
+            })
+            .unwrap();
 
         let event = rx.recv().await.unwrap();
         assert_eq!(event.event_type, "state_changed");
@@ -192,12 +204,15 @@ mod tests {
         let manager = RunnerManager::new(config);
         let mut rx = manager.subscribe_logs();
 
-        manager.log_sender().send(LogEntry {
-            runner_id: "test".to_string(),
-            timestamp: chrono::Utc::now(),
-            line: "hello".to_string(),
-            stream: "stdout".to_string(),
-        }).unwrap();
+        manager
+            .log_sender()
+            .send(LogEntry {
+                runner_id: "test".to_string(),
+                timestamp: chrono::Utc::now(),
+                line: "hello".to_string(),
+                stream: "stdout".to_string(),
+            })
+            .unwrap();
 
         let entry = rx.recv().await.unwrap();
         assert_eq!(entry.line, "hello");
@@ -232,8 +247,14 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        manager.create("aGallea/gifted", None, None, None).await.unwrap();
-        manager.create("aGallea/gifted", None, None, None).await.unwrap();
+        manager
+            .create("aGallea/gifted", None, None, None)
+            .await
+            .unwrap();
+        manager
+            .create("aGallea/gifted", None, None, None)
+            .await
+            .unwrap();
 
         let runners = manager.list().await;
         assert_eq!(runners.len(), 2);
@@ -246,7 +267,10 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let runner = manager.create("aGallea/gifted", None, None, None).await.unwrap();
+        let runner = manager
+            .create("aGallea/gifted", None, None, None)
+            .await
+            .unwrap();
         let id = runner.config.id.clone();
 
         manager.delete(&id).await.unwrap();
@@ -261,17 +285,28 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let runner = manager.create("aGallea/gifted", None, None, None).await.unwrap();
+        let runner = manager
+            .create("aGallea/gifted", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(runner.state, RunnerState::Creating);
 
-        manager.update_state(&runner.config.id, RunnerState::Registering).await.unwrap();
-        manager.update_state(&runner.config.id, RunnerState::Online).await.unwrap();
+        manager
+            .update_state(&runner.config.id, RunnerState::Registering)
+            .await
+            .unwrap();
+        manager
+            .update_state(&runner.config.id, RunnerState::Online)
+            .await
+            .unwrap();
 
         let updated = manager.get(&runner.config.id).await.unwrap();
         assert_eq!(updated.state, RunnerState::Online);
 
         // Invalid transition should fail
-        let result = manager.update_state(&runner.config.id, RunnerState::Creating).await;
+        let result = manager
+            .update_state(&runner.config.id, RunnerState::Creating)
+            .await;
         assert!(result.is_err());
     }
 }

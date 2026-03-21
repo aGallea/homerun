@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{Json, Router, routing::{delete, get, post}};
+use axum::{
+    routing::{delete, get, post},
+    Json, Router,
+};
 use tokio::net::UnixListener;
 
 use crate::api;
@@ -31,9 +34,7 @@ impl AppState {
 
     #[cfg(test)]
     pub fn new_test() -> Self {
-        let config = Config::with_base_dir(
-            tempfile::tempdir().unwrap().keep().join(".homerun"),
-        );
+        let config = Config::with_base_dir(tempfile::tempdir().unwrap().keep().join(".homerun"));
         config.ensure_dirs().unwrap();
         Self::new(config)
     }
@@ -46,8 +47,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth", delete(api::auth::logout))
         .route("/auth/status", get(api::auth::status))
         .route("/repos", get(api::repos::list_repos))
-        .route("/runners", get(api::runners::list_runners).post(api::runners::create_runner))
-        .route("/runners/{id}", get(api::runners::get_runner).patch(api::runners::update_runner).delete(api::runners::delete_runner))
+        .route(
+            "/runners",
+            get(api::runners::list_runners).post(api::runners::create_runner),
+        )
+        .route(
+            "/runners/{id}",
+            get(api::runners::get_runner)
+                .patch(api::runners::update_runner)
+                .delete(api::runners::delete_runner),
+        )
         .route("/runners/{id}/start", post(api::runners::start_runner))
         .route("/runners/{id}/stop", post(api::runners::stop_runner))
         .route("/runners/{id}/restart", post(api::runners::restart_runner))
@@ -99,7 +108,12 @@ mod tests {
     async fn test_health_endpoint() {
         let app = create_router(AppState::new_test());
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);

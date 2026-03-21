@@ -13,10 +13,14 @@ pub async fn configure_runner(
     let labels_str = labels.join(",");
     let status = Command::new(runner_dir.join("config.sh"))
         .args([
-            "--url", url,
-            "--token", token,
-            "--name", name,
-            "--labels", &labels_str,
+            "--url",
+            url,
+            "--token",
+            token,
+            "--name",
+            name,
+            "--labels",
+            &labels_str,
             "--unattended",
             "--replace",
         ])
@@ -69,7 +73,8 @@ mod tests {
             "fake-token",
             "test-runner",
             &["self-hosted".to_string()],
-        ).await;
+        )
+        .await;
         // Should fail because config.sh doesn't exist
         assert!(result.is_err());
     }
