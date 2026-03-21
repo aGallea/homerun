@@ -81,6 +81,28 @@ jobs:
           min-coverage-percentage: '80'
           fail-under-coverage-percentage: 'false'
 
+      - name: Extract coverage percentage
+        if: always()
+        id: coverage
+        run: |
+          COVERAGE=$(cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | grep "^TOTAL" | awk '{print $NF}' | sed 's/%//')
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Coverage: $COVERAGE%"
+
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        continue-on-error: true
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: homerun-coverage
+          filename: coverage.json
+          label: coverage
+          message: "${{ steps.coverage.outputs.percentage }}%"
+          valColorRange: ${{ steps.coverage.outputs.percentage }}
+          minColorRange: 50
+          maxColorRange: 95
+
   rust-audit:
     name: Rust / audit
     runs-on: macos-latest
