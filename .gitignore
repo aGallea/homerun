@@ -5,3 +5,4 @@ dist/
 .superpowers/
 *.swp
 *.swo
+apps/desktop/src-tauri/gen/
