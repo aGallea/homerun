@@ -25,6 +25,8 @@ pub struct RunnerInfo {
     pub state: RunnerState,
     pub pid: Option<u32>,
     pub uptime_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub jobs_completed: u32,
     pub jobs_failed: u32,
 }

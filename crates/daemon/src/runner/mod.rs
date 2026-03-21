@@ -101,6 +101,14 @@ impl RunnerManager {
         &self.event_tx
     }
 
+    fn with_computed_uptime(mut info: RunnerInfo) -> RunnerInfo {
+        info.uptime_secs = info.started_at.map(|started| {
+            let elapsed = chrono::Utc::now() - started;
+            elapsed.num_seconds().max(0) as u64
+        });
+        info
+    }
+
     // ── Persistence ────────────────────────────────────────────────
 
     /// Save all runner configs to disk as JSON.
@@ -134,6 +142,7 @@ impl RunnerManager {
                     state: RunnerState::Offline,
                     pid: None,
                     uptime_secs: None,
+                    started_at: None,
                     jobs_completed: 0,
                     jobs_failed: 0,
                 },
@@ -192,6 +201,7 @@ impl RunnerManager {
             state: RunnerState::Creating,
             pid: None,
             uptime_secs: None,
+            started_at: None,
             jobs_completed: 0,
             jobs_failed: 0,
         };
@@ -202,11 +212,22 @@ impl RunnerManager {
     }
 
     pub async fn list(&self) -> Vec<RunnerInfo> {
-        self.runners.read().await.values().cloned().collect()
+        self.runners
+            .read()
+            .await
+            .values()
+            .cloned()
+            .map(Self::with_computed_uptime)
+            .collect()
     }
 
     pub async fn get(&self, id: &str) -> Option<RunnerInfo> {
-        self.runners.read().await.get(id).cloned()
+        self.runners
+            .read()
+            .await
+            .get(id)
+            .cloned()
+            .map(Self::with_computed_uptime)
     }
 
     pub async fn delete(&self, id: &str) -> Result<()> {
@@ -329,20 +350,62 @@ impl RunnerManager {
         .context("Failed to configure runner")?;
 
         // 5. Spawn run.sh
-        let child = start_runner(&config.work_dir)
+        let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
 
-        // 6. Store PID, update state to Online
+        // 5b. Capture stdout/stderr for log streaming
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        // 6. Store PID, update state to Online, record start time
         let pid = child.id();
+        let started_at = chrono::Utc::now();
         {
             let mut runners = self.runners.write().await;
             if let Some(r) = runners.get_mut(id) {
                 r.state = RunnerState::Online;
                 r.pid = pid;
+                r.started_at = Some(started_at);
             }
         }
         self.emit_state_event(id, "online");
+
+        // 5c. Spawn log reader tasks
+        if let Some(stdout) = stdout {
+            let log_tx = self.log_tx.clone();
+            let rid = id.to_string();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let _ = log_tx.send(LogEntry {
+                        runner_id: rid.clone(),
+                        timestamp: chrono::Utc::now(),
+                        line,
+                        stream: "stdout".to_string(),
+                    });
+                }
+            });
+        }
+        if let Some(stderr) = stderr {
+            let log_tx = self.log_tx.clone();
+            let rid = id.to_string();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let _ = log_tx.send(LogEntry {
+                        runner_id: rid.clone(),
+                        timestamp: chrono::Utc::now(),
+                        line,
+                        stream: "stderr".to_string(),
+                    });
+                }
+            });
+        }
 
         // Store process handle
         let child_arc = Arc::new(RwLock::new(child));
@@ -369,6 +432,7 @@ impl RunnerManager {
                 if r.state == RunnerState::Online || r.state == RunnerState::Busy {
                     r.state = RunnerState::Offline;
                     r.pid = None;
+                    r.started_at = None;
                 }
             }
             drop(runners);
