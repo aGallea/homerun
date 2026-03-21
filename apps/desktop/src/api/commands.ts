@@ -36,6 +36,10 @@ export const api = {
   // Metrics
   getMetrics: () => invoke<MetricsResponse>("get_metrics"),
 
+  // Logs
+  subscribeRunnerLogs: (runnerId: string) =>
+    invoke<void>("subscribe_runner_logs", { runner_id: runnerId }),
+
   // Health
   healthCheck: () => invoke<boolean>("health_check"),
   daemonAvailable: () => invoke<boolean>("daemon_available"),

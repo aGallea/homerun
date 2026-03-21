@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { listen } from "@tauri-apps/api/event";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
+import { api } from "../api/commands";
 import { StatusBadge } from "../components/StatusBadge";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
@@ -27,6 +29,40 @@ export function RunnerDetail() {
   const { metrics } = useMetrics();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<{ timestamp: string; line: string; stream: string }[]>([]);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const subscribedRef = useRef(false);
+
+  // Subscribe to log stream
+  useEffect(() => {
+    if (!id || subscribedRef.current) return;
+    subscribedRef.current = true;
+
+    api.subscribeRunnerLogs(id).catch(() => {});
+
+    const unlisten = listen<string>(`runner-log-${id}`, (event) => {
+      try {
+        const entry = JSON.parse(event.payload);
+        setLogs((prev) => {
+          const next = [...prev, entry];
+          return next.length > 500 ? next.slice(-500) : next;
+        });
+      } catch {
+        // ignore parse errors
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [id]);
+
+  // Auto-scroll logs
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logs]);
 
   const runner = runners.find((r) => r.config.id === id);
   const runnerMetrics = metrics?.runners.find((m) => m.runner_id === id);
@@ -235,21 +271,39 @@ export function RunnerDetail() {
           Logs
         </h2>
         <div
+          ref={logContainerRef}
           className="font-mono"
           style={{
             background: "var(--bg-primary)",
             border: "1px solid var(--border)",
             borderRadius: 6,
-            padding: 16,
+            padding: 12,
             minHeight: 160,
+            maxHeight: 400,
+            overflowY: "auto",
             fontSize: 12,
+            lineHeight: 1.6,
             color: "var(--text-secondary)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
           }}
         >
-          Logs will stream here when connected.
+          {logs.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 140, color: "var(--text-secondary)" }}>
+              {runner.state === "online" || runner.state === "busy"
+                ? "Waiting for log output..."
+                : "Runner is not active."}
+            </div>
+          ) : (
+            logs.map((entry, i) => (
+              <div key={i} style={{ display: "flex", gap: 8 }}>
+                <span style={{ color: "var(--text-secondary)", opacity: 0.5, flexShrink: 0 }}>
+                  {new Date(entry.timestamp).toLocaleTimeString()}
+                </span>
+                <span style={{ color: entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)" }}>
+                  {entry.line}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
