@@ -115,9 +115,23 @@ export function RunnerDetail() {
                 {config.name}
               </h1>
               <StatusBadge state={state} currentJob={current_job ?? undefined} />
+              {uptime_secs != null && (
+                <span className="text-muted" style={{ fontSize: 12 }}>
+                  Uptime: {formatUptime(uptime_secs)}
+                </span>
+              )}
             </div>
             <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-              {config.repo_owner}/{config.repo_name}
+              <a
+                href={`https://github.com/${config.repo_owner}/${config.repo_name}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "var(--accent-blue)" }}
+              >
+                {config.repo_owner}/{config.repo_name}
+              </a>
+              <span style={{ margin: "0 8px", opacity: 0.3 }}>·</span>
+              <span style={{ textTransform: "capitalize" }}>{config.mode} mode</span>
             </p>
           </div>
         </div>
@@ -151,30 +165,16 @@ export function RunnerDetail() {
         </div>
       )}
 
-      {/* Info cards */}
+      {/* Info cards — compact layout */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
           gap: 16,
           marginBottom: 24,
         }}
       >
-        <InfoCard label="Repository">
-          <a
-            href={`https://github.com/${config.repo_owner}/${config.repo_name}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {config.repo_owner}/{config.repo_name}
-          </a>
-        </InfoCard>
-
-        <InfoCard label="Mode">
-          <span style={{ textTransform: "capitalize" }}>{config.mode}</span>
-        </InfoCard>
-
-        {current_job && (
+        {current_job ? (
           <InfoCard label="Current Job">
             <div className="flex items-center gap-8">
               <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
@@ -182,26 +182,76 @@ export function RunnerDetail() {
                 href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
                 target="_blank"
                 rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 style={{ fontSize: 11, color: "var(--accent-blue)" }}
               >
-                View on GitHub →
+                View →
               </a>
             </div>
           </InfoCard>
-        )}
-
-        {!current_job && (
-          <InfoCard label="Workflows">
+        ) : (
+          <InfoCard label="Actions">
             <a
-              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
+              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
               target="_blank"
               rel="noreferrer"
               style={{ color: "var(--accent-blue)" }}
             >
-              View Actions →
+              View on GitHub →
             </a>
           </InfoCard>
         )}
+
+        <InfoCard label="Jobs">
+          <div className="flex items-center gap-16">
+            <span>
+              <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>
+                {jobs_completed}
+              </span>
+              <span className="text-muted" style={{ fontSize: 11, marginLeft: 4 }}>
+                passed
+              </span>
+            </span>
+            <span>
+              <span
+                style={{
+                  color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
+                  fontWeight: 600,
+                }}
+              >
+                {jobs_failed}
+              </span>
+              <span className="text-muted" style={{ fontSize: 11, marginLeft: 4 }}>
+                failed
+              </span>
+            </span>
+          </div>
+        </InfoCard>
+
+        <InfoCard label="Resources">
+          {runnerMetrics ? (
+            <div className="flex items-center gap-16">
+              <span>
+                <span className="font-mono" style={{ fontSize: 13 }}>
+                  {runnerMetrics.cpu_percent.toFixed(1)}%
+                </span>
+                <span className="text-muted" style={{ fontSize: 11, marginLeft: 4 }}>
+                  CPU
+                </span>
+              </span>
+              <span>
+                <span className="font-mono" style={{ fontSize: 13 }}>
+                  {(runnerMetrics.memory_bytes / 1024 / 1024).toFixed(0)} MB
+                </span>
+                <span className="text-muted" style={{ fontSize: 11, marginLeft: 4 }}>
+                  MEM
+                </span>
+              </span>
+            </div>
+          ) : (
+            <span className="text-muted">—</span>
+          )}
+        </InfoCard>
 
         <InfoCard label="Labels">
           <div className="flex" style={{ flexWrap: "wrap", gap: 4 }}>
@@ -222,37 +272,6 @@ export function RunnerDetail() {
             ))}
           </div>
         </InfoCard>
-
-        <InfoCard label="Uptime">{uptime_secs != null ? formatUptime(uptime_secs) : "--"}</InfoCard>
-
-        <InfoCard label="Jobs Completed">
-          <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>{jobs_completed}</span>
-        </InfoCard>
-
-        <InfoCard label="Jobs Failed">
-          <span
-            style={{
-              color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
-              fontWeight: 600,
-            }}
-          >
-            {jobs_failed}
-          </span>
-        </InfoCard>
-
-        {runnerMetrics && (
-          <InfoCard label="CPU Usage">
-            <MetricBar value={runnerMetrics.cpu_percent} />
-          </InfoCard>
-        )}
-
-        {runnerMetrics && (
-          <InfoCard label="Memory">
-            <span className="font-mono" style={{ fontSize: 13 }}>
-              {(runnerMetrics.memory_bytes / 1024 / 1024).toFixed(0)} MB
-            </span>
-          </InfoCard>
-        )}
       </div>
 
       {/* Log viewer */}
@@ -318,36 +337,8 @@ export function RunnerDetail() {
         </div>
       </div>
 
-      {/* Danger zone */}
-      <div className="card" style={{ borderColor: "var(--accent-red)", marginBottom: 24 }}>
-        <h2
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            marginBottom: 8,
-            color: "var(--accent-red)",
-            textTransform: "uppercase",
-            letterSpacing: "0.5px",
-          }}
-        >
-          Danger Zone
-        </h2>
-        <div className="flex items-center justify-between" style={{ padding: "12px 0" }}>
-          <div>
-            <div style={{ fontWeight: 500, marginBottom: 4 }}>Delete this runner</div>
-            <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-              The runner will be stopped, de-registered from GitHub, and permanently removed.
-            </p>
-          </div>
-          <button
-            className="btn btn-danger"
-            style={{ flexShrink: 0, marginLeft: 24 }}
-            onClick={() => setConfirmDelete(true)}
-          >
-            Delete Runner
-          </button>
-        </div>
-      </div>
+      {/* Spacer before confirm dialog */}
+      <div style={{ marginBottom: 24 }}></div>
 
       {confirmDelete && (
         <ConfirmDialog
@@ -380,43 +371,6 @@ function InfoCard({ label, children }: { label: string; children: React.ReactNod
         {label}
       </div>
       <div style={{ fontSize: 14, color: "var(--text-primary)" }}>{children}</div>
-    </div>
-  );
-}
-
-function MetricBar({ value }: { value: number }) {
-  const color =
-    value >= 80
-      ? "var(--accent-red)"
-      : value >= 60
-        ? "var(--accent-yellow)"
-        : "var(--accent-green)";
-
-  return (
-    <div>
-      <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-        <span className="font-mono" style={{ fontSize: 12 }}>
-          {value.toFixed(1)}%
-        </span>
-      </div>
-      <div
-        style={{
-          height: 6,
-          background: "var(--bg-tertiary)",
-          borderRadius: 3,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${Math.min(value, 100)}%`,
-            background: color,
-            borderRadius: 3,
-            transition: "width 0.3s ease",
-          }}
-        />
-      </div>
     </div>
   );
 }

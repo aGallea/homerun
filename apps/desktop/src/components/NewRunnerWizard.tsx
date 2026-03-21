@@ -403,7 +403,16 @@ function StepConfigure({
             className="btn"
             onClick={() => onCount(Math.max(1, count - 1))}
             disabled={count <= 1}
-            style={{ width: 32, padding: "4px 0", textAlign: "center" }}
+            style={{
+              width: 32,
+              height: 32,
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 16,
+              lineHeight: 1,
+            }}
           >
             −
           </button>
@@ -422,7 +431,16 @@ function StepConfigure({
             className="btn"
             onClick={() => onCount(Math.min(10, count + 1))}
             disabled={count >= 10}
-            style={{ width: 32, padding: "4px 0", textAlign: "center" }}
+            style={{
+              width: 32,
+              height: 32,
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 16,
+              lineHeight: 1,
+            }}
           >
             +
           </button>
