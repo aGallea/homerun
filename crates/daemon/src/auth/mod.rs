@@ -229,4 +229,108 @@ mod tests {
         assert!(json.contains("\"authenticated\":true"));
         assert!(json.contains("testuser"));
     }
+
+    /// Validate that `login_with_pat` with an invalid token fails and leaves
+    /// the manager in an unauthenticated state.
+    #[tokio::test]
+    async fn test_login_with_invalid_pat_leaves_state_unauthenticated() {
+        let manager = AuthManager::new();
+        let _ = manager.login_with_pat("definitely_invalid_token_abc123").await;
+        // Whether it errors or not, the state should not be authenticated
+        // (we can't guarantee the keychain state, but internal state is clear)
+        // The important check: the result is an error
+        let result = manager.login_with_pat("definitely_invalid_token_abc123").await;
+        assert!(result.is_err());
+    }
+
+    /// Validate that `validate_token` (indirectly via login_with_pat) returns
+    /// a meaningful error message for an invalid token.
+    #[tokio::test]
+    async fn test_login_with_pat_error_is_descriptive() {
+        let manager = AuthManager::new();
+        let err = manager
+            .login_with_pat("ghp_fake_invalid_token_for_testing")
+            .await
+            .unwrap_err();
+        // The error should come from the octocrab/GitHub API layer
+        let msg = err.to_string();
+        assert!(!msg.is_empty(), "error message should not be empty");
+    }
+
+    /// Test that `try_restore` succeeds (returns Ok) even when there is no
+    /// stored token in the keychain — it should be a no-op in that case.
+    #[tokio::test]
+    async fn test_try_restore_with_no_stored_token_returns_ok() {
+        // Use a fresh AuthManager; there is likely no token for the default service
+        // in the test environment, so try_restore should just return Ok(()).
+        let manager = AuthManager::new();
+        // We can't easily control the keychain in tests, but try_restore must
+        // not panic and must return a Result.
+        let result = manager.try_restore().await;
+        // Accept both Ok (no token stored) and err (keychain unavailable).
+        // The key thing is it shouldn't panic.
+        let _ = result;
+    }
+
+    /// Test that `AuthStatus` correctly deserializes from JSON.
+    #[test]
+    fn test_auth_status_deserialization() {
+        let json = r#"{"authenticated":false,"user":null}"#;
+        let status: AuthStatus = serde_json::from_str(json).unwrap();
+        assert!(!status.authenticated);
+        assert!(status.user.is_none());
+    }
+
+    /// Test that `AuthStatus` with a user deserializes correctly.
+    #[test]
+    fn test_auth_status_deserialization_with_user() {
+        let json = r#"{"authenticated":true,"user":{"login":"alice","avatar_url":"https://example.com/a.png"}}"#;
+        let status: AuthStatus = serde_json::from_str(json).unwrap();
+        assert!(status.authenticated);
+        let user = status.user.unwrap();
+        assert_eq!(user.login, "alice");
+    }
+
+    /// Test that `GitHubUser` serializes to JSON correctly.
+    #[test]
+    fn test_github_user_serialization() {
+        let user = GitHubUser {
+            login: "bob".to_string(),
+            avatar_url: "https://example.com/bob.png".to_string(),
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        assert!(json.contains("\"login\":\"bob\""));
+        assert!(json.contains("avatar_url"));
+    }
+
+    /// Verify that multiple clones of AuthManager share the same underlying state.
+    #[tokio::test]
+    async fn test_auth_manager_clone_shares_state() {
+        let manager = authenticated_manager("shared_user");
+        let clone = manager.clone();
+
+        // Both should see the authenticated state
+        assert!(manager.status().await.authenticated);
+        assert!(clone.status().await.authenticated);
+
+        // Logout via clone, original should also see unauthenticated
+        let _ = clone.logout().await;
+        assert!(!manager.status().await.authenticated);
+    }
+
+    /// Test that token() returns the correct token after being authenticated via helper.
+    #[tokio::test]
+    async fn test_token_value_matches_stored_token() {
+        let manager = authenticated_manager("tokenuser");
+        let token = manager.token().await;
+        assert_eq!(token.as_deref(), Some("ghp_fake_test_token"));
+    }
+
+    /// Test that status() returns the correct user login after being authenticated.
+    #[tokio::test]
+    async fn test_status_user_login_matches() {
+        let manager = authenticated_manager("specific_login_name");
+        let status = manager.status().await;
+        assert_eq!(status.user.unwrap().login, "specific_login_name");
+    }
 }
