@@ -179,7 +179,7 @@ export function RunnerDetail() {
             <div className="flex items-center gap-8">
               <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
               <a
-                href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
+                href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
                 target="_blank"
                 rel="noreferrer"
                 style={{ fontSize: 11, color: "var(--accent-blue)" }}
@@ -193,7 +193,7 @@ export function RunnerDetail() {
         {!current_job && (
           <InfoCard label="Workflows">
             <a
-              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
+              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
               target="_blank"
               rel="noreferrer"
               style={{ color: "var(--accent-blue)" }}
