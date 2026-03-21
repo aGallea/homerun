@@ -129,10 +129,7 @@ impl AuthManager {
         let response = client
             .post(DEVICE_CODE_URL)
             .header("Accept", "application/json")
-            .form(&[
-                ("client_id", GITHUB_CLIENT_ID),
-                ("scope", "repo"),
-            ])
+            .form(&[("client_id", GITHUB_CLIENT_ID), ("scope", "repo")])
             .send()
             .await?;
 
@@ -149,11 +146,7 @@ impl AuthManager {
 
     /// Poll GitHub until the device is authorized or until timeout.
     /// On success, stores the token in the keychain and returns the GitHubUser.
-    pub async fn poll_device_flow(
-        &self,
-        device_code: &str,
-        interval: u64,
-    ) -> Result<GitHubUser> {
+    pub async fn poll_device_flow(&self, device_code: &str, interval: u64) -> Result<GitHubUser> {
         let client = reqwest::Client::new();
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_secs(DEVICE_FLOW_TIMEOUT_SECS);
@@ -172,10 +165,7 @@ impl AuthManager {
                 .form(&[
                     ("client_id", GITHUB_CLIENT_ID),
                     ("device_code", device_code),
-                    (
-                        "grant_type",
-                        "urn:ietf:params:oauth:grant-type:device_code",
-                    ),
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
                 ])
                 .send()
                 .await?;

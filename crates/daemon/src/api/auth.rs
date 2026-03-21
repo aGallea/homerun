@@ -53,7 +53,11 @@ pub async fn poll_device_flow(
     Json(body): Json<PollDeviceRequest>,
 ) -> Result<Json<AuthStatus>, (StatusCode, String)> {
     let interval = body.interval.unwrap_or(5);
-    match state.auth.poll_device_flow(&body.device_code, interval).await {
+    match state
+        .auth
+        .poll_device_flow(&body.device_code, interval)
+        .await
+    {
         Ok(user) => Ok(Json(AuthStatus {
             authenticated: true,
             user: Some(user),
