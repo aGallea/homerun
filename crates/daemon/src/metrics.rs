@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use serde::Serialize;
 use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -79,18 +79,63 @@ impl MetricsCollector {
         }
     }
 
-    pub fn runner_metrics(&self, pid: u32) -> Option<RunnerMetrics> {
+    /// Refresh the process list. Call once before querying individual runners
+    /// to avoid resetting CPU baselines between runners.
+    pub fn refresh_processes(&self) {
         let mut sys = self.system.lock().unwrap();
-        let sysinfo_pid = Pid::from_u32(pid);
         sys.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[sysinfo_pid]),
+            ProcessesToUpdate::All,
             true,
             ProcessRefreshKind::nothing().with_cpu().with_memory(),
         );
-        sys.process(sysinfo_pid).map(|p| RunnerMetrics {
+    }
+
+    /// Collect metrics for a runner by aggregating its process tree.
+    /// Call `refresh_processes()` once before calling this for each runner.
+    pub fn runner_metrics(&self, pid: u32) -> Option<RunnerMetrics> {
+        let sys = self.system.lock().unwrap();
+        let root_pid = Pid::from_u32(pid);
+
+        // Check the root process exists
+        sys.process(root_pid)?;
+
+        // Build a parent→children index in one pass
+        let mut children: std::collections::HashMap<Pid, Vec<Pid>> =
+            std::collections::HashMap::new();
+        for (pid, process) in sys.processes() {
+            if let Some(parent) = process.parent() {
+                children.entry(parent).or_default().push(*pid);
+            }
+        }
+
+        // BFS from root_pid to collect all PIDs in the tree
+        let mut tree_pids = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(root_pid);
+        while let Some(current) = queue.pop_front() {
+            if tree_pids.insert(current) {
+                if let Some(kids) = children.get(&current) {
+                    for &child in kids {
+                        queue.push_back(child);
+                    }
+                }
+            }
+        }
+
+        // Aggregate CPU and memory across the tree
+        let mut total_cpu: f64 = 0.0;
+        let mut total_memory: u64 = 0;
+        for pid in &tree_pids {
+            if let Some(process) = sys.process(*pid) {
+                total_cpu += process.cpu_usage() as f64;
+                total_memory += process.memory();
+            }
+        }
+
+        Some(RunnerMetrics {
             runner_id: String::new(),
-            cpu_percent: p.cpu_usage() as f64,
-            memory_bytes: p.memory(),
+            cpu_percent: total_cpu,
+            memory_bytes: total_memory,
         })
     }
 }
@@ -174,6 +219,39 @@ mod tests {
         let collector = MetricsCollector::default();
         let metrics = collector.system_snapshot();
         assert!(metrics.memory_total_bytes > 0);
+    }
+
+    #[test]
+    fn test_runner_metrics_includes_child_processes() {
+        use std::process::Command;
+
+        // Spawn a shell that itself spawns children — creates a process tree.
+        // Use short sleep durations since we kill the process group after.
+        let mut parent = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 10 & sleep 10 & sleep 10 & wait")
+            .spawn()
+            .expect("failed to spawn parent process");
+
+        let parent_pid = parent.id();
+
+        // Give children time to spawn
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let collector = MetricsCollector::new();
+        collector.refresh_processes();
+        let metrics = collector.runner_metrics(parent_pid);
+
+        // Kill parent and orphaned children via pkill
+        let _ = std::process::Command::new("pkill")
+            .args(["-P", &parent_pid.to_string()])
+            .status();
+        let _ = parent.kill();
+        let _ = parent.wait();
+
+        let metrics = metrics.expect("should find the parent process");
+        // The aggregated memory should be > 0 (includes parent + children)
+        assert!(metrics.memory_bytes > 0, "aggregated memory should be > 0");
     }
 
     #[test]

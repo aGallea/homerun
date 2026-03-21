@@ -68,11 +68,17 @@ export function RunnerTable({
               <td>
                 {runner.current_job ? (
                   <a
-                    href={`https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ color: "var(--accent-yellow)", fontSize: 12 }}
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      import("@tauri-apps/plugin-shell").then(({ open }) => {
+                        open(
+                          `https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`,
+                        );
+                      });
+                    }}
+                    style={{ color: "var(--accent-yellow)", fontSize: 12, cursor: "pointer" }}
                   >
                     {runner.current_job}
                   </a>

@@ -15,6 +15,70 @@ function formatUptime(secs: number): string {
   return `${h}h ${m}m`;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+function cpuBarColor(percent: number): string {
+  if (percent <= 60) return "#22c55e";
+  if (percent <= 80) return "linear-gradient(90deg, #22c55e, #eab308)";
+  return "linear-gradient(90deg, #eab308, #ef4444)";
+}
+
+function ResourceBar({
+  label,
+  percent,
+  value,
+  color,
+}: {
+  label: string;
+  percent: number;
+  value: string;
+  color: string;
+}) {
+  const clampedPercent = Math.max(0, Math.min(100, percent));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <span style={{ fontSize: 12, color: "var(--text-secondary)", width: 32, textAlign: "right" }}>
+        {label}
+      </span>
+      <div
+        style={{
+          flex: 1,
+          height: 16,
+          background: "var(--bg-tertiary)",
+          borderRadius: 3,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${clampedPercent}%`,
+            height: "100%",
+            borderRadius: 3,
+            background: color,
+            transition: "width 0.3s ease",
+          }}
+        />
+      </div>
+      <span
+        style={{
+          fontSize: 13,
+          fontFamily: "monospace",
+          color: "var(--text-primary)",
+          width: 72,
+          textAlign: "right",
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -52,6 +116,7 @@ export function RunnerDetail() {
 
   const runner = runners.find((r) => r.config.id === id);
   const runnerMetrics = metrics?.runners.find((m) => m.runner_id === id);
+  const os_total_memory = metrics?.system.memory_total_bytes ?? 0;
 
   if (loading) {
     return (
@@ -123,10 +188,14 @@ export function RunnerDetail() {
             </div>
             <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
               <a
-                href={`https://github.com/${config.repo_owner}/${config.repo_name}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "var(--accent-blue)" }}
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  import("@tauri-apps/plugin-shell").then(({ open }) => {
+                    open(`https://github.com/${config.repo_owner}/${config.repo_name}`);
+                  });
+                }}
+                style={{ color: "var(--accent-blue)", cursor: "pointer" }}
               >
                 {config.repo_owner}/{config.repo_name}
               </a>
@@ -179,11 +248,17 @@ export function RunnerDetail() {
             <div className="flex items-center gap-8">
               <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
               <a
-                href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                style={{ fontSize: 11, color: "var(--accent-blue)" }}
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  import("@tauri-apps/plugin-shell").then(({ open }) => {
+                    open(
+                      `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`,
+                    );
+                  });
+                }}
+                style={{ fontSize: 11, color: "var(--accent-blue)", cursor: "pointer" }}
               >
                 View →
               </a>
@@ -192,10 +267,14 @@ export function RunnerDetail() {
         ) : (
           <InfoCard label="Actions">
             <a
-              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: "var(--accent-blue)" }}
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                import("@tauri-apps/plugin-shell").then(({ open }) => {
+                  open(`https://github.com/${config.repo_owner}/${config.repo_name}/actions`);
+                });
+              }}
+              style={{ color: "var(--accent-blue)", cursor: "pointer" }}
             >
               View on GitHub →
             </a>
@@ -230,23 +309,19 @@ export function RunnerDetail() {
 
         <InfoCard label="Resources">
           {runnerMetrics ? (
-            <div className="flex items-center gap-16">
-              <span>
-                <span className="font-mono" style={{ fontSize: 13 }}>
-                  {runnerMetrics.cpu_percent.toFixed(1)}%
-                </span>
-                <span className="text-muted" style={{ fontSize: 11, marginLeft: 4 }}>
-                  CPU
-                </span>
-              </span>
-              <span>
-                <span className="font-mono" style={{ fontSize: 13 }}>
-                  {(runnerMetrics.memory_bytes / 1024 / 1024).toFixed(0)} MB
-                </span>
-                <span className="text-muted" style={{ fontSize: 11, marginLeft: 4 }}>
-                  MEM
-                </span>
-              </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <ResourceBar
+                label="CPU"
+                percent={runnerMetrics.cpu_percent}
+                value={`${runnerMetrics.cpu_percent.toFixed(1)}%`}
+                color={cpuBarColor(runnerMetrics.cpu_percent)}
+              />
+              <ResourceBar
+                label="MEM"
+                percent={Math.min((runnerMetrics.memory_bytes / (os_total_memory || 1)) * 100, 100)}
+                value={formatBytes(runnerMetrics.memory_bytes)}
+                color="linear-gradient(90deg, #6366f1, #818cf8)"
+              />
             </div>
           ) : (
             <span className="text-muted">—</span>
