@@ -4,7 +4,6 @@ import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Repositories } from "./pages/Repositories";
 import { RunnerDetail } from "./pages/RunnerDetail";
-import { Monitoring } from "./pages/Monitoring";
 import { Settings } from "./pages/Settings";
 
 function App() {
@@ -17,7 +16,6 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/repositories" element={<Repositories />} />
             <Route path="/runners/:id" element={<RunnerDetail />} />
-            <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>
