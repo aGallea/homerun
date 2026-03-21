@@ -177,7 +177,11 @@ impl AuthManager {
 
             if let Some(token) = poll.access_token {
                 let user = self.validate_token(&token).await?;
-                keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token)?;
+                if let Err(e) = keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token) {
+                    tracing::error!("Failed to store token in keychain: {e}");
+                } else {
+                    tracing::info!("Token stored in macOS Keychain");
+                }
                 let mut state = self.state.write().await;
                 *state = Some(AuthState {
                     token,
