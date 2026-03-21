@@ -20,7 +20,7 @@ ratatui = "0.29"
 crossterm = "0.28"
 clap = { version = "4", features = ["derive"] }
 hyper = { version = "1", features = ["client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio", "client-legacy"] }
+hyper-util = { version = "0.1", features = ["tokio", "client-legacy", "http1"] }
 http-body-util = "0.1"
 tower = "0.5"
 tokio-tungstenite = "0.26"
