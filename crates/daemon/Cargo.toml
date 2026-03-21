@@ -26,7 +26,7 @@ security-framework = "3"
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 reqwest = { version = "0.12", features = ["json"] }
 

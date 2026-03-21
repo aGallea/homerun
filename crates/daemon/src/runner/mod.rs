@@ -4,25 +4,45 @@ pub mod state;
 pub mod types;
 
 use anyhow::{bail, Result};
+use serde::Serialize;
 use state::RunnerState;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use types::{RunnerConfig, RunnerInfo, RunnerMode};
 use crate::config::Config;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LogEntry {
+    pub runner_id: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub line: String,
+    pub stream: String, // "stdout" or "stderr"
+}
 
 #[derive(Clone)]
 pub struct RunnerManager {
     config: Arc<Config>,
     runners: Arc<RwLock<HashMap<String, RunnerInfo>>>,
+    log_tx: Arc<broadcast::Sender<LogEntry>>,
 }
 
 impl RunnerManager {
     pub fn new(config: Config) -> Self {
+        let (log_tx, _) = broadcast::channel(1024);
         Self {
             config: Arc::new(config),
             runners: Arc::new(RwLock::new(HashMap::new())),
+            log_tx: Arc::new(log_tx),
         }
+    }
+
+    pub fn subscribe_logs(&self) -> broadcast::Receiver<LogEntry> {
+        self.log_tx.subscribe()
+    }
+
+    pub fn log_sender(&self) -> &broadcast::Sender<LogEntry> {
+        &self.log_tx
     }
 
     pub async fn create(
@@ -124,6 +144,27 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use state::RunnerState;
+
+    #[tokio::test]
+    async fn test_log_broadcast() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+        let mut rx = manager.subscribe_logs();
+
+        manager.log_sender().send(LogEntry {
+            runner_id: "test".to_string(),
+            timestamp: chrono::Utc::now(),
+            line: "hello".to_string(),
+            stream: "stdout".to_string(),
+        }).unwrap();
+
+        let entry = rx.recv().await.unwrap();
+        assert_eq!(entry.line, "hello");
+        assert_eq!(entry.runner_id, "test");
+        assert_eq!(entry.stream, "stdout");
+    }
 
     #[tokio::test]
     async fn test_create_runner_generates_id_and_name() {

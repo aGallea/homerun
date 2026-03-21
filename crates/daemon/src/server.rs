@@ -48,6 +48,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/runners/{id}/start", post(api::runners::start_runner))
         .route("/runners/{id}/stop", post(api::runners::stop_runner))
         .route("/runners/{id}/restart", post(api::runners::restart_runner))
+        .route("/runners/{id}/logs", get(api::logs::stream_logs))
         .with_state(state)
 }
 
