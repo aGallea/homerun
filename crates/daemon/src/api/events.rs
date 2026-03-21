@@ -23,3 +23,27 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::server::{create_router, AppState};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_events_endpoint_without_upgrade_returns_400() {
+        // Without a WebSocket upgrade header the server should reject with 400
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}

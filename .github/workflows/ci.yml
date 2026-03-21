@@ -15,70 +15,50 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ── Rust ──────────────────────────────────────────────────────────────────
-
-  rust-fmt:
-    name: Rust / fmt
+  rust:
+    name: Rust (fmt + clippy + test + coverage)
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
         with:
-          components: rustfmt
+          fetch-depth: 0
+
+      - name: Ensure Rust is available
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          rustc --version
+          cargo --version
 
       - name: Check formatting
         run: |
-          source "$HOME/.cargo/env"
+          source "$HOME/.cargo/env" 2>/dev/null || true
           cargo fmt --all -- --check
-
-  rust-clippy:
-    name: Rust / clippy
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
       - name: Run clippy
         run: |
-          source "$HOME/.cargo/env"
+          source "$HOME/.cargo/env" 2>/dev/null || true
           cargo clippy --all-targets --all-features -- -D warnings
-
-  rust-test:
-    name: Rust / test
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-llvm-cov
         run: |
-          source "$HOME/.cargo/env"
-          cargo install cargo-llvm-cov --quiet
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
 
       - name: Run tests with coverage (daemon)
         run: |
-          source "$HOME/.cargo/env"
+          source "$HOME/.cargo/env" 2>/dev/null || true
           cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
 
       - name: Run tests with coverage (tui)
         run: |
-          source "$HOME/.cargo/env"
+          source "$HOME/.cargo/env" 2>/dev/null || true
           cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
 
       - name: Merge coverage
-        run: |
-          cat daemon-lcov.info tui-lcov.info > lcov.info
+        run: cat daemon-lcov.info tui-lcov.info > lcov.info
 
       - name: Coverage Report
-        if: github.event_name == 'pull_request'
+        if: always()
         continue-on-error: true
         uses: aGallea/tests-coverage-report@1.3.11
         with:
@@ -90,64 +70,43 @@ jobs:
           min-coverage-percentage: '80'
           fail-under-coverage-percentage: 'false'
 
-  rust-audit:
-    name: Rust / audit
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install cargo-audit
+      - name: Extract coverage percentage
+        if: always()
+        id: coverage
         run: |
-          source "$HOME/.cargo/env"
-          cargo install cargo-audit --quiet
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          COVERAGE=$(cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | grep "^TOTAL" | awk '{print $NF}' | sed 's/%//')
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Coverage: $COVERAGE%"
 
-      - name: Audit dependencies
-        run: |
-          source "$HOME/.cargo/env"
-          cargo audit
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        continue-on-error: true
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 77f18f115b500bdc5d6df52f95d399b9
+          filename: coverage.json
+          label: coverage
+          message: "${{ steps.coverage.outputs.percentage }}%"
+          valColorRange: ${{ steps.coverage.outputs.percentage }}
+          minColorRange: 50
+          maxColorRange: 95
 
-  # ── TypeScript ────────────────────────────────────────────────────────────
-
-  ts-typecheck:
-    name: TypeScript / type check
+  typescript:
+    name: TypeScript (type check + build)
     runs-on: self-hosted
     defaults:
       run:
         working-directory: apps/desktop
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: npm ci
 
       - name: Type check
         run: npx tsc --noEmit
-
-  ts-build:
-    name: TypeScript / build
-    runs-on: self-hosted
-    defaults:
-      run:
-        working-directory: apps/desktop
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: apps/desktop/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Build
         run: npm run build

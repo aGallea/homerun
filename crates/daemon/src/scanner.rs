@@ -144,9 +144,12 @@ async fn process_workflows_dir(
     matching_files.sort();
 
     // Determine the repo full name from the git remote URL
-    let full_name = git_remote_full_name(repo_root)
-        .await
-        .unwrap_or_else(|| repo_root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let full_name = git_remote_full_name(repo_root).await.unwrap_or_else(|| {
+        repo_root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default()
+    });
 
     let entry = found
         .entry(repo_root.to_path_buf())

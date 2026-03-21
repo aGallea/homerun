@@ -59,11 +59,7 @@ impl GitHubClient {
 
     /// Fetch `.github/workflows/` contents for `owner/repo` and return the
     /// relative file paths of workflow files that contain `runs-on: self-hosted`.
-    pub async fn list_self_hosted_workflows(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<Vec<String>> {
+    pub async fn list_self_hosted_workflows(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
         #[derive(Deserialize)]
         struct ContentItem {
             name: String,
@@ -147,9 +143,116 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_github_client_none_error_message() {
+        let err = GitHubClient::new(None).err().unwrap();
+        assert!(err.to_string().contains("Not authenticated") || err.to_string().contains("login"));
+    }
+
     #[tokio::test]
     async fn test_github_client_with_token() {
         let client = GitHubClient::new(Some("ghp_test".to_string()));
         assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_github_client_with_some_token_creates_ok() {
+        // Any non-empty token string should create a client (validation happens on API call)
+        let client = GitHubClient::new(Some("fake-token-value".to_string()));
+        assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_github_client_empty_token_creates_ok() {
+        // An empty token string is still a Some(...), so it should build successfully
+        // — authentication errors only surface when making actual API calls.
+        let result = GitHubClient::new(Some(String::new()));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_github_client_none_error_contains_not_authenticated() {
+        let err = GitHubClient::new(None).err().unwrap();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Not authenticated"),
+            "expected 'Not authenticated' in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_github_client_none_error_contains_login() {
+        let err = GitHubClient::new(None).err().unwrap();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("login"),
+            "expected 'login' in error, got: {msg}"
+        );
+    }
+
+    /// Verify that list_repos returns an error (not a panic) when called
+    /// with an invalid token — exercises the API call error path.
+    #[tokio::test]
+    async fn test_list_repos_with_invalid_token_returns_err() {
+        let client = GitHubClient::new(Some("invalid_token_xyz".to_string())).unwrap();
+        let result = client.list_repos().await;
+        assert!(
+            result.is_err(),
+            "expected API call to fail with invalid token"
+        );
+    }
+
+    /// Verify that get_runner_registration_token returns an error for an invalid token.
+    #[tokio::test]
+    async fn test_get_runner_registration_token_invalid_token_returns_err() {
+        let client = GitHubClient::new(Some("invalid_token_xyz".to_string())).unwrap();
+        let result = client
+            .get_runner_registration_token("fake-owner", "fake-repo")
+            .await;
+        assert!(
+            result.is_err(),
+            "expected API call to fail with invalid token"
+        );
+    }
+
+    /// Verify that list_self_hosted_workflows returns an empty vec (not an error)
+    /// when the workflows directory is inaccessible (error is swallowed by design).
+    #[tokio::test]
+    async fn test_list_self_hosted_workflows_inaccessible_repo_returns_empty() {
+        let client = GitHubClient::new(Some("invalid_token_xyz".to_string())).unwrap();
+        let result = client
+            .list_self_hosted_workflows("fake-owner-xyz-123", "fake-repo-xyz-456")
+            .await;
+        // By design the function swallows errors and returns Ok(Vec::new())
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_runner_registration_type_fields() {
+        use types::RunnerRegistration;
+        let reg = RunnerRegistration {
+            token: "token123".to_string(),
+            expires_at: "2030-01-01T00:00:00Z".to_string(),
+        };
+        assert_eq!(reg.token, "token123");
+        assert_eq!(reg.expires_at, "2030-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn test_repo_info_fields() {
+        use types::RepoInfo;
+        let repo = RepoInfo {
+            id: 42,
+            full_name: "owner/repo".to_string(),
+            name: "repo".to_string(),
+            owner: "owner".to_string(),
+            private: true,
+            html_url: "https://github.com/owner/repo".to_string(),
+            is_org: false,
+        };
+        assert_eq!(repo.id, 42);
+        assert!(repo.private);
+        assert!(!repo.is_org);
     }
 }

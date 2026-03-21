@@ -50,6 +50,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth/token", post(api::auth::login_with_token))
         .route("/auth", delete(api::auth::logout))
         .route("/auth/status", get(api::auth::status))
+        .route("/auth/device", post(api::auth::start_device_flow))
+        .route("/auth/device/poll", post(api::auth::poll_device_flow))
         .route("/repos", get(api::repos::list_repos))
         .route(
             "/runners",
@@ -100,6 +102,12 @@ pub async fn serve(config: Config) -> Result<()> {
     tracing::info!("Listening on Unix socket: {}", socket_path.display());
 
     let state = AppState::new(config);
+
+    // Load persisted runner configs from disk
+    if let Err(e) = state.runner_manager.load_from_disk().await {
+        tracing::warn!("Failed to load runners from disk: {}", e);
+    }
+
     let app = create_router(state);
 
     axum::serve(listener, app).await?;
@@ -130,6 +138,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_health_endpoint_contains_status_ok() {
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert!(json.get("version").is_some());
+    }
+
+    #[tokio::test]
     async fn test_auth_status_unauthenticated() {
         let app = create_router(AppState::new_test());
         let response = app
@@ -147,7 +175,31 @@ mod tests {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["authenticated"], false);
+        assert!(json["authenticated"] == false);
         assert!(json["user"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_unknown_route_returns_404() {
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/nonexistent-route")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_app_state_new_test_creates_valid_state() {
+        let state = AppState::new_test();
+        // Verify the state has sensible defaults
+        assert!(!state.auth.status().await.authenticated);
+        let runners = state.runner_manager.list().await;
+        assert!(runners.is_empty());
     }
 }

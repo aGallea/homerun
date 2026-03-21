@@ -14,3 +14,27 @@ pub async fn list_repos(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(repos))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::server::{create_router, AppState};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_list_repos_unauthenticated_returns_401() {
+        // No token set → GitHubClient::new(None) → UNAUTHORIZED
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/repos")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}

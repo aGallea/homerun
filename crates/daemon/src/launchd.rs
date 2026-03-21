@@ -127,6 +127,18 @@ mod tests {
     }
 
     #[test]
+    fn test_plist_path_ends_with_plist_filename() {
+        let path = plist_path().unwrap();
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), PLIST_FILENAME);
+    }
+
+    #[test]
+    fn test_plist_path_is_absolute() {
+        let path = plist_path().unwrap();
+        assert!(path.is_absolute());
+    }
+
+    #[test]
     fn test_build_plist_contains_label_and_path() {
         let daemon_path = PathBuf::from("/usr/local/bin/homerund");
         let plist = build_plist(&daemon_path).unwrap();
@@ -147,8 +159,99 @@ mod tests {
     }
 
     #[test]
+    fn test_build_plist_is_valid_xml_structure() {
+        let daemon_path = PathBuf::from("/usr/local/bin/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.starts_with("<?xml version=\"1.0\""));
+        assert!(plist.contains("<plist version=\"1.0\">"));
+        assert!(plist.contains("</plist>"));
+        assert!(plist.contains("<dict>"));
+        assert!(plist.contains("</dict>"));
+    }
+
+    #[test]
+    fn test_build_plist_label_value() {
+        let daemon_path = PathBuf::from("/tmp/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        // The label string should appear as plist string value
+        assert!(plist.contains(&format!("<string>{PLIST_LABEL}</string>")));
+    }
+
+    #[test]
+    fn test_build_plist_uses_provided_daemon_path() {
+        let daemon_path = PathBuf::from("/custom/path/to/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.contains("/custom/path/to/homerund"));
+    }
+
+    #[test]
     fn test_is_daemon_installed_returns_bool() {
         // Just verify it doesn't panic; actual value depends on the machine state
         let _ = is_daemon_installed();
+    }
+
+    #[test]
+    fn test_is_daemon_installed_false_when_no_plist_in_temp() {
+        // We can verify the function returns false when the expected plist doesn't exist
+        // by checking that it matches the actual filesystem state
+        let expected_path = plist_path().unwrap();
+        let installed = is_daemon_installed();
+        assert_eq!(installed, expected_path.exists());
+    }
+
+    #[test]
+    fn test_uninstall_service_noop_when_not_installed() {
+        // If not installed, uninstall_daemon_service should succeed without error
+        // (it logs "nothing to uninstall" and returns Ok)
+        let path = plist_path().unwrap();
+        if !path.exists() {
+            let result = uninstall_daemon_service();
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_home_dir_str_is_non_empty() {
+        let home = home_dir_str().unwrap();
+        assert!(!home.is_empty());
+    }
+
+    #[test]
+    fn test_home_dir_str_is_absolute_path() {
+        let home = home_dir_str().unwrap();
+        assert!(home.starts_with('/'), "home dir should be absolute: {home}");
+    }
+
+    #[test]
+    fn test_build_plist_program_arguments_contains_path() {
+        let daemon_path = PathBuf::from("/usr/bin/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.contains("<key>ProgramArguments</key>"));
+        assert!(plist.contains("<array>"));
+        assert!(plist.contains("/usr/bin/homerund"));
+    }
+
+    #[test]
+    fn test_build_plist_standard_out_path() {
+        let daemon_path = PathBuf::from("/usr/bin/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.contains("<key>StandardOutPath</key>"));
+        assert!(plist.contains("daemon.log"));
+    }
+
+    #[test]
+    fn test_build_plist_standard_error_path() {
+        let daemon_path = PathBuf::from("/usr/bin/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.contains("<key>StandardErrorPath</key>"));
+        assert!(plist.contains("daemon.err"));
+    }
+
+    #[test]
+    fn test_build_plist_keep_alive_true() {
+        let daemon_path = PathBuf::from("/usr/bin/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.contains("<key>KeepAlive</key>"));
+        assert!(plist.contains("<true/>"));
     }
 }

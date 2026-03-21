@@ -21,6 +21,10 @@ impl Config {
         Self { base_dir }
     }
 
+    pub fn base_dir(&self) -> &Path {
+        &self.base_dir
+    }
+
     pub fn socket_path(&self) -> PathBuf {
         self.base_dir.join("daemon.sock")
     }
@@ -39,6 +43,10 @@ impl Config {
 
     pub fn config_path(&self) -> PathBuf {
         self.base_dir.join("config.toml")
+    }
+
+    pub fn runners_json_path(&self) -> PathBuf {
+        self.base_dir.join("runners.json")
     }
 
     pub fn load(path: &Path) -> Result<Self> {

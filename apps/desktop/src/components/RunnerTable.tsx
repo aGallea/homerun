@@ -34,7 +34,7 @@ export function RunnerTable({
   }
 
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+    <div className="card" style={{ padding: 0, overflow: "visible" }}>
       <table className="table">
         <thead>
           <tr>

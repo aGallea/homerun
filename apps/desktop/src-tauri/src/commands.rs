@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::client::{
-    AuthStatus, CreateRunnerRequest, MetricsResponse, RepoInfo, RunnerInfo,
+    AuthStatus, CreateRunnerRequest, DeviceFlowResponse, MetricsResponse, RepoInfo, RunnerInfo,
 };
 use crate::AppState;
 
@@ -86,9 +86,45 @@ pub async fn get_metrics(state: State<'_, AppState>) -> Result<MetricsResponse, 
     client.get_metrics().await
 }
 
+#[tauri::command]
+pub async fn start_device_flow(
+    state: State<'_, AppState>,
+) -> Result<DeviceFlowResponse, String> {
+    let client = state.client.lock().await;
+    client.start_device_flow().await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn poll_device_flow(
+    state: State<'_, AppState>,
+    device_code: String,
+    interval: u64,
+) -> Result<AuthStatus, String> {
+    let client = state.client.lock().await;
+    client.poll_device_flow(&device_code, interval).await
+}
+
 /// Check whether the daemon socket file exists (fast, no network call).
 #[tauri::command]
 pub async fn daemon_available(state: State<'_, AppState>) -> Result<bool, String> {
     let client = state.client.lock().await;
     Ok(client.socket_exists())
+}
+
+#[tauri::command]
+pub async fn service_status(state: State<'_, AppState>) -> Result<bool, String> {
+    let client = state.client.lock().await;
+    client.service_status().await
+}
+
+#[tauri::command]
+pub async fn install_service(state: State<'_, AppState>) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.install_service().await
+}
+
+#[tauri::command]
+pub async fn uninstall_service(state: State<'_, AppState>) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.uninstall_service().await
 }

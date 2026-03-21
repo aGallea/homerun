@@ -15,7 +15,7 @@ export function Sidebar() {
   return (
     <nav className="sidebar">
       <div className="sidebar-header">
-        <span className="sidebar-logo">⚡</span>
+        <img src="/icon.png" alt="HomeRun" style={{ width: 48, height: 48, borderRadius: 10 }} />
         <span className="sidebar-title">HomeRun</span>
       </div>
       <div className="sidebar-nav">
