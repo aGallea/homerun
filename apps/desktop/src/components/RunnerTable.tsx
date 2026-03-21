@@ -41,6 +41,7 @@ export function RunnerTable({
             <th>Name</th>
             <th>Repository</th>
             <th>Status</th>
+            <th>Current Job</th>
             <th>Mode</th>
             <th>CPU</th>
             <th style={{ width: 60 }}></th>
@@ -63,6 +64,23 @@ export function RunnerTable({
               </td>
               <td>
                 <StatusBadge state={runner.state} />
+              </td>
+              <td>
+                {runner.current_job ? (
+                  <a
+                    href={`https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ color: "var(--accent-yellow)", fontSize: 12 }}
+                  >
+                    {runner.current_job}
+                  </a>
+                ) : (
+                  <span className="text-muted" style={{ fontSize: 12 }}>
+                    —
+                  </span>
+                )}
               </td>
               <td className="text-muted" style={{ textTransform: "capitalize" }}>
                 {runner.config.mode}
