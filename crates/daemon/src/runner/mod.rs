@@ -199,7 +199,11 @@ impl RunnerManager {
             default_labels.push("X64".to_string());
         }
         if let Some(extra) = labels {
-            default_labels.extend(extra);
+            for label in extra {
+                if !default_labels.contains(&label) {
+                    default_labels.push(label);
+                }
+            }
         }
 
         let runner = RunnerInfo {
