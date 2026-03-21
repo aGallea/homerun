@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::api::{service as api_service, updates as api_updates};
 use anyhow::Result;
 use axum::{
     routing::{delete, get, post},
@@ -11,6 +12,7 @@ use crate::api;
 use crate::auth::AuthManager;
 use crate::config::Config;
 use crate::metrics::MetricsCollector;
+use crate::notifications::NotificationManager;
 use crate::runner::RunnerManager;
 
 #[derive(Clone)]
@@ -19,6 +21,7 @@ pub struct AppState {
     pub auth: AuthManager,
     pub runner_manager: RunnerManager,
     pub metrics: Arc<MetricsCollector>,
+    pub notifications: Arc<NotificationManager>,
 }
 
 impl AppState {
@@ -29,6 +32,7 @@ impl AppState {
             auth: AuthManager::new(),
             runner_manager,
             metrics: Arc::new(MetricsCollector::new()),
+            notifications: Arc::new(NotificationManager::new()),
         }
     }
 
@@ -65,6 +69,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/metrics", get(api::metrics::get_metrics))
         .route("/scan/local", post(api::scanner::scan_local_handler))
         .route("/scan/remote", post(api::scanner::scan_remote_handler))
+        .route("/service/install", post(api_service::install_service))
+        .route("/service/uninstall", post(api_service::uninstall_service))
+        .route("/service/status", get(api_service::service_status))
+        .route("/updates/check", get(api_updates::check_updates))
         .with_state(state)
 }
 
