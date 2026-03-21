@@ -174,6 +174,35 @@ export function RunnerDetail() {
           <span style={{ textTransform: "capitalize" }}>{config.mode}</span>
         </InfoCard>
 
+        {current_job && (
+          <InfoCard label="Current Job">
+            <div className="flex items-center gap-8">
+              <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
+              <a
+                href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 11, color: "var(--accent-blue)" }}
+              >
+                View on GitHub →
+              </a>
+            </div>
+          </InfoCard>
+        )}
+
+        {!current_job && (
+          <InfoCard label="Workflows">
+            <a
+              href={`https://github.com/${config.repo_owner}/${config.repo_name}/actions`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent-blue)" }}
+            >
+              View Actions →
+            </a>
+          </InfoCard>
+        )}
+
         <InfoCard label="Labels">
           <div className="flex" style={{ flexWrap: "wrap", gap: 4 }}>
             {config.labels.map((lbl) => (

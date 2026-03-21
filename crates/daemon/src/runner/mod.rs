@@ -418,8 +418,9 @@ impl RunnerManager {
                         }
                     }
                     // Parse job events from stdout
-                    if let Some(job_name) = line.strip_prefix("Running job: ") {
-                        let job_name = job_name.to_string();
+                    // Lines look like: "2026-03-21 19:49:31Z: Running job: TypeScript (type check + build)"
+                    if let Some(idx) = line.find("Running job: ") {
+                        let job_name = line[idx + "Running job: ".len()..].to_string();
                         let mut map = runners.write().await;
                         if let Some(r) = map.get_mut(&rid) {
                             r.state = RunnerState::Busy;
