@@ -36,6 +36,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth/token", post(api::auth::login_with_token))
         .route("/auth", delete(api::auth::logout))
         .route("/auth/status", get(api::auth::status))
+        .route("/repos", get(api::repos::list_repos))
         .with_state(state)
 }
 
