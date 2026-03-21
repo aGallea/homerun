@@ -130,8 +130,8 @@ export function RunnerDetail() {
     return (
       <div className="page">
         <div className="page-header">
-          <button className="btn" onClick={() => navigate("/runners")}>
-            ← Back to Runners
+          <button className="btn" onClick={() => navigate("/dashboard")}>
+            ← Back to Dashboard
           </button>
         </div>
         <p className="text-muted">Runner not found.</p>
@@ -156,7 +156,7 @@ export function RunnerDetail() {
     setConfirmDelete(false);
     try {
       await deleteRunner(config.id);
-      navigate("/runners");
+      navigate("/dashboard");
     } catch (e) {
       setActionError(String(e));
     }
@@ -169,7 +169,7 @@ export function RunnerDetail() {
         <div className="flex items-center gap-16">
           <button
             className="btn"
-            onClick={() => navigate("/runners")}
+            onClick={() => navigate("/dashboard")}
             style={{ padding: "6px 12px" }}
           >
             ← Back
