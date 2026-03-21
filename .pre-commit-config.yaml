@@ -89,5 +89,5 @@ repos:
         name: tsc --noEmit
         entry: bash -c 'cd apps/desktop && [ -d node_modules ] && npx tsc --noEmit || true'
         language: system
-        files: "apps/desktop/src/.*\\.(ts|tsx)$"
+        always_run: true
         pass_filenames: false
