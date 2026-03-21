@@ -16,11 +16,11 @@ Thank you for your interest in contributing! This document explains how to get t
 
 ### Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Rust | stable (1.75+) | `curl https://sh.rustup.rs -sSf \| sh` |
-| Node.js | 20+ | [nodejs.org](https://nodejs.org) or `brew install node` |
-| Xcode Command Line Tools | latest | `xcode-select --install` |
+| Tool                     | Version        | Install                                                 |
+| ------------------------ | -------------- | ------------------------------------------------------- |
+| Rust                     | stable (1.75+) | `curl https://sh.rustup.rs -sSf \| sh`                  |
+| Node.js                  | 20+            | [nodejs.org](https://nodejs.org) or `brew install node` |
+| Xcode Command Line Tools | latest         | `xcode-select --install`                                |
 
 ### Clone and install
 
@@ -197,6 +197,7 @@ Conventional commits power the auto-generated CHANGELOG and semantic versioning.
 ### Submitting a PR
 
 1. Fork the repository and create a branch from `main`:
+
    ```sh
    git checkout -b feat/my-feature
    ```
@@ -206,6 +207,7 @@ Conventional commits power the auto-generated CHANGELOG and semantic versioning.
 3. Add or update tests as appropriate.
 
 4. Ensure everything passes locally:
+
    ```sh
    cargo fmt --check
    cargo clippy -- -D warnings

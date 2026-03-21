@@ -17,7 +17,7 @@ Keep it brief — 2-4 sentences or a short bullet list.
 - [ ] Refactoring (no behavior change)
 - [ ] Documentation
 - [ ] CI / tooling
-- [ ] Other: ___
+- [ ] Other: \_\_\_
 
 ## Testing
 
@@ -29,7 +29,7 @@ How did you test this? What should reviewers focus on?
 - [ ] `cargo clippy -- -D warnings` passes
 - [ ] `cargo fmt --check` passes
 - [ ] `tsc --noEmit` passes (if frontend changed)
-- [ ] Tested manually: ___
+- [ ] Tested manually: \_\_\_
 
 ## Related issues
 

@@ -7,6 +7,7 @@
 **Architecture:** A new `tui` crate in the workspace. The binary connects to the daemon at `~/.homerun/daemon.sock` via HTTP (using `hyper` + `hyper-util` over Unix socket) and WebSocket. The TUI uses Ratatui with crossterm for rendering, driven by an async event loop that merges terminal input, tick events, and daemon WebSocket messages.
 
 **Deferred to later plans:**
+
 - OAuth flow (`homerun login` browser-based) — Plan 5
 - Workflows tab — Plan 5 (requires `GET /repos/:id/workflows` endpoint)
 - Add-runner interactive wizard — Plan 5
@@ -16,6 +17,7 @@
 **Spec:** `docs/superpowers/specs/2026-03-21-self-runner-design.md` (TUI section)
 
 **Implementation notes:**
+
 - The daemon must be running for the TUI to work. If the socket is missing, show a clear error: "Daemon not running. Start it with: homerund"
 - For HTTP over Unix socket, use `hyper-util` with a custom Unix connector — `reqwest` does not support Unix sockets natively. Alternatively, check if `hyperlocal` crate is compatible with hyper 1.x; if not, write a minimal connector.
 - For WebSocket over Unix socket, `tokio-tungstenite` supports custom connectors via `client_async` on any `AsyncRead + AsyncWrite` stream (i.e., `tokio::net::UnixStream`).
@@ -54,6 +56,7 @@ homerun/
 ### Task 1: TUI Crate Scaffold
 
 **Files:**
+
 - Modify: `Cargo.toml` (workspace root — add `crates/tui` to members)
 - Create: `crates/tui/Cargo.toml`
 - Create: `crates/tui/src/main.rs`
@@ -172,21 +175,25 @@ pub mod cli;
 Create the following files with minimal content so `cargo check` passes:
 
 `crates/tui/src/client.rs`:
+
 ```rust
 // DaemonClient — HTTP + WebSocket over Unix socket
 ```
 
 `crates/tui/src/app.rs`:
+
 ```rust
 // App state and update logic
 ```
 
 `crates/tui/src/event.rs`:
+
 ```rust
 // Event loop: crossterm + tick + WebSocket
 ```
 
 `crates/tui/src/ui/mod.rs`:
+
 ```rust
 pub mod tabs;
 pub mod runners;
@@ -198,6 +205,7 @@ pub mod status_bar;
 Create empty files for each UI submodule (`tabs.rs`, `runners.rs`, `repos.rs`, `monitoring.rs`, `status_bar.rs`) as blank files.
 
 `crates/tui/src/cli.rs`:
+
 ```rust
 // Plain CLI mode (--no-tui)
 ```
@@ -219,6 +227,7 @@ git commit -m "chore: scaffold TUI crate with clap CLI skeleton"
 ### Task 2: DaemonClient (HTTP over Unix Socket)
 
 **Files:**
+
 - Create: `crates/tui/src/client.rs`
 - Test: inline `#[cfg(test)]` module (tests use the daemon's router directly via `tower::ServiceExt` to avoid needing a real socket)
 
@@ -559,6 +568,7 @@ git commit -m "feat(tui): add DaemonClient with Unix socket HTTP transport"
 ### Task 3: App Struct + Event Loop Skeleton
 
 **Files:**
+
 - Create: `crates/tui/src/app.rs`
 - Create: `crates/tui/src/event.rs`
 
@@ -777,6 +787,7 @@ git commit -m "feat(tui): add App state struct and event loop skeleton"
 ### Task 4: Runners Tab (List + Detail Split Pane)
 
 **Files:**
+
 - Create: `crates/tui/src/ui/mod.rs`
 - Create: `crates/tui/src/ui/tabs.rs`
 - Create: `crates/tui/src/ui/runners.rs`
@@ -1144,6 +1155,7 @@ git commit -m "feat(tui): add Runners tab with split pane list+detail UI"
 ### Task 5: Keyboard Handling (Navigation + Actions)
 
 **Files:**
+
 - Modify: `crates/tui/src/main.rs`
 - Create keyboard handler logic (integrated into main loop)
 
@@ -1344,6 +1356,7 @@ git commit -m "feat(tui): add keyboard handling with actions for runner manageme
 ### Task 6: Main Loop + Real-Time Updates (WebSocket)
 
 **Files:**
+
 - Modify: `crates/tui/src/main.rs`
 - Modify: `crates/tui/src/event.rs`
 - Modify: `crates/tui/src/client.rs`
@@ -1592,6 +1605,7 @@ git commit -m "feat(tui): wire up main TUI loop with polling and WebSocket skele
 ### Task 7: Repos Tab
 
 **Files:**
+
 - Create: `crates/tui/src/ui/repos.rs`
 - Modify: `crates/tui/src/main.rs` (fetch repos on tab switch)
 
@@ -1743,6 +1757,7 @@ git commit -m "feat(tui): add Repos tab with list and detail pane"
 ### Task 8: Monitoring Tab (System Metrics Display)
 
 **Files:**
+
 - Create: `crates/tui/src/ui/monitoring.rs`
 
 - [ ] **Step 1: Implement monitoring tab**
@@ -1913,6 +1928,7 @@ git commit -m "feat(tui): add Monitoring tab with CPU/memory/disk gauges"
 ### Task 9: Plain CLI Mode (--no-tui)
 
 **Files:**
+
 - Create: `crates/tui/src/cli.rs`
 
 - [ ] **Step 1: Write failing test for CLI output formatting**
@@ -2056,6 +2072,7 @@ git commit -m "feat(tui): add plain CLI mode with list and status commands"
 ### Task 10: Integration Test + Cleanup
 
 **Files:**
+
 - Create: `crates/tui/tests/integration.rs`
 - Cleanup: ensure `cargo clippy` and `cargo test` pass across workspace
 

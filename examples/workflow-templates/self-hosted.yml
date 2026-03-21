@@ -19,7 +19,7 @@ jobs:
   # ── Basic: single job on a self-hosted runner ─────────────────────────────
   build:
     name: Build & Test
-    runs-on: [self-hosted, macOS]   # targets any HomeRun runner with these labels
+    runs-on: [self-hosted, macOS] # targets any HomeRun runner with these labels
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,14 +59,14 @@ jobs:
   # ── Label-specific: route jobs to runners with custom labels ──────────────
   unit-tests:
     name: Unit Tests
-    runs-on: [self-hosted, macOS, unit]   # matches runners labelled 'unit'
+    runs-on: [self-hosted, macOS, unit] # matches runners labelled 'unit'
     steps:
       - uses: actions/checkout@v4
       - run: cargo test --lib
 
   integration-tests:
     name: Integration Tests
-    runs-on: [self-hosted, macOS, e2e]    # matches runners labelled 'e2e'
+    runs-on: [self-hosted, macOS, e2e] # matches runners labelled 'e2e'
     steps:
       - uses: actions/checkout@v4
       - run: cargo test --test '*'
@@ -84,8 +84,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Install dependencies

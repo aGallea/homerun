@@ -18,14 +18,7 @@ function formatUptime(secs: number): string {
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const {
-    runners,
-    loading,
-    startRunner,
-    stopRunner,
-    restartRunner,
-    deleteRunner,
-  } = useRunners();
+  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } = useRunners();
   const { metrics } = useMetrics();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -146,23 +139,14 @@ export function RunnerDetail() {
             </button>
           )}
           {isRunning && (
-            <button
-              className="btn"
-              onClick={() => doAction(() => stopRunner(config.id))}
-            >
+            <button className="btn" onClick={() => doAction(() => stopRunner(config.id))}>
               ■ Stop
             </button>
           )}
-          <button
-            className="btn"
-            onClick={() => doAction(() => restartRunner(config.id))}
-          >
+          <button className="btn" onClick={() => doAction(() => restartRunner(config.id))}>
             ↺ Restart
           </button>
-          <button
-            className="btn btn-danger"
-            onClick={() => setConfirmDelete(true)}
-          >
+          <button className="btn btn-danger" onClick={() => setConfirmDelete(true)}>
             Delete
           </button>
         </div>
@@ -217,23 +201,16 @@ export function RunnerDetail() {
           </div>
         </InfoCard>
 
-        <InfoCard label="Uptime">
-          {uptime_secs != null ? formatUptime(uptime_secs) : "--"}
-        </InfoCard>
+        <InfoCard label="Uptime">{uptime_secs != null ? formatUptime(uptime_secs) : "--"}</InfoCard>
 
         <InfoCard label="Jobs Completed">
-          <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>
-            {jobs_completed}
-          </span>
+          <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>{jobs_completed}</span>
         </InfoCard>
 
         <InfoCard label="Jobs Failed">
           <span
             style={{
-              color:
-                jobs_failed > 0
-                  ? "var(--accent-red)"
-                  : "var(--text-secondary)",
+              color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
               fontWeight: 600,
             }}
           >
@@ -287,7 +264,15 @@ export function RunnerDetail() {
           }}
         >
           {logs.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 140, color: "var(--text-secondary)" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 140,
+                color: "var(--text-secondary)",
+              }}
+            >
               {runner.state === "online" || runner.state === "busy"
                 ? "Waiting for log output..."
                 : "Runner is not active."}
@@ -298,7 +283,11 @@ export function RunnerDetail() {
                 <span style={{ color: "var(--text-secondary)", opacity: 0.5, flexShrink: 0 }}>
                   {new Date(entry.timestamp).toLocaleTimeString()}
                 </span>
-                <span style={{ color: entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)" }}>
+                <span
+                  style={{
+                    color: entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)",
+                  }}
+                >
                   {entry.line}
                 </span>
               </div>
@@ -308,10 +297,7 @@ export function RunnerDetail() {
       </div>
 
       {/* Danger zone */}
-      <div
-        className="card"
-        style={{ borderColor: "var(--accent-red)", marginBottom: 24 }}
-      >
+      <div className="card" style={{ borderColor: "var(--accent-red)", marginBottom: 24 }}>
         <h2
           style={{
             fontSize: 14,
@@ -324,17 +310,11 @@ export function RunnerDetail() {
         >
           Danger Zone
         </h2>
-        <div
-          className="flex items-center justify-between"
-          style={{ padding: "12px 0" }}
-        >
+        <div className="flex items-center justify-between" style={{ padding: "12px 0" }}>
           <div>
-            <div style={{ fontWeight: 500, marginBottom: 4 }}>
-              Delete this runner
-            </div>
+            <div style={{ fontWeight: 500, marginBottom: 4 }}>Delete this runner</div>
             <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-              The runner will be stopped, de-registered from GitHub, and
-              permanently removed.
+              The runner will be stopped, de-registered from GitHub, and permanently removed.
             </p>
           </div>
           <button
@@ -363,13 +343,7 @@ export function RunnerDetail() {
 
 // Helper components
 
-function InfoCard({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function InfoCard({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div
@@ -383,9 +357,7 @@ function InfoCard({
       >
         {label}
       </div>
-      <div style={{ fontSize: 14, color: "var(--text-primary)" }}>
-        {children}
-      </div>
+      <div style={{ fontSize: 14, color: "var(--text-primary)" }}>{children}</div>
     </div>
   );
 }

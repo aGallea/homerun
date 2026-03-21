@@ -81,17 +81,20 @@ The daemon exposes a REST-style API over Unix socket at `~/.homerun/daemon.sock`
 ### Endpoints
 
 **Auth:**
+
 - `POST /auth/github` — OAuth callback
 - `POST /auth/token` — PAT login
 - `DELETE /auth` — Logout
 - `GET /auth/status` — Current user info
 
 **Repos:**
+
 - `GET /repos` — List user's GitHub repos
 - `GET /repos/:id/workflows` — Workflow run history
 - `GET /repos/:id/runners` — Registered runners for repo
 
 **Runners:**
+
 - `POST /runners` — Create and start a runner
 - `DELETE /runners/:id` — Stop, deregister, and delete a runner
 - `PATCH /runners/:id` — Update labels or mode
@@ -100,6 +103,7 @@ The daemon exposes a REST-style API over Unix socket at `~/.homerun/daemon.sock`
 - `POST /runners/:id/restart` — Restart a runner
 
 **Monitoring:**
+
 - `GET /runners/:id/logs` — Stream logs (SSE)
 - `GET /metrics` — Current CPU/RAM/disk per runner
 - `GET /metrics/history?runner=:id&period=1h` — Historical metrics (in-memory ring buffer, last 24h)
@@ -311,6 +315,7 @@ The Tauri app bundles `homerund` inside the `.app` package and installs it to `~
 HomeRun is an open-source project and the repository should reflect best practices:
 
 ### Documentation
+
 - **README.md** — project overview, screenshots/GIFs, quick start, installation (DMG + Homebrew), usage examples, architecture overview, contributing guide link
 - **CONTRIBUTING.md** — how to set up the dev environment, coding standards, PR process
 - **LICENSE** — MIT
@@ -318,21 +323,25 @@ HomeRun is an open-source project and the repository should reflect best practic
 - **docs/** — detailed documentation: architecture deep-dive, API reference, configuration reference
 
 ### Testing
+
 - **Rust (daemon/TUI):** `cargo test` with unit tests and integration tests. Use `mockall` for mocking GitHub API. Test coverage target: 80%+.
 - **React (Tauri frontend):** Vitest + React Testing Library for component tests. Playwright for E2E tests of the Tauri app.
 - **Coverage reports:** Generated in CI, posted as PR comments.
 
 ### CI/CD (GitHub Actions)
+
 - **CI on PR:** Lint (clippy + eslint), format check (rustfmt + prettier), type check, unit tests, integration tests, coverage report
 - **Release:** Automated via GitHub Releases. Tauri builds the `.dmg`, Homebrew formula updates automatically.
 - **Conventional commits:** Enforced via commitlint. Powers auto-changelog and semantic versioning.
 
 ### Code Quality
+
 - **Rust:** `clippy` (strict), `rustfmt`, `cargo audit` for dependency vulnerabilities
 - **TypeScript:** ESLint, Prettier, `tsc --noEmit`
 - **Pre-commit hooks:** Format, lint, type check (via `husky` + `lint-staged` for TS, `cargo fmt` + `cargo clippy` for Rust)
 
 ### Examples
+
 - **examples/** directory with:
   - Basic setup walkthrough
   - Multi-runner configuration
@@ -340,22 +349,23 @@ HomeRun is an open-source project and the repository should reflect best practic
   - Scripting with the CLI/TUI
 
 ### Project Management
+
 - **GitHub Issues** with templates (bug report, feature request)
 - **GitHub Discussions** enabled for Q&A
 - **Labels** for triage (bug, enhancement, good first issue, help wanted)
 
 ## Tech Stack Summary
 
-| Component | Technology |
-|-----------|-----------|
-| Daemon HTTP server | Rust + Axum (async web framework) |
-| Daemon | Rust |
-| Tauri App | Tauri 2.0 + React + TypeScript |
-| TUI | Rust + Ratatui |
-| Process management | Rust `tokio::process` + `sysinfo` crate |
+| Component          | Technology                                                             |
+| ------------------ | ---------------------------------------------------------------------- |
+| Daemon HTTP server | Rust + Axum (async web framework)                                      |
+| Daemon             | Rust                                                                   |
+| Tauri App          | Tauri 2.0 + React + TypeScript                                         |
+| TUI                | Rust + Ratatui                                                         |
+| Process management | Rust `tokio::process` + `sysinfo` crate                                |
 | Auth token storage | macOS Keychain (via Tauri secure storage / `security-framework` crate) |
-| GitHub API | `octocrab` crate (Rust GitHub API client) |
-| Log streaming | Server-Sent Events (SSE) |
-| Real-time updates | WebSocket |
-| Auto-start | macOS launchd |
-| Notifications | macOS native (`objc2` / `notify-rust` crate) |
+| GitHub API         | `octocrab` crate (Rust GitHub API client)                              |
+| Log streaming      | Server-Sent Events (SSE)                                               |
+| Real-time updates  | WebSocket                                                              |
+| Auto-start         | macOS launchd                                                          |
+| Notifications      | macOS native (`objc2` / `notify-rust` crate)                           |

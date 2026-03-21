@@ -71,8 +71,8 @@ jobs:
           diffcover-ref: lcov
           show-junit: false
           show-diffcover: true
-          min-coverage-percentage: '80'
-          fail-under-coverage-percentage: 'false'
+          min-coverage-percentage: "80"
+          fail-under-coverage-percentage: "false"
 
       - name: Extract coverage percentage
         if: always()

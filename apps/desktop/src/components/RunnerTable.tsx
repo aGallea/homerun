@@ -64,10 +64,7 @@ export function RunnerTable({
               <td>
                 <StatusBadge state={runner.state} />
               </td>
-              <td
-                className="text-muted"
-                style={{ textTransform: "capitalize" }}
-              >
+              <td className="text-muted" style={{ textTransform: "capitalize" }}>
                 {runner.config.mode}
               </td>
               <td className="font-mono text-muted">

@@ -17,11 +17,7 @@ function generateName(repoName: string): string {
   return `${slug}-runner-${rand}`;
 }
 
-export function NewRunnerWizard({
-  onClose,
-  onCreate,
-  preselectedRepo,
-}: NewRunnerWizardProps) {
+export function NewRunnerWizard({ onClose, onCreate, preselectedRepo }: NewRunnerWizardProps) {
   const { repos, loading: reposLoading } = useRepos();
   const [step, setStep] = useState<0 | 1 | 2>(preselectedRepo ? 1 : 0);
   const [search, setSearch] = useState("");
@@ -103,16 +99,10 @@ export function NewRunnerWizard({
             <div
               key={i}
               className={`wizard-step ${
-                i === step
-                  ? "wizard-step-active"
-                  : i < step
-                    ? "wizard-step-done"
-                    : ""
+                i === step ? "wizard-step-active" : i < step ? "wizard-step-done" : ""
               }`}
             >
-              <span className="wizard-step-num">
-                {i < step ? "✓" : i + 1}
-              </span>
+              <span className="wizard-step-num">{i < step ? "✓" : i + 1}</span>
               <span className="wizard-step-label">{label}</span>
             </div>
           ))}
@@ -161,16 +151,10 @@ export function NewRunnerWizard({
               >
                 ✓
               </div>
-              <h3 style={{ margin: "0 0 8px", color: "var(--text-primary)" }}>
-                Runner launched!
-              </h3>
+              <h3 style={{ margin: "0 0 8px", color: "var(--text-primary)" }}>Runner launched!</h3>
               <p className="text-muted">
-                <strong className="text-primary">{name}</strong> is being
-                created for{" "}
-                <strong className="text-primary">
-                  {selectedRepo?.full_name}
-                </strong>
-                .
+                <strong className="text-primary">{name}</strong> is being created for{" "}
+                <strong className="text-primary">{selectedRepo?.full_name}</strong>.
               </p>
             </div>
           )}
@@ -198,20 +182,12 @@ export function NewRunnerWizard({
               </button>
             )}
             {step === 1 && (
-              <button
-                className="btn btn-primary"
-                disabled={!name.trim()}
-                onClick={handleNext}
-              >
+              <button className="btn btn-primary" disabled={!name.trim()} onClick={handleNext}>
                 Next
               </button>
             )}
             {step === 2 && (
-              <button
-                className="btn btn-primary"
-                disabled={launching}
-                onClick={handleLaunch}
-              >
+              <button className="btn btn-primary" disabled={launching} onClick={handleLaunch}>
                 {launching ? "Launching..." : "Launch Runner"}
               </button>
             )}
@@ -280,12 +256,8 @@ function StepSelectRepo({
                   fontSize: 11,
                   padding: "2px 6px",
                   borderRadius: 10,
-                  background: repo.private
-                    ? "rgba(210, 153, 34, 0.2)"
-                    : "rgba(63, 185, 80, 0.2)",
-                  color: repo.private
-                    ? "var(--accent-yellow)"
-                    : "var(--accent-green)",
+                  background: repo.private ? "rgba(210, 153, 34, 0.2)" : "rgba(63, 185, 80, 0.2)",
+                  color: repo.private ? "var(--accent-yellow)" : "var(--accent-green)",
                 }}
               >
                 {repo.private ? "Private" : "Public"}
@@ -347,9 +319,7 @@ function StepConfigure({
           style={{ width: "100%" }}
           placeholder="e.g. my-repo-runner-1234"
         />
-        <p className="form-hint">
-          Unique name for this runner instance (auto-generated).
-        </p>
+        <p className="form-hint">Unique name for this runner instance (auto-generated).</p>
       </div>
 
       <div className="form-group">
@@ -384,9 +354,7 @@ function StepConfigure({
             onClick={() => onMode("service")}
           >
             <div className="mode-option-title">Service</div>
-            <div className="mode-option-desc">
-              Runs as a launchd service. Survives reboots.
-            </div>
+            <div className="mode-option-desc">Runs as a launchd service. Survives reboots.</div>
           </button>
         </div>
       </div>
@@ -426,10 +394,7 @@ function StepLaunch({ repo, name, labels, mode, error }: StepLaunchProps) {
         </div>
         <div className="launch-summary-row">
           <span className="launch-summary-key">Mode</span>
-          <span
-            className="launch-summary-value"
-            style={{ textTransform: "capitalize" }}
-          >
+          <span className="launch-summary-value" style={{ textTransform: "capitalize" }}>
             {mode}
           </span>
         </div>

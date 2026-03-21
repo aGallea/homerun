@@ -16,6 +16,7 @@ Initial release of HomeRun.
 ### Added
 
 #### Daemon (`homerund`)
+
 - Rust + Axum daemon exposing REST/SSE/WebSocket API over Unix socket at `~/.homerun/daemon.sock`
 - GitHub OAuth flow with temporary localhost callback listener
 - Personal Access Token (PAT) authentication as fallback
@@ -35,6 +36,7 @@ Initial release of HomeRun.
 - Structured logging to `~/.homerun/logs/`
 
 #### TUI / CLI (`homerun`)
+
 - Ratatui-based terminal UI with split-pane layout (runner list + detail)
 - Tab bar: Runners, Repos, Workflows, Monitoring
 - Full keyboard navigation: `↑↓`, `Enter`, `a`, `d`, `s`, `r`, `l`, `e`, `1-4`, `q`, `?`
@@ -46,6 +48,7 @@ Initial release of HomeRun.
 - Clap-based argument parsing
 
 #### Desktop App (Tauri)
+
 - Tauri 2.0 desktop app for macOS (ARM64 + Intel)
 - React + TypeScript frontend
 - Dashboard with runner stats cards and runners table
@@ -60,6 +63,7 @@ Initial release of HomeRun.
 - React Router v7 for navigation
 
 #### Infrastructure
+
 - Rust workspace with `resolver = "2"`
 - Shared workspace dependencies and version management
 - MIT license

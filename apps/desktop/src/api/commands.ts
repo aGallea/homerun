@@ -11,8 +11,7 @@ import type {
 export const api = {
   // Auth
   getAuthStatus: () => invoke<AuthStatus>("auth_status"),
-  loginWithToken: (token: string) =>
-    invoke<AuthStatus>("login_with_token", { token }),
+  loginWithToken: (token: string) => invoke<AuthStatus>("login_with_token", { token }),
   logout: () => invoke<void>("logout"),
   startDeviceFlow: () => invoke<DeviceFlowResponse>("start_device_flow"),
   pollDeviceFlow: (deviceCode: string, interval: number) =>
@@ -23,8 +22,7 @@ export const api = {
 
   // Runners
   listRunners: () => invoke<RunnerInfo[]>("list_runners"),
-  createRunner: (req: CreateRunnerRequest) =>
-    invoke<RunnerInfo>("create_runner", { req }),
+  createRunner: (req: CreateRunnerRequest) => invoke<RunnerInfo>("create_runner", { req }),
   deleteRunner: (id: string) => invoke<void>("delete_runner", { id }),
   startRunner: (id: string) => invoke<void>("start_runner", { id }),
   stopRunner: (id: string) => invoke<void>("stop_runner", { id }),
