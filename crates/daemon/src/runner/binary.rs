@@ -159,10 +159,7 @@ mod tests {
     #[test]
     fn test_detect_platform_arch_is_valid() {
         let (_os, arch) = detect_platform();
-        assert!(
-            arch == "arm64" || arch == "x64",
-            "unexpected arch: {arch}"
-        );
+        assert!(arch == "arm64" || arch == "x64", "unexpected arch: {arch}");
     }
 
     /// Test the cache-hit early-return path: if `runner-{version}/run.sh`

@@ -57,7 +57,7 @@ mod tests {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(json["authenticated"], false);
+        assert!(json["authenticated"] == false);
         assert!(json["user"].is_null());
     }
 

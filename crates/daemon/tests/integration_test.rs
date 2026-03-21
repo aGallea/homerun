@@ -136,5 +136,5 @@ async fn test_auth_status_unauthenticated() {
         .await
         .unwrap();
     let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(status["authenticated"], false);
+    assert!(status["authenticated"] == false);
 }

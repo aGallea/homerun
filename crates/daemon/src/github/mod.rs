@@ -196,7 +196,10 @@ mod tests {
     async fn test_list_repos_with_invalid_token_returns_err() {
         let client = GitHubClient::new(Some("invalid_token_xyz".to_string())).unwrap();
         let result = client.list_repos().await;
-        assert!(result.is_err(), "expected API call to fail with invalid token");
+        assert!(
+            result.is_err(),
+            "expected API call to fail with invalid token"
+        );
     }
 
     /// Verify that get_runner_registration_token returns an error for an invalid token.

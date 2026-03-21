@@ -174,7 +174,7 @@ mod tests {
     async fn test_status_returns_correct_structure_when_unauthenticated() {
         let manager = AuthManager::new();
         let status = manager.status().await;
-        assert_eq!(status.authenticated, false);
+        assert!(!status.authenticated);
         assert!(status.user.is_none());
     }
 
@@ -235,11 +235,15 @@ mod tests {
     #[tokio::test]
     async fn test_login_with_invalid_pat_leaves_state_unauthenticated() {
         let manager = AuthManager::new();
-        let _ = manager.login_with_pat("definitely_invalid_token_abc123").await;
+        let _ = manager
+            .login_with_pat("definitely_invalid_token_abc123")
+            .await;
         // Whether it errors or not, the state should not be authenticated
         // (we can't guarantee the keychain state, but internal state is clear)
         // The important check: the result is an error
-        let result = manager.login_with_pat("definitely_invalid_token_abc123").await;
+        let result = manager
+            .login_with_pat("definitely_invalid_token_abc123")
+            .await;
         assert!(result.is_err());
     }
 

@@ -57,8 +57,14 @@ mod tests {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json.get("system").is_some(), "response should have 'system' key");
-        assert!(json.get("runners").is_some(), "response should have 'runners' key");
+        assert!(
+            json.get("system").is_some(),
+            "response should have 'system' key"
+        );
+        assert!(
+            json.get("runners").is_some(),
+            "response should have 'runners' key"
+        );
         assert!(json["runners"].is_array());
     }
 
