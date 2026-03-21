@@ -43,6 +43,11 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth", delete(api::auth::logout))
         .route("/auth/status", get(api::auth::status))
         .route("/repos", get(api::repos::list_repos))
+        .route("/runners", get(api::runners::list_runners).post(api::runners::create_runner))
+        .route("/runners/{id}", get(api::runners::get_runner).patch(api::runners::update_runner).delete(api::runners::delete_runner))
+        .route("/runners/{id}/start", post(api::runners::start_runner))
+        .route("/runners/{id}/stop", post(api::runners::stop_runner))
+        .route("/runners/{id}/restart", post(api::runners::restart_runner))
         .with_state(state)
 }
 

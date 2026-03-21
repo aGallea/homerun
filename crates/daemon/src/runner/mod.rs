@@ -95,6 +95,18 @@ impl RunnerManager {
         Ok(())
     }
 
+    pub async fn update(&self, id: &str, req: types::UpdateRunnerRequest) -> Result<RunnerInfo> {
+        let mut runners = self.runners.write().await;
+        let runner = runners.get_mut(id).ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        if let Some(labels) = req.labels {
+            runner.config.labels = labels;
+        }
+        if let Some(mode) = req.mode {
+            runner.config.mode = mode;
+        }
+        Ok(runner.clone())
+    }
+
     pub async fn update_state(&self, id: &str, state: RunnerState) -> Result<()> {
         let mut runners = self.runners.write().await;
         let runner = runners.get_mut(id).ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
