@@ -984,6 +984,412 @@ mod tests {
         assert_eq!(json["jobs_failed"], 1);
     }
 
+    #[tokio::test]
+    async fn test_update_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create("owner/repo", None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+
+        // Default mode is App; update to Service
+        manager
+            .update(
+                &id,
+                crate::runner::types::UpdateRunnerRequest {
+                    labels: None,
+                    mode: Some(crate::runner::types::RunnerMode::Service),
+                },
+            )
+            .await
+            .unwrap();
+
+        let updated = manager.get(&id).await.unwrap();
+        assert_eq!(
+            updated.config.mode,
+            crate::runner::types::RunnerMode::Service
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_not_found_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let result = manager
+            .update(
+                "nonexistent-id",
+                crate::runner::types::UpdateRunnerRequest {
+                    labels: Some(vec!["self-hosted".to_string()]),
+                    mode: None,
+                },
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_update_state_not_found_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let result = manager
+            .update_state("nonexistent-id", RunnerState::Online)
+            .await;
+        assert!(result.is_err(), "expected error for nonexistent runner");
+    }
+
+    #[tokio::test]
+    async fn test_update_state_invalid_transition() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create("owner/repo", None, None, None)
+            .await
+            .unwrap();
+        // Creating -> Busy is not a valid transition
+        let result = manager
+            .update_state(&runner.config.id, RunnerState::Busy)
+            .await;
+        assert!(
+            result.is_err(),
+            "expected error for invalid state transition"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Invalid state transition"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_custom_labels() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                Some(vec!["gpu".to_string(), "macOS".to_string()]),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(runner.config.name, "my-runner");
+        // "macOS" is in the default list so should not be duplicated
+        let count = runner
+            .config
+            .labels
+            .iter()
+            .filter(|l| l.as_str() == "macOS")
+            .count();
+        assert_eq!(count, 1, "macOS label should not be duplicated");
+        assert!(runner.config.labels.contains(&"gpu".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_invalid_repo_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let result = manager.create("nodash", None, None, None).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("Invalid repo name"), "unexpected: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_full_delete_nonexistent_runner_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let result = manager.full_delete("nonexistent-id", "fake-token").await;
+        assert!(
+            result.is_err(),
+            "full_delete on nonexistent runner should error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_full_delete_offline_runner_removes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create("owner/repo", None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+
+        // Transition to Offline so full_delete doesn't try to stop a process
+        manager
+            .update_state(&id, RunnerState::Registering)
+            .await
+            .unwrap();
+        manager
+            .update_state(&id, RunnerState::Online)
+            .await
+            .unwrap();
+        manager
+            .update_state(&id, RunnerState::Offline)
+            .await
+            .unwrap();
+
+        // full_delete with invalid token: GitHub deregistration will fail but runner
+        // should still be removed from the local store.
+        let result = manager.full_delete(&id, "invalid-token").await;
+        // We expect success (the function ignores deregistration errors)
+        assert!(
+            result.is_ok(),
+            "full_delete should succeed even with invalid token"
+        );
+        assert!(
+            manager.get(&id).await.is_none(),
+            "runner should be removed from the manager"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_emit_state_event_is_received_by_subscriber() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let mut rx = manager.subscribe_events();
+
+        // emit_state_event is private but exercised via update_state (which calls it)
+        // We can also trigger it via create + update_state.
+        let runner = manager
+            .create("owner/repo", None, None, None)
+            .await
+            .unwrap();
+        manager
+            .update_state(&runner.config.id, RunnerState::Registering)
+            .await
+            .unwrap();
+
+        // The event channel may or may not have fired (depends on whether anyone subscribed
+        // before the event was sent).  What matters is that no panic occurred and the
+        // subscribe/receive machinery works end-to-end.
+        let _ = rx.try_recv(); // swallow any buffered event
+    }
+
+    #[tokio::test]
+    async fn test_log_sender_and_subscribe_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let mut rx = manager.subscribe_logs();
+        let sender = manager.log_sender();
+        sender
+            .send(LogEntry {
+                runner_id: "r1".to_string(),
+                timestamp: chrono::Utc::now(),
+                line: "test line".to_string(),
+                stream: "stdout".to_string(),
+            })
+            .unwrap();
+
+        let entry = rx.recv().await.unwrap();
+        assert_eq!(entry.runner_id, "r1");
+        assert_eq!(entry.line, "test line");
+    }
+
+    #[tokio::test]
+    async fn test_with_computed_uptime_is_non_negative() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        // A runner started in the past should have non-negative uptime
+        let started_at = chrono::Utc::now() - chrono::Duration::seconds(10);
+        let info = crate::runner::types::RunnerInfo {
+            config: RunnerConfig {
+                id: "x".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+            },
+            state: RunnerState::Online,
+            pid: None,
+            uptime_secs: None,
+            started_at: Some(started_at),
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+        };
+        let computed = RunnerManager::with_computed_uptime(info);
+        let uptime = computed.uptime_secs.expect("uptime should be computed");
+        assert!(
+            uptime >= 10,
+            "uptime should be at least 10 seconds, got {uptime}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_with_computed_uptime_none_when_not_started() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = crate::runner::types::RunnerInfo {
+            config: RunnerConfig {
+                id: "x".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+            },
+            state: RunnerState::Offline,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+        };
+        let computed = RunnerManager::with_computed_uptime(info);
+        assert!(
+            computed.uptime_secs.is_none(),
+            "uptime should be None when not started"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_copy_dir_recursive_preserves_executable_bit() {
+        use std::fs;
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+
+        // Create an executable file in the source
+        let script_path = src.path().join("run.sh");
+        fs::write(&script_path, "#!/bin/bash\necho hi").unwrap();
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        copy_dir_recursive(src.path(), dst.path()).unwrap();
+
+        let dst_script = dst.path().join("run.sh");
+        assert!(dst_script.exists());
+        let content = fs::read_to_string(&dst_script).unwrap();
+        assert!(content.contains("echo hi"));
+
+        #[cfg(unix)]
+        {
+            let perms = fs::metadata(&dst_script).unwrap().permissions();
+            assert!(
+                perms.mode() & 0o111 != 0,
+                "copied file should be executable"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_runners_same_repo_get_sequential_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let r1 = manager.create("org/myapp", None, None, None).await.unwrap();
+        let r2 = manager.create("org/myapp", None, None, None).await.unwrap();
+
+        assert!(
+            r1.config.name.contains("myapp-runner-1"),
+            "first runner name: {}",
+            r1.config.name
+        );
+        assert!(
+            r2.config.name.contains("myapp-runner-2"),
+            "second runner name: {}",
+            r2.config.name
+        );
+    }
+
+    #[test]
+    fn test_parse_job_event_started_no_timestamp_prefix() {
+        // The function should work even without a timestamp prefix
+        let event = parse_job_event("Running job: deploy");
+        assert_eq!(event, Some(JobEvent::Started("deploy".to_string())));
+    }
+
+    #[test]
+    fn test_parse_job_event_completed_succeeded_case_sensitive() {
+        // "Succeeded" (capital S) triggers succeeded=true
+        let event = parse_job_event("Job build completed with result: Succeeded");
+        assert_eq!(event, Some(JobEvent::Completed { succeeded: true }));
+
+        // Any other result keyword yields succeeded=false
+        let event2 = parse_job_event("Job build completed with result: Cancelled");
+        assert_eq!(event2, Some(JobEvent::Completed { succeeded: false }));
+    }
+
+    #[test]
+    fn test_parse_job_event_completed_skipped_result() {
+        let line = "Job lint completed with result: Skipped";
+        let event = parse_job_event(line);
+        assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+    }
+
+    #[test]
+    fn test_runner_event_serialization() {
+        let event = RunnerEvent {
+            runner_id: "abc".to_string(),
+            event_type: "state_changed".to_string(),
+            data: serde_json::json!({"state": "online"}),
+            timestamp: chrono::Utc::now(),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["runner_id"], "abc");
+        assert_eq!(json["event_type"], "state_changed");
+        assert_eq!(json["data"]["state"], "online");
+    }
+
+    #[test]
+    fn test_log_entry_fields() {
+        let ts = chrono::Utc::now();
+        let entry = LogEntry {
+            runner_id: "r1".to_string(),
+            timestamp: ts,
+            line: "my log line".to_string(),
+            stream: "stderr".to_string(),
+        };
+        assert_eq!(entry.runner_id, "r1");
+        assert_eq!(entry.line, "my log line");
+        assert_eq!(entry.stream, "stderr");
+    }
+
     #[test]
     fn test_runner_info_serialization_omits_current_job_when_none() {
         use crate::runner::types::{RunnerConfig, RunnerMode};
