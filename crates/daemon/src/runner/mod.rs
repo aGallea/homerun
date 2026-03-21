@@ -419,26 +419,27 @@ impl RunnerManager {
                     }
                     // Parse job events from stdout
                     // Lines look like: "2026-03-21 19:49:31Z: Running job: TypeScript (type check + build)"
-                    if let Some(idx) = line.find("Running job: ") {
-                        let job_name = line[idx + "Running job: ".len()..].to_string();
-                        let mut map = runners.write().await;
-                        if let Some(r) = map.get_mut(&rid) {
-                            r.state = RunnerState::Busy;
-                            r.current_job = Some(job_name);
-                        }
-                    } else if line.contains("completed with result:") {
-                        // "Job <name> completed with result: Succeeded/Failed"
-                        let succeeded = line.contains("Succeeded");
-                        let mut map = runners.write().await;
-                        if let Some(r) = map.get_mut(&rid) {
-                            if succeeded {
-                                r.jobs_completed += 1;
-                            } else {
-                                r.jobs_failed += 1;
+                    match parse_job_event(&line) {
+                        Some(JobEvent::Started(job_name)) => {
+                            let mut map = runners.write().await;
+                            if let Some(r) = map.get_mut(&rid) {
+                                r.state = RunnerState::Busy;
+                                r.current_job = Some(job_name);
                             }
-                            r.state = RunnerState::Online;
-                            r.current_job = None;
                         }
+                        Some(JobEvent::Completed { succeeded }) => {
+                            let mut map = runners.write().await;
+                            if let Some(r) = map.get_mut(&rid) {
+                                if succeeded {
+                                    r.jobs_completed += 1;
+                                } else {
+                                    r.jobs_failed += 1;
+                                }
+                                r.state = RunnerState::Online;
+                                r.current_job = None;
+                            }
+                        }
+                        None => {}
                     }
                 }
             });
@@ -581,6 +582,33 @@ impl RunnerManager {
             timestamp: chrono::Utc::now(),
         });
     }
+}
+
+/// Parsed result of a job-related stdout line emitted by the GitHub Actions runner.
+#[derive(Debug, PartialEq)]
+pub enum JobEvent {
+    /// The runner started executing a job with the given name.
+    Started(String),
+    /// A job completed; `succeeded` is true when the result was "Succeeded".
+    Completed { succeeded: bool },
+}
+
+/// Parse a single stdout line from the runner process into a [`JobEvent`], if it
+/// matches a known pattern.
+///
+/// Expected patterns (prefixed by a timestamp the function ignores):
+/// - `"… Running job: <name>"` → [`JobEvent::Started`]
+/// - `"… completed with result: Succeeded|<other>"` → [`JobEvent::Completed`]
+pub fn parse_job_event(line: &str) -> Option<JobEvent> {
+    if let Some(idx) = line.find("Running job: ") {
+        let job_name = line[idx + "Running job: ".len()..].to_string();
+        return Some(JobEvent::Started(job_name));
+    }
+    if line.contains("completed with result:") {
+        let succeeded = line.contains("Succeeded");
+        return Some(JobEvent::Completed { succeeded });
+    }
+    None
 }
 
 #[cfg(test)]
@@ -790,5 +818,194 @@ mod tests {
             std::fs::read_to_string(dst.path().join("subdir/file2.txt")).unwrap(),
             "world"
         );
+    }
+
+    // ── recent_logs ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_get_recent_logs_empty_for_unknown_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let logs = manager.get_recent_logs("nonexistent-runner-id").await;
+        assert!(logs.is_empty(), "expected no logs for an unknown runner");
+    }
+
+    #[tokio::test]
+    async fn test_recent_logs_stored_on_broadcast() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        // Manually insert a log entry into the ring buffer the same way the
+        // stdout reader task does.
+        {
+            let entry = LogEntry {
+                runner_id: "runner-1".to_string(),
+                timestamp: chrono::Utc::now(),
+                line: "hello from runner".to_string(),
+                stream: "stdout".to_string(),
+            };
+            let mut map = manager.recent_logs.write().await;
+            let dq = map
+                .entry("runner-1".to_string())
+                .or_insert_with(VecDeque::new);
+            dq.push_back(entry);
+        }
+
+        let logs = manager.get_recent_logs("runner-1").await;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].line, "hello from runner");
+        assert_eq!(logs[0].stream, "stdout");
+    }
+
+    #[tokio::test]
+    async fn test_recent_logs_ring_buffer_capacity() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        // Insert RECENT_LOGS_MAX + 50 entries, simulating the ring-buffer logic.
+        {
+            let mut map = manager.recent_logs.write().await;
+            let dq = map
+                .entry("runner-cap".to_string())
+                .or_insert_with(VecDeque::new);
+            for i in 0..(RECENT_LOGS_MAX + 50) {
+                dq.push_back(LogEntry {
+                    runner_id: "runner-cap".to_string(),
+                    timestamp: chrono::Utc::now(),
+                    line: format!("line {i}"),
+                    stream: "stdout".to_string(),
+                });
+                if dq.len() > RECENT_LOGS_MAX {
+                    dq.pop_front();
+                }
+            }
+        }
+
+        let logs = manager.get_recent_logs("runner-cap").await;
+        assert_eq!(
+            logs.len(),
+            RECENT_LOGS_MAX,
+            "ring buffer should not exceed RECENT_LOGS_MAX"
+        );
+        // The oldest surviving entry should be line 50 (the first 50 were evicted).
+        assert_eq!(logs[0].line, "line 50");
+        // The newest should be line RECENT_LOGS_MAX + 49.
+        assert_eq!(
+            logs[logs.len() - 1].line,
+            format!("line {}", RECENT_LOGS_MAX + 49)
+        );
+    }
+
+    // ── job parsing ────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_job_event_started() {
+        let line = "2026-03-21 20:06:36Z: Running job: TypeScript (type check + build)";
+        let event = parse_job_event(line);
+        assert_eq!(
+            event,
+            Some(JobEvent::Started(
+                "TypeScript (type check + build)".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_job_event_completed_succeeded() {
+        let line =
+            "2026-03-21 20:06:51Z: Job TypeScript (type check + build) completed with result: Succeeded";
+        let event = parse_job_event(line);
+        assert_eq!(event, Some(JobEvent::Completed { succeeded: true }));
+    }
+
+    #[test]
+    fn test_parse_job_event_completed_failed() {
+        let line =
+            "2026-03-21 20:06:51Z: Job TypeScript (type check + build) completed with result: Failed";
+        let event = parse_job_event(line);
+        assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+    }
+
+    #[test]
+    fn test_parse_job_event_unrelated_line() {
+        let line = "2026-03-21 20:05:00Z: Listening for jobs";
+        let event = parse_job_event(line);
+        assert_eq!(event, None);
+    }
+
+    #[test]
+    fn test_parse_job_event_empty_line() {
+        assert_eq!(parse_job_event(""), None);
+    }
+
+    // ── RunnerInfo serialization ────────────────────────────────────
+
+    #[test]
+    fn test_runner_info_serialization_includes_current_job() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        use state::RunnerState;
+
+        let info = crate::runner::types::RunnerInfo {
+            config: RunnerConfig {
+                id: "abc".to_string(),
+                name: "test-runner".to_string(),
+                repo_owner: "owner".to_string(),
+                repo_name: "repo".to_string(),
+                labels: vec!["self-hosted".to_string()],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp/runner-abc"),
+            },
+            state: RunnerState::Busy,
+            pid: Some(1234),
+            uptime_secs: Some(60),
+            started_at: None,
+            jobs_completed: 3,
+            jobs_failed: 1,
+            current_job: Some("TypeScript (type check + build)".to_string()),
+        };
+
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(
+            json["current_job"],
+            serde_json::Value::String("TypeScript (type check + build)".to_string())
+        );
+        assert_eq!(json["jobs_completed"], 3);
+        assert_eq!(json["jobs_failed"], 1);
+    }
+
+    #[test]
+    fn test_runner_info_serialization_omits_current_job_when_none() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        use state::RunnerState;
+
+        let info = crate::runner::types::RunnerInfo {
+            config: RunnerConfig {
+                id: "abc".to_string(),
+                name: "test-runner".to_string(),
+                repo_owner: "owner".to_string(),
+                repo_name: "repo".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp/runner-abc"),
+            },
+            state: RunnerState::Online,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+        };
+
+        let json = serde_json::to_value(&info).unwrap();
+        // `current_job` is `skip_serializing_if = "Option::is_none"`, so the key must be absent.
+        assert!(!json.as_object().unwrap().contains_key("current_job"));
     }
 }

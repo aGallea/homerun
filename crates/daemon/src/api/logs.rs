@@ -57,4 +57,28 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn test_recent_logs_returns_200_with_empty_array_for_unknown_runner() {
+        let state = AppState::new_test();
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/runners/unknown-runner-id/logs/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json, serde_json::json!([]));
+    }
 }
