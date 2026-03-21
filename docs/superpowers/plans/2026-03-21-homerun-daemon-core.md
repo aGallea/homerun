@@ -7,6 +7,7 @@
 **Architecture:** A Rust workspace with a `daemon` crate. The daemon exposes a REST/SSE/WebSocket API over a Unix socket. It manages runner processes (download, register, start, stop, delete), authenticates via GitHub PAT (OAuth deferred to Plan 5), streams logs via SSE, and collects metrics via the `sysinfo` crate.
 
 **Deferred to later plans:**
+
 - OAuth flow (`POST /auth/github`) — Plan 5
 - `GET /repos/:id/workflows`, `GET /repos/:id/runners` — Plan 2 (TUI) or Plan 5
 - `GET /metrics/history` — Plan 5 (notifications & polish)
@@ -16,6 +17,7 @@
 **Spec:** `docs/superpowers/specs/2026-03-21-self-runner-design.md`
 
 **Implementation notes:**
+
 - Verify `sysinfo` v0.33 API at implementation time — `System::new_all()` may have been replaced with `System::new()` + specific refresh calls. Check docs.
 - Verify `security-framework` v3 error type API — `.code()` method availability may differ.
 - For Unix socket serving with Axum 0.8, check latest docs. May need `tokio-listener`, `hyperlocal`, or direct `hyper-util` wiring.
@@ -72,6 +74,7 @@ homerun/
 ### Task 1: Project Scaffold
 
 **Files:**
+
 - Create: `Cargo.toml` (workspace root)
 - Create: `crates/daemon/Cargo.toml`
 - Create: `crates/daemon/src/main.rs`
@@ -201,6 +204,7 @@ git commit -m "chore: initial project scaffold with Rust workspace"
 ### Task 2: Config Module
 
 **Files:**
+
 - Create: `crates/daemon/src/config.rs`
 - Test: inline `#[cfg(test)]` module
 
@@ -327,6 +331,7 @@ git commit -m "feat: add config module with defaults and serialization"
 ### Task 3: Axum Server on Unix Socket
 
 **Files:**
+
 - Create: `crates/daemon/src/server.rs`
 - Create: `crates/daemon/src/api/mod.rs`
 - Modify: `crates/daemon/src/main.rs`
@@ -429,7 +434,8 @@ pub async fn serve(config: Config) -> Result<()> {
 ```
 
 **Note:** Add `tokio-listener = "0.4"` to daemon dependencies. This crate provides the `Listener` trait implementation that Axum needs for Unix sockets. Alternatively, use `hyperlocal` or wire `hyper-util` manually — verify the latest Axum 0.8 docs for Unix socket support at implementation time.
-```
+
+````
 
 - [ ] **Step 4: Update main.rs to call serve**
 
@@ -453,7 +459,7 @@ async fn main() -> Result<()> {
     tracing::info!("HomeRun daemon starting...");
     homerund::server::serve(config).await
 }
-```
+````
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -463,11 +469,13 @@ Expected: PASS
 - [ ] **Step 6: Manual smoke test — start daemon, hit health endpoint**
 
 In one terminal:
+
 ```bash
 cargo run -p homerund
 ```
 
 In another terminal:
+
 ```bash
 curl --unix-socket ~/.homerun/daemon.sock http://localhost/health
 ```
@@ -488,6 +496,7 @@ git commit -m "feat: add Axum server on Unix socket with health endpoint"
 ### Task 4: Auth Module (PAT)
 
 **Files:**
+
 - Create: `crates/daemon/src/auth/mod.rs`
 - Create: `crates/daemon/src/auth/keychain.rs`
 - Create: `crates/daemon/src/api/auth.rs`
@@ -753,6 +762,7 @@ git commit -m "feat: add auth module with PAT login and macOS Keychain storage"
 ### Task 5: GitHub API Client
 
 **Files:**
+
 - Create: `crates/daemon/src/github/mod.rs`
 - Create: `crates/daemon/src/github/types.rs`
 - Create: `crates/daemon/src/api/repos.rs`
@@ -959,6 +969,7 @@ git commit -m "feat: add GitHub API client with repo listing and runner registra
 ### Task 6: Runner Binary Downloader
 
 **Files:**
+
 - Create: `crates/daemon/src/runner/binary.rs`
 - Create: `crates/daemon/src/runner/mod.rs`
 
@@ -1080,6 +1091,7 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
 - [ ] **Step 4: Add reqwest to daemon dependencies (if not already present)**
 
 Ensure `reqwest` is in `crates/daemon/Cargo.toml` dependencies:
+
 ```toml
 reqwest = { version = "0.12", features = ["json"] }
 ```
@@ -1102,6 +1114,7 @@ git commit -m "feat: add runner binary download and caching"
 ### Task 7: Runner State Machine & Types
 
 **Files:**
+
 - Create: `crates/daemon/src/runner/state.rs`
 - Create: `crates/daemon/src/runner/types.rs`
 
@@ -1265,6 +1278,7 @@ git commit -m "feat: add runner state machine and types"
 ### Task 8: Runner Manager
 
 **Files:**
+
 - Create: `crates/daemon/src/runner/process.rs`
 - Modify: `crates/daemon/src/runner/mod.rs` (add RunnerManager)
 - Modify: `crates/daemon/src/server.rs` (add RunnerManager to AppState)
@@ -1458,11 +1472,13 @@ Expected: All pass
 - [ ] **Step 5: Add RunnerManager to AppState**
 
 Update `server.rs`:
+
 ```rust
 pub runner_manager: RunnerManager,
 ```
 
 And initialize it in `AppState::new`:
+
 ```rust
 runner_manager: RunnerManager::new(config.clone()),
 ```
@@ -1484,6 +1500,7 @@ git commit -m "feat: add runner manager with create, list, get, delete"
 ### Task 9: Runner API Endpoints
 
 **Files:**
+
 - Create: `crates/daemon/src/api/runners.rs`
 - Modify: `crates/daemon/src/api/mod.rs`
 - Modify: `crates/daemon/src/server.rs` (add runner routes)
@@ -1695,6 +1712,7 @@ pub async fn update_runner(
 ```
 
 Add `UpdateRunnerRequest` to `runner/types.rs`:
+
 ```rust
 #[derive(Debug, Deserialize)]
 pub struct UpdateRunnerRequest {
@@ -1730,6 +1748,7 @@ git commit -m "feat: add runner CRUD API endpoints"
 ### Task 10: Runner Process Management
 
 **Files:**
+
 - Create: `crates/daemon/src/runner/process.rs`
 - Modify: `crates/daemon/src/runner/mod.rs` (add start/stop methods to RunnerManager)
 
@@ -1805,6 +1824,7 @@ pub async fn remove_runner(runner_dir: &Path, token: &str) -> Result<()> {
 - [ ] **Step 2: Add full lifecycle methods to RunnerManager**
 
 Add `register_and_start` and `stop` methods to `RunnerManager` in `mod.rs`. These methods:
+
 - `register_and_start(id, github_token)`: downloads binary (if needed), copies to runner dir, runs config.sh, spawns run.sh, updates state through Creating → Registering → Online
 - `stop(id)`: sends SIGTERM to the process, waits for completion, transitions to Offline
 
@@ -1853,6 +1873,7 @@ git commit -m "feat: add runner process management (configure, start, stop)"
 ### Task 11: SSE Log Streaming
 
 **Files:**
+
 - Create: `crates/daemon/src/api/logs.rs`
 - Modify: `crates/daemon/src/runner/mod.rs` (add log broadcasting)
 - Modify: `crates/daemon/src/api/mod.rs`
@@ -1931,6 +1952,7 @@ git commit -m "feat: add SSE log streaming for runners"
 ### Task 12: Metrics Collection
 
 **Files:**
+
 - Create: `crates/daemon/src/metrics.rs`
 - Create: `crates/daemon/src/api/metrics.rs`
 - Modify: `crates/daemon/src/server.rs`
@@ -2098,6 +2120,7 @@ pub async fn get_metrics(
 - [ ] **Step 5: Wire metrics into AppState and router**
 
 Add `MetricsCollector` to `AppState` and route:
+
 ```rust
 .route("/metrics", get(api::metrics::get_metrics))
 ```
@@ -2119,6 +2142,7 @@ git commit -m "feat: add metrics collection with system and per-runner CPU/RAM/d
 ### Task 13: WebSocket Events
 
 **Files:**
+
 - Create: `crates/daemon/src/api/events.rs`
 - Modify: `crates/daemon/src/runner/mod.rs` (add event broadcasting)
 - Modify: `crates/daemon/src/server.rs`
@@ -2193,6 +2217,7 @@ git commit -m "feat: add WebSocket event streaming for real-time runner updates"
 ### Task 14: Integration Test — Full Flow
 
 **Files:**
+
 - Create: `crates/daemon/tests/helpers.rs`
 - Create: `crates/daemon/tests/health_test.rs`
 - Create: `crates/daemon/tests/runner_test.rs`
@@ -2257,6 +2282,7 @@ git commit -m "test: add integration tests for health and runner CRUD"
 ### Task 15: Final Cleanup & Documentation
 
 **Files:**
+
 - Modify: `crates/daemon/src/lib.rs` (clean up re-exports)
 - Modify: `Cargo.toml` (verify all deps are correct)
 

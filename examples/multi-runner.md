@@ -5,6 +5,7 @@ Run multiple GitHub Actions runners in parallel to dramatically reduce CI wait t
 ## Why Multiple Runners?
 
 GitHub Actions jobs run one at a time per runner. With multiple runners:
+
 - Parallel jobs in a single workflow actually run in parallel
 - Multiple PRs can run CI simultaneously
 - Different job types can be isolated to different runners with custom labels
@@ -130,6 +131,7 @@ homerun
 ```
 
 Key operations:
+
 - `↑↓` — navigate runner list
 - `a` — add new runner (wizard)
 - `d` — delete selected runner (with confirmation)

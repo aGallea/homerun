@@ -44,6 +44,7 @@ homerun --no-tui login --token ghp_your_token_here
 ```
 
 Required scopes:
+
 - Personal repos: `repo`
 - Organization repos: `repo` + `manage_runners:org`
 
@@ -56,6 +57,7 @@ homerun --no-tui add my-runner --repo owner/my-repo
 ```
 
 HomeRun will:
+
 1. Download the GitHub Actions runner binary (cached for future use)
 2. Register the runner with your repo via the GitHub API
 3. Start the runner process
@@ -104,7 +106,7 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: self-hosted   # <-- this targets your HomeRun runner
+    runs-on: self-hosted # <-- this targets your HomeRun runner
     steps:
       - uses: actions/checkout@v4
       - name: Run tests

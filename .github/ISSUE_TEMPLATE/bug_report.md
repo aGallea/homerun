@@ -1,9 +1,9 @@
 ---
 name: Bug report
 about: Report something that isn't working correctly
-title: 'bug: '
+title: "bug: "
 labels: bug
-assignees: ''
+assignees: ""
 ---
 
 ## Describe the bug
@@ -28,13 +28,13 @@ What actually happened.
 
 ## Environment
 
-| Field | Value |
-|-------|-------|
-| HomeRun version | (e.g. 0.1.0) |
-| macOS version | (e.g. macOS 14.3 Sonoma) |
-| Architecture | ARM64 / Intel |
-| Install method | DMG / Homebrew / built from source |
-| Component | daemon / TUI / desktop app |
+| Field           | Value                              |
+| --------------- | ---------------------------------- |
+| HomeRun version | (e.g. 0.1.0)                       |
+| macOS version   | (e.g. macOS 14.3 Sonoma)           |
+| Architecture    | ARM64 / Intel                      |
+| Install method  | DMG / Homebrew / built from source |
+| Component       | daemon / TUI / desktop app         |
 
 ## Logs
 

@@ -5,15 +5,8 @@ import { RunnerTable } from "../components/RunnerTable";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Runners() {
-  const {
-    runners,
-    loading,
-    startRunner,
-    stopRunner,
-    restartRunner,
-    deleteRunner,
-    createRunner,
-  } = useRunners();
+  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner, createRunner } =
+    useRunners();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
   const [filter, setFilter] = useState("");
@@ -24,9 +17,7 @@ export function Runners() {
   const filtered = runners.filter(
     (r) =>
       r.config.name.toLowerCase().includes(filter.toLowerCase()) ||
-      `${r.config.repo_owner}/${r.config.repo_name}`
-        .toLowerCase()
-        .includes(filter.toLowerCase()),
+      `${r.config.repo_owner}/${r.config.repo_name}`.toLowerCase().includes(filter.toLowerCase()),
   );
 
   if (loading) {
@@ -48,10 +39,7 @@ export function Runners() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowWizard(true)}
-          >
+          <button className="btn btn-primary" onClick={() => setShowWizard(true)}>
             + New Runner
           </button>
         </div>
@@ -67,10 +55,7 @@ export function Runners() {
       />
 
       {showWizard && (
-        <NewRunnerWizard
-          onClose={() => setShowWizard(false)}
-          onCreate={createRunner}
-        />
+        <NewRunnerWizard onClose={() => setShowWizard(false)} onCreate={createRunner} />
       )}
     </div>
   );

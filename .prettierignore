@@ -1,0 +1,6 @@
+target/
+node_modules/
+dist/
+*.lock
+Cargo.lock
+apps/desktop/src-tauri/

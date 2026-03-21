@@ -53,16 +53,12 @@ export function Repositories() {
       {reposLoading ? (
         <p className="text-muted">Loading repositories...</p>
       ) : filteredRepos.length === 0 ? (
-        <div
-          className="card"
-          style={{ textAlign: "center", padding: "40px" }}
-        >
+        <div className="card" style={{ textAlign: "center", padding: "40px" }}>
           <p className="text-muted">
             {search ? "No repositories match your search." : "No repositories found."}
           </p>
           <p className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Make sure you are authenticated with a GitHub token that has repo
-            access.
+            Make sure you are authenticated with a GitHub token that has repo access.
           </p>
         </div>
       ) : (
@@ -88,10 +84,7 @@ export function Repositories() {
                 {/* Header */}
                 <div className="flex items-center justify-between">
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div
-                      className="flex items-center gap-8"
-                      style={{ marginBottom: 4 }}
-                    >
+                    <div className="flex items-center gap-8" style={{ marginBottom: 4 }}>
                       <span
                         style={{
                           fontWeight: 600,
@@ -114,9 +107,7 @@ export function Repositories() {
                           background: repo.private
                             ? "rgba(210, 153, 34, 0.2)"
                             : "rgba(63, 185, 80, 0.2)",
-                          color: repo.private
-                            ? "var(--accent-yellow)"
-                            : "var(--accent-green)",
+                          color: repo.private ? "var(--accent-yellow)" : "var(--accent-green)",
                         }}
                       >
                         {repo.private ? "Private" : "Public"}
@@ -145,10 +136,7 @@ export function Repositories() {
                       style={{
                         fontSize: 22,
                         fontWeight: 600,
-                        color:
-                          count > 0
-                            ? "var(--accent-green)"
-                            : "var(--text-secondary)",
+                        color: count > 0 ? "var(--accent-green)" : "var(--text-secondary)",
                       }}
                     >
                       {count}

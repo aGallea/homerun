@@ -24,9 +24,7 @@ export function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.to === "/"}
-            className={({ isActive }) =>
-              `sidebar-link${isActive ? " sidebar-link-active" : ""}`
-            }
+            className={({ isActive }) => `sidebar-link${isActive ? " sidebar-link-active" : ""}`}
           >
             <span className="sidebar-icon">{item.icon}</span>
             {item.label}
@@ -36,11 +34,7 @@ export function Sidebar() {
       <div className="sidebar-footer">
         {auth.user ? (
           <div className="sidebar-user">
-            <img
-              className="sidebar-avatar"
-              src={auth.user.avatar_url}
-              alt={auth.user.login}
-            />
+            <img className="sidebar-avatar" src={auth.user.avatar_url} alt={auth.user.login} />
             <span className="sidebar-username">{auth.user.login}</span>
           </div>
         ) : (

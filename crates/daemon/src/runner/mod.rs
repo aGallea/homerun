@@ -304,13 +304,8 @@ impl RunnerManager {
     }
 
     /// Common register-and-start flow (assumes already in Registering state):
-    /// 1. Download / cache runner binary
-    /// 2. Copy binary files to runner work_dir
-    /// 3. Get registration token from GitHub
-    /// 4. Run config.sh
-    /// 5. Spawn run.sh
-    /// 6. Store PID, update state to Online
-    /// 7. Spawn background monitor task
+    /// If the runner is already configured (.runner file exists), skip download + config
+    /// and go straight to starting run.sh.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         let runner = self
             .get(id)
@@ -318,36 +313,45 @@ impl RunnerManager {
             .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
         let config = &runner.config;
 
-        // 1. Download / cache runner binary
-        let cached_runner_dir = ensure_runner_binary(&self.config.cache_dir())
+        let already_configured = config.work_dir.join(".runner").exists();
+
+        if !already_configured {
+            // 1. Download / cache runner binary
+            let cached_runner_dir = ensure_runner_binary(&self.config.cache_dir())
+                .await
+                .context("Failed to download runner binary")?;
+
+            // 2. Copy binary files to runner work_dir
+            copy_dir_recursive(&cached_runner_dir, &config.work_dir)
+                .context("Failed to copy runner binary to work dir")?;
+
+            // 3. Get registration token
+            let gh = GitHubClient::new(Some(auth_token.to_string()))?;
+            let reg = gh
+                .get_runner_registration_token(&config.repo_owner, &config.repo_name)
+                .await
+                .context("Failed to get registration token")?;
+
+            // 4. Run config.sh
+            let repo_url = format!(
+                "https://github.com/{}/{}",
+                config.repo_owner, config.repo_name
+            );
+            configure_runner(
+                &config.work_dir,
+                &repo_url,
+                &reg.token,
+                &config.name,
+                &config.labels,
+            )
             .await
-            .context("Failed to download runner binary")?;
-
-        // 2. Copy binary files to runner work_dir
-        copy_dir_recursive(&cached_runner_dir, &config.work_dir)
-            .context("Failed to copy runner binary to work dir")?;
-
-        // 3. Get registration token
-        let gh = GitHubClient::new(Some(auth_token.to_string()))?;
-        let reg = gh
-            .get_runner_registration_token(&config.repo_owner, &config.repo_name)
-            .await
-            .context("Failed to get registration token")?;
-
-        // 4. Run config.sh
-        let repo_url = format!(
-            "https://github.com/{}/{}",
-            config.repo_owner, config.repo_name
-        );
-        configure_runner(
-            &config.work_dir,
-            &repo_url,
-            &reg.token,
-            &config.name,
-            &config.labels,
-        )
-        .await
-        .context("Failed to configure runner")?;
+            .context("Failed to configure runner")?;
+        } else {
+            tracing::info!(
+                "Runner {} already configured, skipping download + config",
+                id
+            );
+        }
 
         // 5. Spawn run.sh
         let mut child = start_runner(&config.work_dir)

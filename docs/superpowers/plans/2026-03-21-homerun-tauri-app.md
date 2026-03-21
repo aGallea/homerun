@@ -7,6 +7,7 @@
 **Architecture:** A Tauri 2.0 app at `apps/desktop/` (separate from `crates/` — it's a frontend app with a Rust backend). The Rust side (`apps/desktop/src-tauri/`) exposes Tauri commands that proxy to the daemon via HTTP over Unix socket. The React frontend (`apps/desktop/src/`) calls these commands via `@tauri-apps/api` `invoke()`. Vite bundles the frontend.
 
 **Deferred to later plans:**
+
 - OAuth flow (browser-based login) — Plan 5
 - Workflow Runs page — Plan 5
 - Smart Repo Discovery / Scan — Plan 5
@@ -19,6 +20,7 @@
 **Spec:** `docs/superpowers/specs/2026-03-21-self-runner-design.md` (Tauri App section)
 
 **Implementation notes:**
+
 - The daemon must be running for the app to work. If the socket is missing, show a clear "Daemon not running" screen with instructions to start `homerund`.
 - Tauri commands are the bridge: React calls `invoke("list_runners")` -> Rust Tauri command makes HTTP request to daemon Unix socket -> returns JSON to React.
 - For HTTP over Unix socket in the Tauri Rust backend, reuse the same `hyper` + `hyper-util` Unix connector pattern from the TUI client (`crates/tui/src/client.rs`).
@@ -86,6 +88,7 @@ homerun/
 ### Task 1: Tauri Project Scaffold
 
 **Files:**
+
 - Create: `apps/desktop/package.json`
 - Create: `apps/desktop/tsconfig.json`
 - Create: `apps/desktop/tsconfig.node.json`
@@ -322,24 +325,62 @@ body {
 }
 
 /* Utility classes */
-.flex { display: flex; }
-.flex-col { flex-direction: column; }
-.flex-1 { flex: 1; }
-.items-center { align-items: center; }
-.justify-between { justify-content: space-between; }
-.gap-sm { gap: 8px; }
-.gap-md { gap: 16px; }
-.gap-lg { gap: 24px; }
-.p-sm { padding: 8px; }
-.p-md { padding: 16px; }
-.p-lg { padding: 24px; }
-.text-muted { color: var(--text-secondary); }
-.text-sm { font-size: 12px; }
-.text-lg { font-size: 18px; }
-.text-xl { font-size: 24px; }
-.font-bold { font-weight: 600; }
-.font-mono { font-family: var(--font-mono); }
-.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flex {
+  display: flex;
+}
+.flex-col {
+  flex-direction: column;
+}
+.flex-1 {
+  flex: 1;
+}
+.items-center {
+  align-items: center;
+}
+.justify-between {
+  justify-content: space-between;
+}
+.gap-sm {
+  gap: 8px;
+}
+.gap-md {
+  gap: 16px;
+}
+.gap-lg {
+  gap: 24px;
+}
+.p-sm {
+  padding: 8px;
+}
+.p-md {
+  padding: 16px;
+}
+.p-lg {
+  padding: 24px;
+}
+.text-muted {
+  color: var(--text-secondary);
+}
+.text-sm {
+  font-size: 12px;
+}
+.text-lg {
+  font-size: 18px;
+}
+.text-xl {
+  font-size: 24px;
+}
+.font-bold {
+  font-weight: 600;
+}
+.font-mono {
+  font-family: var(--font-mono);
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Button base */
 .btn {
@@ -353,7 +394,9 @@ body {
   color: var(--text-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 .btn:hover {
   background: var(--border);
@@ -512,10 +555,7 @@ dirs = "6"
   "identifier": "default",
   "description": "Default capability for HomeRun desktop app",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "shell:allow-open"
-  ]
+  "permissions": ["core:default", "shell:allow-open"]
 }
 ```
 
@@ -569,11 +609,13 @@ pub fn run() {
 - [ ] **Step 15: Create stub files for `src-tauri/src/client.rs` and `src-tauri/src/commands.rs`**
 
 `src-tauri/src/client.rs`:
+
 ```rust
 // DaemonClient — HTTP over Unix socket (implemented in Task 2)
 ```
 
 `src-tauri/src/commands.rs`:
+
 ```rust
 // Tauri commands (implemented in Task 2)
 ```
@@ -610,6 +652,7 @@ git commit -m "chore: scaffold Tauri 2.0 desktop app with Vite + React + TypeScr
 ### Task 2: Tauri Commands (Rust Side — Proxy to Daemon)
 
 **Files:**
+
 - Create: `apps/desktop/src-tauri/src/client.rs`
 - Create: `apps/desktop/src-tauri/src/commands.rs`
 - Modify: `apps/desktop/src-tauri/src/lib.rs` (restore invoke_handler)
@@ -947,6 +990,7 @@ git commit -m "feat: implement Tauri commands proxying to daemon Unix socket"
 ### Task 3: TypeScript API Layer + Hooks
 
 **Files:**
+
 - Create: `apps/desktop/src/api/types.ts`
 - Create: `apps/desktop/src/api/commands.ts`
 - Create: `apps/desktop/src/hooks/useAuth.ts`
@@ -1060,15 +1104,13 @@ import type {
 export const api = {
   // Auth
   getAuthStatus: () => invoke<AuthStatus>("get_auth_status"),
-  loginWithToken: (token: string) =>
-    invoke<AuthStatus>("login_with_token", { token }),
+  loginWithToken: (token: string) => invoke<AuthStatus>("login_with_token", { token }),
   logout: () => invoke<void>("logout"),
 
   // Runners
   listRunners: () => invoke<RunnerInfo[]>("list_runners"),
   getRunner: (id: string) => invoke<RunnerInfo>("get_runner", { id }),
-  createRunner: (req: CreateRunnerRequest) =>
-    invoke<RunnerInfo>("create_runner", { req }),
+  createRunner: (req: CreateRunnerRequest) => invoke<RunnerInfo>("create_runner", { req }),
   deleteRunner: (id: string) => invoke<void>("delete_runner", { id }),
   startRunner: (id: string) => invoke<void>("start_runner", { id }),
   stopRunner: (id: string) => invoke<void>("stop_runner", { id }),
@@ -1115,21 +1157,18 @@ export function useAuth() {
     refresh();
   }, [refresh]);
 
-  const loginWithToken = useCallback(
-    async (token: string) => {
-      try {
-        setError(null);
-        const status = await api.loginWithToken(token);
-        setAuth(status);
-        return status;
-      } catch (e) {
-        const msg = String(e);
-        setError(msg);
-        throw new Error(msg);
-      }
-    },
-    [],
-  );
+  const loginWithToken = useCallback(async (token: string) => {
+    try {
+      setError(null);
+      const status = await api.loginWithToken(token);
+      setAuth(status);
+      return status;
+    } catch (e) {
+      const msg = String(e);
+      setError(msg);
+      throw new Error(msg);
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -1348,6 +1387,7 @@ git commit -m "feat: add TypeScript API layer and React hooks for daemon communi
 ### Task 4: App Shell (Sidebar, Routing, Layout)
 
 **Files:**
+
 - Modify: `apps/desktop/src/App.tsx`
 - Create: `apps/desktop/src/components/Sidebar.tsx`
 - Create page stubs: `apps/desktop/src/pages/Dashboard.tsx`, etc.
@@ -1388,9 +1428,7 @@ export function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.to === "/"}
-            className={({ isActive }) =>
-              `sidebar-link ${isActive ? "sidebar-link-active" : ""}`
-            }
+            className={({ isActive }) => `sidebar-link ${isActive ? "sidebar-link-active" : ""}`}
           >
             <span className="sidebar-icon">{icons[item.icon]}</span>
             {item.label}
@@ -1461,7 +1499,9 @@ Append to the end of `apps/desktop/src/App.css`:
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .sidebar-link:hover {
@@ -1504,6 +1544,7 @@ Append to the end of `apps/desktop/src/App.css`:
 - [ ] **Step 3: Create stub pages**
 
 `apps/desktop/src/pages/Dashboard.tsx`:
+
 ```tsx
 export function Dashboard() {
   return (
@@ -1518,6 +1559,7 @@ export function Dashboard() {
 ```
 
 `apps/desktop/src/pages/Repositories.tsx`:
+
 ```tsx
 export function Repositories() {
   return (
@@ -1532,6 +1574,7 @@ export function Repositories() {
 ```
 
 `apps/desktop/src/pages/Runners.tsx`:
+
 ```tsx
 export function Runners() {
   return (
@@ -1546,6 +1589,7 @@ export function Runners() {
 ```
 
 `apps/desktop/src/pages/RunnerDetail.tsx`:
+
 ```tsx
 export function RunnerDetail() {
   return (
@@ -1560,6 +1604,7 @@ export function RunnerDetail() {
 ```
 
 `apps/desktop/src/pages/Monitoring.tsx`:
+
 ```tsx
 export function Monitoring() {
   return (
@@ -1574,6 +1619,7 @@ export function Monitoring() {
 ```
 
 `apps/desktop/src/pages/Settings.tsx`:
+
 ```tsx
 export function Settings() {
   return (
@@ -1642,6 +1688,7 @@ git commit -m "feat: add app shell with sidebar navigation and page routing"
 ### Task 5: Dashboard Page (Stats Cards + Runners Table)
 
 **Files:**
+
 - Create: `apps/desktop/src/components/StatsCard.tsx`
 - Create: `apps/desktop/src/components/StatusBadge.tsx`
 - Create: `apps/desktop/src/components/RunnerTable.tsx`
@@ -1676,10 +1723,7 @@ export function StatusBadge({ state }: { state: RunnerState }) {
 
   return (
     <span className="status-badge" style={{ color: config.color }}>
-      <span
-        className="status-dot"
-        style={{ background: config.color }}
-      />
+      <span className="status-dot" style={{ background: config.color }} />
       {config.label}
     </span>
   );
@@ -1791,10 +1835,7 @@ export function ConfirmDialog({
           <button className="btn" onClick={onCancel}>
             Cancel
           </button>
-          <button
-            className={`btn ${danger ? "btn-danger" : "btn-primary"}`}
-            onClick={onConfirm}
-          >
+          <button className={`btn ${danger ? "btn-danger" : "btn-primary"}`} onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>
@@ -2114,29 +2155,19 @@ import { RunnerTable } from "../components/RunnerTable";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Dashboard() {
-  const {
-    runners,
-    loading,
-    startRunner,
-    stopRunner,
-    restartRunner,
-    deleteRunner,
-    createRunner,
-  } = useRunners();
+  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner, createRunner } =
+    useRunners();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
 
-  const online = runners.filter(
-    (r) => r.state === "online" || r.state === "busy",
-  ).length;
+  const online = runners.filter((r) => r.state === "online" || r.state === "busy").length;
   const busy = runners.filter((r) => r.state === "busy").length;
 
   const cpuMap = new Map<string, number>();
   metrics?.runners.forEach((m) => cpuMap.set(m.runner_id, m.cpu_percent));
   const avgCpu =
     metrics && metrics.runners.length > 0
-      ? metrics.runners.reduce((sum, r) => sum + r.cpu_percent, 0) /
-        metrics.runners.length
+      ? metrics.runners.reduce((sum, r) => sum + r.cpu_percent, 0) / metrics.runners.length
       : 0;
 
   if (loading) {
@@ -2158,21 +2189,9 @@ export function Dashboard() {
 
       <div className="stats-grid">
         <StatsCard label="Total Runners" value={runners.length} />
-        <StatsCard
-          label="Online"
-          value={online}
-          color="var(--accent-green)"
-        />
-        <StatsCard
-          label="Busy"
-          value={busy}
-          color="var(--accent-yellow)"
-        />
-        <StatsCard
-          label="Avg CPU"
-          value={`${avgCpu.toFixed(1)}%`}
-          color="var(--accent-blue)"
-        />
+        <StatsCard label="Online" value={online} color="var(--accent-green)" />
+        <StatsCard label="Busy" value={busy} color="var(--accent-yellow)" />
+        <StatsCard label="Avg CPU" value={`${avgCpu.toFixed(1)}%`} color="var(--accent-blue)" />
       </div>
 
       <RunnerTable
@@ -2185,10 +2204,7 @@ export function Dashboard() {
       />
 
       {showWizard && (
-        <NewRunnerWizard
-          onClose={() => setShowWizard(false)}
-          onCreate={createRunner}
-        />
+        <NewRunnerWizard onClose={() => setShowWizard(false)} onCreate={createRunner} />
       )}
     </div>
   );
@@ -2207,15 +2223,8 @@ import { RunnerTable } from "../components/RunnerTable";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Runners() {
-  const {
-    runners,
-    loading,
-    startRunner,
-    stopRunner,
-    restartRunner,
-    deleteRunner,
-    createRunner,
-  } = useRunners();
+  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner, createRunner } =
+    useRunners();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
   const [filter, setFilter] = useState("");
@@ -2226,9 +2235,7 @@ export function Runners() {
   const filtered = runners.filter(
     (r) =>
       r.config.name.toLowerCase().includes(filter.toLowerCase()) ||
-      `${r.config.repo_owner}/${r.config.repo_name}`
-        .toLowerCase()
-        .includes(filter.toLowerCase()),
+      `${r.config.repo_owner}/${r.config.repo_name}`.toLowerCase().includes(filter.toLowerCase()),
   );
 
   if (loading) {
@@ -2250,10 +2257,7 @@ export function Runners() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowWizard(true)}
-          >
+          <button className="btn btn-primary" onClick={() => setShowWizard(true)}>
             + New Runner
           </button>
         </div>
@@ -2269,10 +2273,7 @@ export function Runners() {
       />
 
       {showWizard && (
-        <NewRunnerWizard
-          onClose={() => setShowWizard(false)}
-          onCreate={createRunner}
-        />
+        <NewRunnerWizard onClose={() => setShowWizard(false)} onCreate={createRunner} />
       )}
     </div>
   );
@@ -2328,6 +2329,7 @@ git commit -m "feat: implement dashboard with stats cards and runners table"
 ### Task 6: New Runner Wizard
 
 **Files:**
+
 - Modify: `apps/desktop/src/components/NewRunnerWizard.tsx`
 
 - [ ] **Step 1: Implement the full 3-step wizard**
@@ -2358,10 +2360,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
   const [error, setError] = useState<string | null>(null);
 
   const filteredRepos = useMemo(
-    () =>
-      repos.filter((r) =>
-        r.full_name.toLowerCase().includes(search.toLowerCase()),
-      ),
+    () => repos.filter((r) => r.full_name.toLowerCase().includes(search.toLowerCase())),
     [repos, search],
   );
 
@@ -2388,10 +2387,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
-      <div
-        className="wizard"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="wizard" onClick={(e) => e.stopPropagation()}>
         {/* Progress bar */}
         <div className="wizard-progress">
           {(["repo", "configure", "launch"] as Step[]).map((s, i) => (
@@ -2435,9 +2431,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
                   onClick={() => setSelectedRepo(repo)}
                 >
                   <span className="font-mono">{repo.full_name}</span>
-                  {repo.private && (
-                    <span className="text-muted text-sm">Private</span>
-                  )}
+                  {repo.private && <span className="text-muted text-sm">Private</span>}
                 </button>
               ))}
               {!reposLoading && filteredRepos.length === 0 && (
@@ -2455,9 +2449,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
             <h3 className="dialog-title">Configure Runner</h3>
             <div className="form-group">
               <label className="form-label">Repository</label>
-              <div className="text-muted font-mono">
-                {selectedRepo?.full_name}
-              </div>
+              <div className="text-muted font-mono">{selectedRepo?.full_name}</div>
             </div>
             <div className="form-group">
               <label className="form-label">Runner Name</label>
@@ -2515,9 +2507,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
               </div>
               <div className="launch-row">
                 <span className="text-muted">Name</span>
-                <span className="font-mono">
-                  {runnerName || "(auto-generated)"}
-                </span>
+                <span className="font-mono">{runnerName || "(auto-generated)"}</span>
               </div>
               <div className="launch-row">
                 <span className="text-muted">Labels</span>
@@ -2528,11 +2518,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
                 <span style={{ textTransform: "capitalize" }}>{mode}</span>
               </div>
             </div>
-            {error && (
-              <p style={{ color: "var(--accent-red)", marginTop: 12 }}>
-                {error}
-              </p>
-            )}
+            {error && <p style={{ color: "var(--accent-red)", marginTop: 12 }}>{error}</p>}
           </div>
         )}
 
@@ -2545,9 +2531,7 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
             {step !== "repo" && (
               <button
                 className="btn"
-                onClick={() =>
-                  setStep(step === "launch" ? "configure" : "repo")
-                }
+                onClick={() => setStep(step === "launch" ? "configure" : "repo")}
               >
                 Back
               </button>
@@ -2562,19 +2546,12 @@ export function NewRunnerWizard({ onClose, onCreate }: NewRunnerWizardProps) {
               </button>
             )}
             {step === "configure" && (
-              <button
-                className="btn btn-primary"
-                onClick={() => setStep("launch")}
-              >
+              <button className="btn btn-primary" onClick={() => setStep("launch")}>
                 Next
               </button>
             )}
             {step === "launch" && (
-              <button
-                className="btn btn-primary"
-                disabled={launching}
-                onClick={handleLaunch}
-              >
+              <button className="btn btn-primary" disabled={launching} onClick={handleLaunch}>
                 {launching ? "Launching..." : "Launch Runner"}
               </button>
             )}
@@ -2738,6 +2715,7 @@ git commit -m "feat: implement 3-step new runner wizard"
 ### Task 7: Runner Detail Page (Info + Logs)
 
 **Files:**
+
 - Modify: `apps/desktop/src/pages/RunnerDetail.tsx`
 
 - [ ] **Step 1: Implement `RunnerDetail.tsx`**
@@ -2841,11 +2819,7 @@ export function RunnerDetail() {
     return (
       <div className="page">
         <p style={{ color: "var(--accent-red)" }}>{error}</p>
-        <button
-          className="btn"
-          onClick={() => navigate("/runners")}
-          style={{ marginTop: 12 }}
-        >
+        <button className="btn" onClick={() => navigate("/runners")} style={{ marginTop: 12 }}>
           Back to Runners
         </button>
       </div>
@@ -2905,13 +2879,9 @@ export function RunnerDetail() {
         <div className="card">
           <div className="form-label">Jobs</div>
           <div>
-            <span style={{ color: "var(--accent-green)" }}>
-              {runner.jobs_completed} passed
-            </span>
+            <span style={{ color: "var(--accent-green)" }}>{runner.jobs_completed} passed</span>
             {" / "}
-            <span style={{ color: "var(--accent-red)" }}>
-              {runner.jobs_failed} failed
-            </span>
+            <span style={{ color: "var(--accent-red)" }}>{runner.jobs_failed} failed</span>
           </div>
         </div>
       </div>
@@ -2945,10 +2915,7 @@ export function RunnerDetail() {
       </div>
 
       {/* Danger zone */}
-      <div
-        className="card"
-        style={{ borderColor: "rgba(248, 81, 73, 0.3)" }}
-      >
+      <div className="card" style={{ borderColor: "rgba(248, 81, 73, 0.3)" }}>
         <div className="form-label" style={{ color: "var(--accent-red)" }}>
           Danger Zone
         </div>
@@ -3054,6 +3021,7 @@ git commit -m "feat: implement runner detail page with info cards, logs, and act
 ### Task 8: Repositories Page
 
 **Files:**
+
 - Modify: `apps/desktop/src/pages/Repositories.tsx`
 
 - [ ] **Step 1: Implement `Repositories.tsx`**
@@ -3071,9 +3039,7 @@ export function Repositories() {
   const [search, setSearch] = useState("");
   const [wizardRepo, setWizardRepo] = useState<RepoInfo | null>(null);
 
-  const filtered = repos.filter((r) =>
-    r.full_name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = repos.filter((r) => r.full_name.toLowerCase().includes(search.toLowerCase()));
 
   // Count runners per repo
   const runnerCounts = new Map<string, number>();
@@ -3127,22 +3093,15 @@ export function Repositories() {
                       {repo.full_name}
                     </div>
                     <div className="flex gap-sm" style={{ marginTop: 6 }}>
-                      {repo.private && (
-                        <span className="label-tag">Private</span>
-                      )}
-                      {repo.is_org && (
-                        <span className="label-tag">Org</span>
-                      )}
+                      {repo.private && <span className="label-tag">Private</span>}
+                      {repo.is_org && <span className="label-tag">Org</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-md">
                     <div className="text-muted text-sm">
                       {count} runner{count !== 1 ? "s" : ""}
                     </div>
-                    <button
-                      className="btn btn-sm btn-primary"
-                      onClick={() => setWizardRepo(repo)}
-                    >
+                    <button className="btn btn-sm btn-primary" onClick={() => setWizardRepo(repo)}>
                       + Runner
                     </button>
                   </div>
@@ -3154,10 +3113,7 @@ export function Repositories() {
       )}
 
       {wizardRepo && (
-        <NewRunnerWizard
-          onClose={() => setWizardRepo(null)}
-          onCreate={createRunner}
-        />
+        <NewRunnerWizard onClose={() => setWizardRepo(null)} onCreate={createRunner} />
       )}
     </div>
   );
@@ -3203,6 +3159,7 @@ git commit -m "feat: implement repositories page with runner counts and quick-ad
 ### Task 9: Monitoring Page
 
 **Files:**
+
 - Modify: `apps/desktop/src/pages/Monitoring.tsx`
 
 - [ ] **Step 1: Implement `Monitoring.tsx`**
@@ -3218,22 +3175,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
-function ProgressBar({
-  value,
-  max,
-  color,
-}: {
-  value: number;
-  max: number;
-  color: string;
-}) {
+function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max > 0 ? (value / max) * 100 : 0;
   return (
     <div className="progress-bar">
-      <div
-        className="progress-fill"
-        style={{ width: `${pct}%`, background: color }}
-      />
+      <div className="progress-fill" style={{ width: `${pct}%`, background: color }} />
     </div>
   );
 }
@@ -3303,8 +3249,7 @@ export function Monitoring() {
             color="var(--accent-blue)"
           />
           <div className="text-muted text-sm" style={{ marginTop: 6 }}>
-            {formatBytes(system.memory_used_bytes)} /{" "}
-            {formatBytes(system.memory_total_bytes)}
+            {formatBytes(system.memory_used_bytes)} / {formatBytes(system.memory_total_bytes)}
           </div>
         </div>
 
@@ -3319,16 +3264,13 @@ export function Monitoring() {
             color="var(--accent-purple)"
           />
           <div className="text-muted text-sm" style={{ marginTop: 6 }}>
-            {formatBytes(system.disk_used_bytes)} /{" "}
-            {formatBytes(system.disk_total_bytes)}
+            {formatBytes(system.disk_used_bytes)} / {formatBytes(system.disk_total_bytes)}
           </div>
         </div>
       </div>
 
       {/* Per-runner metrics */}
-      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "24px 0 16px" }}>
-        Per-Runner Resources
-      </h2>
+      <h2 style={{ fontSize: 18, fontWeight: 600, margin: "24px 0 16px" }}>Per-Runner Resources</h2>
 
       {runnerMetrics.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: "32px" }}>
@@ -3421,6 +3363,7 @@ git commit -m "feat: implement monitoring page with system and per-runner metric
 ### Task 10: Settings Page + Final Cleanup
 
 **Files:**
+
 - Modify: `apps/desktop/src/pages/Settings.tsx`
 - Modify: `apps/desktop/src-tauri/src/lib.rs` (add WebSocket event forwarding)
 
@@ -3458,9 +3401,7 @@ export function Settings() {
 
       {/* Auth section */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
-          Authentication
-        </h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Authentication</h2>
         {loading ? (
           <p className="text-muted">Loading...</p>
         ) : auth.authenticated && auth.user ? (
@@ -3517,11 +3458,7 @@ export function Settings() {
               </button>
             </div>
             {loginError && (
-              <p
-                style={{ color: "var(--accent-red)", marginTop: 8, fontSize: 13 }}
-              >
-                {loginError}
-              </p>
+              <p style={{ color: "var(--accent-red)", marginTop: 8, fontSize: 13 }}>{loginError}</p>
             )}
           </div>
         )}
@@ -3529,9 +3466,7 @@ export function Settings() {
 
       {/* Daemon section */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
-          Daemon
-        </h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Daemon</h2>
         <div className="flex items-center justify-between">
           <div>
             <div>Auto-start on login</div>
@@ -3545,9 +3480,7 @@ export function Settings() {
 
       {/* Notifications section */}
       <div className="card">
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
-          Notifications
-        </h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Notifications</h2>
         <div className="text-muted">
           Notification preferences will be available in a future update.
         </div>
@@ -3642,11 +3575,13 @@ cd apps/desktop && npx tsc --noEmit && cargo check --manifest-path src-tauri/Car
 - [ ] **Step 4: Test with `npm run tauri dev`**
 
 Start the daemon first (`cargo run -p homerund`), then:
+
 ```bash
 cd apps/desktop && npm run tauri dev
 ```
 
 Verify:
+
 - App window opens with dark theme
 - Sidebar navigation works across all pages
 - Dashboard shows stats cards and empty runners table

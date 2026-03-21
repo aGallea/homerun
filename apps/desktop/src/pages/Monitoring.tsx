@@ -37,10 +37,7 @@ function ResourceBar({ label, value, sublabel }: ResourceBarProps) {
         >
           {label}
         </span>
-        <span
-          className="font-mono"
-          style={{ fontSize: 20, fontWeight: 600, color }}
-        >
+        <span className="font-mono" style={{ fontSize: 20, fontWeight: 600, color }}>
           {value.toFixed(1)}%
         </span>
       </div>
@@ -78,14 +75,10 @@ export function Monitoring() {
   const sys = metrics?.system;
 
   const memPct =
-    sys && sys.memory_total_bytes > 0
-      ? (sys.memory_used_bytes / sys.memory_total_bytes) * 100
-      : 0;
+    sys && sys.memory_total_bytes > 0 ? (sys.memory_used_bytes / sys.memory_total_bytes) * 100 : 0;
 
   const diskPct =
-    sys && sys.disk_total_bytes > 0
-      ? (sys.disk_used_bytes / sys.disk_total_bytes) * 100
-      : 0;
+    sys && sys.disk_total_bytes > 0 ? (sys.disk_used_bytes / sys.disk_total_bytes) * 100 : 0;
 
   // Build per-runner metrics map
   const metricsMap = new Map<string, { cpu: number; memBytes: number }>();
@@ -136,10 +129,7 @@ export function Monitoring() {
               gap: 16,
             }}
           >
-            <ResourceBar
-              label="CPU"
-              value={sys?.cpu_percent ?? 0}
-            />
+            <ResourceBar label="CPU" value={sys?.cpu_percent ?? 0} />
             <ResourceBar
               label="Memory"
               value={memPct}
@@ -205,10 +195,7 @@ export function Monitoring() {
                         <span className="font-mono" style={{ fontSize: 13 }}>
                           {runner.config.name}
                         </span>
-                        <div
-                          className="text-muted"
-                          style={{ fontSize: 11, marginTop: 2 }}
-                        >
+                        <div className="text-muted" style={{ fontSize: 11, marginTop: 2 }}>
                           {runner.config.repo_owner}/{runner.config.repo_name}
                         </div>
                       </td>

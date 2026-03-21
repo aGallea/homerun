@@ -102,18 +102,18 @@ homerun --no-tui login --token <PAT>
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| Daemon | Rust + Axum (async HTTP/SSE/WebSocket over Unix socket) |
-| TUI / CLI | Rust + Ratatui + Clap |
-| Desktop app | Tauri 2.0 + React + TypeScript |
-| Process management | `tokio::process` + `sysinfo` |
-| GitHub API | `octocrab` crate |
-| Auth token storage | macOS Keychain (`security-framework`) |
-| Log streaming | Server-Sent Events (SSE) |
-| Real-time updates | WebSocket |
-| Auto-start | macOS launchd |
-| Notifications | macOS native (`notify-rust`) |
+| Component          | Technology                                              |
+| ------------------ | ------------------------------------------------------- |
+| Daemon             | Rust + Axum (async HTTP/SSE/WebSocket over Unix socket) |
+| TUI / CLI          | Rust + Ratatui + Clap                                   |
+| Desktop app        | Tauri 2.0 + React + TypeScript                          |
+| Process management | `tokio::process` + `sysinfo`                            |
+| GitHub API         | `octocrab` crate                                        |
+| Auth token storage | macOS Keychain (`security-framework`)                   |
+| Log streaming      | Server-Sent Events (SSE)                                |
+| Real-time updates  | WebSocket                                               |
+| Auto-start         | macOS launchd                                           |
+| Notifications      | macOS native (`notify-rust`)                            |
 
 ## Requirements
 
