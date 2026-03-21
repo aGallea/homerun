@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Rust ──────────────────────────────────────────────────────────────────
+
+  rust-fmt:
+    name: Rust / fmt
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: |
+          source "$HOME/.cargo/env"
+          cargo fmt --all -- --check
+
+  rust-clippy:
+    name: Rust / clippy
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy
+        run: |
+          source "$HOME/.cargo/env"
+          cargo clippy --all-targets --all-features -- -D warnings
+
+  rust-test:
+    name: Rust / test
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests (daemon)
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test -p homerund --all-features
+
+      - name: Run tests (tui)
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test -p homerun --all-features
+
+  rust-audit:
+    name: Rust / audit
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        run: |
+          source "$HOME/.cargo/env"
+          cargo install cargo-audit --quiet
+
+      - name: Audit dependencies
+        run: |
+          source "$HOME/.cargo/env"
+          cargo audit
+
+  # ── TypeScript ────────────────────────────────────────────────────────────
+
+  ts-typecheck:
+    name: TypeScript / type check
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+  ts-build:
+    name: TypeScript / build
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build

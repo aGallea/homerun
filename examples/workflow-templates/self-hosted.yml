@@ -1,0 +1,98 @@
+# Example GitHub Actions workflow targeting a HomeRun self-hosted runner.
+#
+# Replace `owner/my-repo` references with your actual repo.
+# Adjust the `runs-on` label list to match the labels you assigned
+# when creating your runner with HomeRun.
+#
+# Usage:
+#   Copy this file to .github/workflows/ in your repository.
+
+name: CI (self-hosted)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Basic: single job on a self-hosted runner ─────────────────────────────
+  build:
+    name: Build & Test
+    runs-on: [self-hosted, macOS]   # targets any HomeRun runner with these labels
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test
+
+  # ── Parallel matrix: runs across multiple HomeRun runners ─────────────────
+  test-matrix:
+    name: Test (${{ matrix.rust }})
+    runs-on: [self-hosted, macOS]
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-features
+
+  # ── Label-specific: route jobs to runners with custom labels ──────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: [self-hosted, macOS, unit]   # matches runners labelled 'unit'
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --lib
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: [self-hosted, macOS, e2e]    # matches runners labelled 'e2e'
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --test '*'
+
+  # ── Node/TypeScript project example ──────────────────────────────────────
+  frontend:
+    name: Frontend
+    runs-on: [self-hosted, macOS]
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
