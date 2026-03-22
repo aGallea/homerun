@@ -284,40 +284,41 @@ export function RunnerDetail() {
           {/* Current Job */}
           <div className="runner-card runner-card-job">
             <div className="runner-card-glow runner-card-glow-blue" />
-            <h3 className="runner-card-label">Current Job</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="runner-card-label">Current Job</h3>
+              {current_job && (
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const url =
+                      job_context?.run_url ??
+                      `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
+                    import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
+                  }}
+                  style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
+                >
+                  View →
+                </a>
+              )}
+            </div>
             {current_job ? (
               <div
                 style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}
               >
-                <div className="flex items-center gap-8">
-                  <span
-                    style={{
-                      fontSize: 16,
-                      fontWeight: 500,
-                      color: "var(--text-primary)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      maxWidth: 220,
-                    }}
-                    title={current_job}
-                  >
-                    {current_job}
-                  </span>
-                  <a
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      const url =
-                        job_context?.run_url ??
-                        `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
-                      import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
-                    }}
-                    style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
-                  >
-                    View →
-                  </a>
-                </div>
+                <span
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 500,
+                    color: "var(--text-primary)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={current_job}
+                >
+                  {current_job}
+                </span>
                 {job_context && (
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                     Branch:{" "}

@@ -1170,7 +1170,7 @@ p {
 }
 
 .runner-card-job {
-  flex: 1;
+  flex: 2;
   min-width: 0;
 }
 
