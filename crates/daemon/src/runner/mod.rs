@@ -92,10 +92,35 @@ impl RunnerManager {
     }
 
     async fn next_runner_number(&self, repo_name: &str) -> u32 {
+        // Find existing numbers for this repo to pick the next available one
+        let runners = self.runners.read().await;
+        let existing_nums: std::collections::HashSet<u32> = runners
+            .values()
+            .filter(|r| r.config.repo_name == repo_name)
+            .filter_map(|r| {
+                let prefix = format!("{}-runner-", repo_name);
+                r.config.name.strip_prefix(&prefix)?.parse::<u32>().ok()
+            })
+            .collect();
+        drop(runners);
+
+        // Find lowest unused number starting from 1
+        let mut num = 1;
+        while existing_nums.contains(&num) {
+            num += 1;
+        }
+
+        // Also check the counter to avoid reuse within the same session
+        // (e.g., during a batch create where runners are being added in a loop)
         let mut counters = self.name_counters.write().await;
         let counter = counters.entry(repo_name.to_string()).or_insert(0);
-        *counter += 1;
-        *counter
+        if num <= *counter {
+            *counter += 1;
+            num = *counter;
+        } else {
+            *counter = num;
+        }
+        num
     }
 
     pub fn subscribe_logs(&self) -> broadcast::Receiver<LogEntry> {
@@ -170,18 +195,6 @@ impl RunnerManager {
                     current_job: None,
                 },
             );
-        }
-        // Initialize name counters from existing runner names
-        let mut counters = self.name_counters.write().await;
-        for info in runners.values() {
-            let repo = &info.config.repo_name;
-            let prefix = format!("{}-runner-", repo);
-            if let Some(num_str) = info.config.name.strip_prefix(&prefix) {
-                if let Ok(num) = num_str.parse::<u32>() {
-                    let entry = counters.entry(repo.clone()).or_insert(0);
-                    *entry = (*entry).max(num);
-                }
-            }
         }
         Ok(())
     }
