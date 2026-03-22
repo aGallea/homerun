@@ -13,7 +13,7 @@ pub struct UpdateCheckResponse {
 pub async fn check_updates(
     State(state): State<AppState>,
 ) -> Result<Json<UpdateCheckResponse>, (StatusCode, String)> {
-    let cache_dir = state.config.cache_dir();
+    let cache_dir = state.config.read().await.cache_dir();
     let current = updater::read_cached_version(&cache_dir);
 
     let latest = updater::fetch_latest_version()

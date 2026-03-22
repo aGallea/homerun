@@ -7,6 +7,7 @@ use axum::{
     Json, Router,
 };
 use tokio::net::UnixListener;
+use tokio::sync::RwLock;
 
 use crate::api;
 use crate::auth::AuthManager;
@@ -17,7 +18,7 @@ use crate::runner::RunnerManager;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<Config>,
+    pub config: Arc<RwLock<Config>>,
     pub auth: AuthManager,
     pub runner_manager: RunnerManager,
     pub metrics: Arc<MetricsCollector>,
@@ -28,7 +29,7 @@ impl AppState {
     pub fn new(config: Config) -> Self {
         let runner_manager = RunnerManager::new(config.clone());
         Self {
-            config: Arc::new(config),
+            config: Arc::new(RwLock::new(config)),
             auth: AuthManager::new(),
             runner_manager,
             metrics: Arc::new(MetricsCollector::new()),
@@ -101,6 +102,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/service/uninstall", post(api_service::uninstall_service))
         .route("/service/status", get(api_service::service_status))
         .route("/updates/check", get(api_updates::check_updates))
+        .route(
+            "/preferences",
+            get(api::preferences::get_preferences).put(api::preferences::update_preferences),
+        )
         .with_state(state)
 }
 
