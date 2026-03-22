@@ -645,36 +645,58 @@ impl RunnerManager {
                                     let t = auth_token_clone.read().await;
                                     t.clone()
                                 };
-                                if let Some(token) = token {
-                                    if let Ok(gh) = GitHubClient::new(Some(token)) {
-                                        match gh
-                                            .get_active_run_for_runner(
-                                                &repo_owner,
-                                                &repo_name,
-                                                &runner_name,
-                                            )
-                                            .await
-                                        {
-                                            Ok(Some(ctx)) => {
-                                                let mut map = runners_clone.write().await;
-                                                if let Some(r) = map.get_mut(&rid_clone) {
-                                                    r.job_context = Some(ctx);
-                                                }
-                                            }
-                                            Ok(None) => {
-                                                tracing::debug!(
-                                                    runner = %rid_clone,
-                                                    "No matching workflow run found for runner"
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    runner = %rid_clone,
-                                                    error = %e,
-                                                    "Failed to fetch job context from GitHub"
-                                                );
-                                            }
+                                let Some(token) = token else {
+                                    tracing::warn!(
+                                        runner = %rid_clone,
+                                        "No auth token available, skipping job context fetch"
+                                    );
+                                    return;
+                                };
+                                let gh = match GitHubClient::new(Some(token)) {
+                                    Ok(gh) => gh,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            runner = %rid_clone,
+                                            error = %e,
+                                            "Failed to create GitHub client for job context"
+                                        );
+                                        return;
+                                    }
+                                };
+                                match gh
+                                    .get_active_run_for_runner(
+                                        &repo_owner,
+                                        &repo_name,
+                                        &runner_name,
+                                    )
+                                    .await
+                                {
+                                    Ok(Some(ctx)) => {
+                                        tracing::info!(
+                                            runner = %rid_clone,
+                                            branch = %ctx.branch,
+                                            pr = ?ctx.pr_number,
+                                            "Job context fetched"
+                                        );
+                                        let mut map = runners_clone.write().await;
+                                        if let Some(r) = map.get_mut(&rid_clone) {
+                                            r.job_context = Some(ctx);
                                         }
+                                    }
+                                    Ok(None) => {
+                                        tracing::warn!(
+                                            runner = %rid_clone,
+                                            repo = %format!("{repo_owner}/{repo_name}"),
+                                            runner_name = %runner_name,
+                                            "No matching workflow run found for runner"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            runner = %rid_clone,
+                                            error = %e,
+                                            "Failed to fetch job context from GitHub"
+                                        );
                                     }
                                 }
                             });
