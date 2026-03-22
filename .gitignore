@@ -3,6 +3,7 @@ node_modules/
 dist/
 .DS_Store
 .superpowers/
+.worktrees/
 *.swp
 *.swo
 apps/desktop/src-tauri/gen/
