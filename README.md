@@ -44,7 +44,9 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
    └─────┘  └─────┘  └─────┘
 ```
 
-All GitHub communication is outbound HTTPS from the runner processes. No inbound ports needed.
+Runners are native child processes of the daemon — not Docker containers. Each runner is an instance of the [official GitHub Actions runner binary](https://github.com/actions/runner). All GitHub communication is outbound HTTPS. No inbound ports needed.
+
+For the full architecture deep-dive (runner lifecycle, state machine, process management, auth flow), see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick Start
 
