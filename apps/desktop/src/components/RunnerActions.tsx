@@ -27,25 +27,12 @@ export function RunnerActions({
   const isRunning = runner.state === "online" || runner.state === "busy";
   const isStopped = runner.state === "offline" || runner.state === "error";
 
-  // Ghost/outline style for individual runner buttons (visually distinct from group buttons)
-  const ghostStyle: React.CSSProperties = {
-    opacity: loading ? 0.4 : 0.7,
-    fontSize: 11,
-    padding: "2px 4px",
-    minWidth: 22,
-    height: 22,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  };
-
   return (
-    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+    <div className="runner-actions-bar">
       {loading && <Spinner />}
       {isStopped && (
         <button
-          className="btn btn-sm"
-          style={ghostStyle}
+          className="icon-btn"
           onClick={() => onStart(runner.config.id)}
           title="Start"
           disabled={loading}
@@ -55,8 +42,7 @@ export function RunnerActions({
       )}
       {isRunning && (
         <button
-          className="btn btn-sm"
-          style={ghostStyle}
+          className="icon-btn"
           onClick={() => onStop(runner.config.id)}
           title="Stop"
           disabled={loading}
@@ -64,20 +50,16 @@ export function RunnerActions({
           ■
         </button>
       )}
-      {isRunning && (
-        <button
-          className="btn btn-sm"
-          style={ghostStyle}
-          onClick={() => onRestart(runner.config.id)}
-          title="Restart"
-          disabled={loading}
-        >
-          ↻
-        </button>
-      )}
       <button
-        className="btn btn-sm"
-        style={{ ...ghostStyle, color: loading ? undefined : "var(--accent-red)" }}
+        className="icon-btn"
+        onClick={() => onRestart(runner.config.id)}
+        title="Restart"
+        disabled={loading}
+      >
+        ↻
+      </button>
+      <button
+        className="icon-btn icon-btn-danger"
         onClick={() => setConfirm("delete")}
         title="Delete"
         disabled={loading}

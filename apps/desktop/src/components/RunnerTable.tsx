@@ -5,6 +5,9 @@ import { StatusBadge } from "./StatusBadge";
 import { RunnerActions } from "./RunnerActions";
 import { RunnerGroupRow } from "./RunnerGroupRow";
 
+// Persists across navigations (module-level)
+const persistedExpandedGroups = new Set<string>();
+
 interface RunnerTableProps {
   runners: RunnerInfo[];
   onStart: (id: string) => void;
@@ -20,6 +23,21 @@ interface RunnerTableProps {
   forceExpandedGroups?: Set<string>;
   pendingActions?: Set<string>;
   readOnly?: boolean;
+}
+
+function CpuValue({ value }: { value: number | undefined }) {
+  if (value == null) return <span className="text-muted font-mono">--</span>;
+  const color =
+    value > 80
+      ? "var(--accent-red)"
+      : value > 50
+        ? "var(--accent-yellow)"
+        : "var(--text-secondary)";
+  return (
+    <span className="font-mono" style={{ color, fontSize: 13 }}>
+      {value.toFixed(1)}%
+    </span>
+  );
 }
 
 export function RunnerTable({
@@ -39,15 +57,19 @@ export function RunnerTable({
   readOnly = false,
 }: RunnerTableProps) {
   const navigate = useNavigate();
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(persistedExpandedGroups),
+  );
 
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(groupId)) {
         next.delete(groupId);
+        persistedExpandedGroups.delete(groupId);
       } else {
         next.add(groupId);
+        persistedExpandedGroups.add(groupId);
       }
       return next;
     });
@@ -87,245 +109,140 @@ export function RunnerTable({
   }
 
   return (
-    <div className="card" style={{ padding: 0, overflow: "visible" }}>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Repository</th>
-            <th>Status</th>
-            <th>Current Job</th>
-            <th>Mode</th>
-            <th>CPU</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from(groups.entries()).map(([groupId, groupRunners]) => {
-            const isExpanded = effectiveExpanded.has(groupId);
-            return (
-              <Fragment key={`group-${groupId}`}>
-                <RunnerGroupRow
-                  groupId={groupId}
-                  runners={groupRunners}
-                  expanded={isExpanded}
-                  onToggle={() => toggleGroup(groupId)}
-                  onStartGroup={onStartGroup}
-                  onStopGroup={onStopGroup}
-                  onRestartGroup={onRestartGroup}
-                  onDeleteGroup={onDeleteGroup}
-                  onScaleGroup={onScaleGroup}
-                  loading={pendingActions?.has(groupId)}
-                  readOnly={readOnly}
-                />
-                {isExpanded &&
-                  groupRunners.map((runner) => {
-                    const rowLoading =
-                      pendingActions?.has(runner.config.id) || pendingActions?.has(groupId);
-                    return (
-                      <tr
-                        key={runner.config.id}
-                        style={{
-                          cursor: rowLoading ? "default" : "pointer",
-                          opacity: rowLoading ? 0.6 : 1,
-                          pointerEvents: rowLoading ? "none" : undefined,
-                        }}
-                        onClick={() => navigate(`/runners/${runner.config.id}`)}
-                      >
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          <span className="font-mono" style={{ fontSize: 13, paddingLeft: 24 }}>
-                            {runner.config.name}
-                          </span>
-                        </td>
-                        <td className="text-muted">
-                          {runner.config.repo_owner}/{runner.config.repo_name}
-                        </td>
-                        <td>
-                          <StatusBadge state={runner.state} />
-                        </td>
-                        <td>
-                          {runner.current_job ? (
-                            <div>
-                              <a
-                                href="#"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const url =
-                                    runner.job_context?.run_url ??
-                                    `https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`;
-                                  import("@tauri-apps/plugin-shell").then(({ open }) => {
-                                    open(url);
-                                  });
-                                }}
-                                style={{
-                                  color: "var(--accent-yellow)",
-                                  fontSize: 12,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {runner.current_job}
-                              </a>
-                              {runner.job_context && (
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    color: "var(--text-secondary)",
-                                    marginTop: 2,
-                                  }}
-                                >
-                                  {runner.job_context.branch}
-                                  {runner.job_context.pr_number != null && (
-                                    <a
-                                      href="#"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        if (runner.job_context?.pr_url) {
-                                          import("@tauri-apps/plugin-shell").then(({ open }) => {
-                                            open(runner.job_context!.pr_url!);
-                                          });
-                                        }
-                                      }}
-                                      style={{
-                                        color: "var(--accent-blue)",
-                                        marginLeft: 6,
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      PR #{runner.job_context.pr_number}
-                                    </a>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-muted" style={{ fontSize: 12 }}>
-                              —
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-muted" style={{ textTransform: "capitalize" }}>
-                          {runner.config.mode}
-                        </td>
-                        <td className="font-mono text-muted">
-                          {metrics?.get(runner.config.id) != null
-                            ? `${metrics.get(runner.config.id)!.toFixed(1)}%`
-                            : "--"}
-                        </td>
-                        <td onClick={(e) => e.stopPropagation()}>
-                          <RunnerActions
-                            runner={runner}
-                            onStart={onStart}
-                            onStop={onStop}
-                            onRestart={onRestart}
-                            onDelete={onDelete}
-                            loading={rowLoading}
-                            readOnly={readOnly}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </Fragment>
-            );
-          })}
-          {soloRunners.map((runner) => (
-            <tr
-              key={runner.config.id}
-              style={{
-                cursor: pendingActions?.has(runner.config.id) ? "default" : "pointer",
-                opacity: pendingActions?.has(runner.config.id) ? 0.6 : 1,
-                pointerEvents: pendingActions?.has(runner.config.id) ? "none" : undefined,
-              }}
-              onClick={() => navigate(`/runners/${runner.config.id}`)}
-            >
-              <td style={{ whiteSpace: "nowrap" }}>
-                <span className="font-mono" style={{ fontSize: 13 }}>
-                  {runner.config.name}
-                </span>
-              </td>
-              <td className="text-muted">
-                {runner.config.repo_owner}/{runner.config.repo_name}
-              </td>
-              <td>
-                <StatusBadge state={runner.state} />
-              </td>
-              <td>
-                {runner.current_job ? (
-                  <div>
-                    <a
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const url =
-                          runner.job_context?.run_url ??
-                          `https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`;
-                        import("@tauri-apps/plugin-shell").then(({ open }) => {
-                          open(url);
-                        });
-                      }}
-                      style={{ color: "var(--accent-yellow)", fontSize: 12, cursor: "pointer" }}
-                    >
-                      {runner.current_job}
-                    </a>
-                    {runner.job_context && (
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-                        {runner.job_context.branch}
-                        {runner.job_context.pr_number != null && (
-                          <a
-                            href="#"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (runner.job_context?.pr_url) {
-                                import("@tauri-apps/plugin-shell").then(({ open }) => {
-                                  open(runner.job_context!.pr_url!);
-                                });
-                              }
-                            }}
-                            style={{
-                              color: "var(--accent-blue)",
-                              marginLeft: 6,
-                              cursor: "pointer",
-                            }}
-                          >
-                            PR #{runner.job_context.pr_number}
-                          </a>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-muted" style={{ fontSize: 12 }}>
-                    —
-                  </span>
-                )}
-              </td>
-              <td className="text-muted" style={{ textTransform: "capitalize" }}>
-                {runner.config.mode}
-              </td>
-              <td className="font-mono text-muted">
-                {metrics?.get(runner.config.id) != null
-                  ? `${metrics.get(runner.config.id)!.toFixed(1)}%`
-                  : "--"}
-              </td>
-              <td onClick={(e) => e.stopPropagation()}>
-                <RunnerActions
-                  runner={runner}
-                  onStart={onStart}
-                  onStop={onStop}
-                  onRestart={onRestart}
-                  onDelete={onDelete}
-                  loading={pendingActions?.has(runner.config.id)}
-                  readOnly={readOnly}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="runner-list">
+      {/* Column header */}
+      <div className="runner-list-header">
+        <div className="runner-row-grid">
+          <div className="runner-col-name">NAME</div>
+          <div className="runner-col-repo">REPOSITORY</div>
+          <div className="runner-col-status">STATUS</div>
+          <div className="runner-col-actions"></div>
+        </div>
+      </div>
+
+      {/* Groups */}
+      {Array.from(groups.entries()).map(([groupId, groupRunners]) => {
+        const isExpanded = effectiveExpanded.has(groupId);
+        return (
+          <Fragment key={`group-${groupId}`}>
+            <RunnerGroupRow
+              groupId={groupId}
+              runners={groupRunners}
+              expanded={isExpanded}
+              onToggle={() => toggleGroup(groupId)}
+              onStartGroup={onStartGroup}
+              onStopGroup={onStopGroup}
+              onRestartGroup={onRestartGroup}
+              onDeleteGroup={onDeleteGroup}
+              onScaleGroup={onScaleGroup}
+              loading={pendingActions?.has(groupId)}
+              readOnly={readOnly}
+            />
+            {isExpanded &&
+              groupRunners.map((runner) => {
+                const rowLoading =
+                  pendingActions?.has(runner.config.id) || pendingActions?.has(groupId);
+                return (
+                  <RunnerRow
+                    key={runner.config.id}
+                    runner={runner}
+                    cpuValue={metrics?.get(runner.config.id)}
+                    loading={rowLoading}
+                    readOnly={readOnly}
+                    indented
+                    inGroup
+                    onStart={onStart}
+                    onStop={onStop}
+                    onRestart={onRestart}
+                    onDelete={onDelete}
+                    onClick={() => navigate(`/runners/${runner.config.id}`)}
+                  />
+                );
+              })}
+          </Fragment>
+        );
+      })}
+
+      {/* Solo runners */}
+      {soloRunners.map((runner) => (
+        <RunnerRow
+          key={runner.config.id}
+          runner={runner}
+          cpuValue={metrics?.get(runner.config.id)}
+          loading={pendingActions?.has(runner.config.id)}
+          readOnly={readOnly}
+          onStart={onStart}
+          onStop={onStop}
+          onRestart={onRestart}
+          onDelete={onDelete}
+          onClick={() => navigate(`/runners/${runner.config.id}`)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RunnerRow({
+  runner,
+  cpuValue,
+  loading,
+  readOnly,
+  indented,
+  inGroup,
+  onStart,
+  onStop,
+  onRestart,
+  onDelete,
+  onClick,
+}: {
+  runner: RunnerInfo;
+  cpuValue?: number;
+  loading?: boolean;
+  readOnly: boolean;
+  indented?: boolean;
+  inGroup?: boolean;
+  onStart: (id: string) => void;
+  onStop: (id: string) => void;
+  onRestart: (id: string) => void;
+  onDelete: (id: string) => void;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      className={`runner-row ${indented ? "runner-row-indented" : ""}`}
+      style={{
+        cursor: loading ? "default" : "pointer",
+        opacity: loading ? 0.6 : 1,
+        pointerEvents: loading ? "none" : undefined,
+      }}
+      onClick={onClick}
+    >
+      <div className="runner-row-grid">
+        <div className="runner-col-name">
+          {indented && <span style={{ width: 20, display: "inline-block" }} />}
+          <span className="font-mono" style={{ fontSize: 14, fontWeight: 500 }}>
+            {runner.config.name}
+          </span>
+        </div>
+        <div className="runner-col-repo">
+          {!inGroup && `${runner.config.repo_owner}/${runner.config.repo_name}`}
+        </div>
+        <div className="runner-col-status">
+          <StatusBadge state={runner.state} />
+        </div>
+        <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
+          <CpuValue value={cpuValue} />
+          <RunnerActions
+            runner={runner}
+            onStart={onStart}
+            onStop={onStop}
+            onRestart={onRestart}
+            onDelete={onDelete}
+            loading={loading}
+            readOnly={readOnly}
+          />
+        </div>
+      </div>
     </div>
   );
 }
