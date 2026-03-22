@@ -679,8 +679,11 @@ impl RunnerManager {
             // Update state to Offline
             let mut runners = manager.runners.write().await;
             if let Some(r) = runners.get_mut(&runner_id) {
-                // Only transition if still Online or Busy (not if already Stopping/Deleting)
-                if r.state == RunnerState::Online || r.state == RunnerState::Busy {
+                // Transition to Offline if Online, Busy, or Stopping (not if Deleting)
+                if r.state == RunnerState::Online
+                    || r.state == RunnerState::Busy
+                    || r.state == RunnerState::Stopping
+                {
                     r.state = RunnerState::Offline;
                     r.pid = None;
                     r.started_at = None;
