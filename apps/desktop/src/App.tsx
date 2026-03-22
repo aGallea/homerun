@@ -5,6 +5,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Repositories } from "./pages/Repositories";
 import { RunnerDetail } from "./pages/RunnerDetail";
 import { Settings } from "./pages/Settings";
+import { Daemon } from "./pages/Daemon";
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/repositories" element={<Repositories />} />
             <Route path="/runners/:id" element={<RunnerDetail />} />
+            <Route path="/daemon" element={<Daemon />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

@@ -146,6 +146,10 @@ async fn run_tui() -> Result<()> {
                             app.metrics = Some(metrics);
                         }
                     }
+                    // Refresh daemon logs when on Daemon tab
+                    if app.active_tab == homerun::app::Tab::Daemon {
+                        refresh_daemon_logs(&client, &mut app).await;
+                    }
                 }
                 AppEvent::DaemonEvent(_json) => {
                     // Real-time event received — refresh runner list
@@ -217,6 +221,10 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
             }
             Ok(())
         }
+        Action::RefreshDaemonLogs => {
+            refresh_daemon_logs(client, app).await;
+            Ok(())
+        }
     };
 
     match result {
@@ -248,6 +256,25 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
         }
         Err(e) => {
             app.status_message = Some(format!("Error: {e}"));
+        }
+    }
+}
+
+async fn refresh_daemon_logs(client: &DaemonClient, app: &mut App) {
+    let level = Some(app.daemon_log_level.as_str());
+    let search = if app.daemon_search.is_empty() {
+        None
+    } else {
+        Some(app.daemon_search.as_str())
+    };
+    if let Ok(logs) = client
+        .get_daemon_logs_recent(level, Some(500), search)
+        .await
+    {
+        let was_following = app.daemon_follow;
+        app.daemon_logs = logs;
+        if was_following && !app.daemon_logs.is_empty() {
+            app.daemon_log_scroll = app.daemon_logs.len().saturating_sub(1);
         }
     }
 }

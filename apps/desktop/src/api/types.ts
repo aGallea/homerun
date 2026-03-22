@@ -79,6 +79,30 @@ export interface RunnerMetrics {
 export interface MetricsResponse {
   system: SystemMetrics;
   runners: RunnerMetrics[];
+  daemon?: DaemonMetrics;
+}
+
+export interface DaemonLogEntry {
+  timestamp: string;
+  level: string;
+  target: string;
+  message: string;
+}
+
+export interface DaemonMetrics {
+  pid: number;
+  uptime_seconds: number;
+  cpu_percent: number;
+  memory_bytes: number;
+  child_processes: ChildProcessInfo[];
+}
+
+export interface ChildProcessInfo {
+  pid: number;
+  runner_id: string;
+  runner_name: string;
+  cpu_percent: number;
+  memory_bytes: number;
 }
 
 export interface RepoInfo {

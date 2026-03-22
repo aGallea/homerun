@@ -3,6 +3,7 @@ import type {
   AuthStatus,
   BatchCreateResponse,
   CreateBatchRequest,
+  DaemonLogEntry,
   DeviceFlowResponse,
   GroupActionResponse,
   LogEntry,
@@ -43,6 +44,8 @@ export const api = {
   // Logs
   getRunnerLogs: (runnerId: string) =>
     invoke<LogEntry[]>("get_runner_logs", { runner_id: runnerId }),
+  getDaemonLogsRecent: (level?: string, limit?: number, search?: string) =>
+    invoke<DaemonLogEntry[]>("get_daemon_logs_recent", { level, limit, search }),
 
   // Health
   healthCheck: () => invoke<boolean>("health_check"),

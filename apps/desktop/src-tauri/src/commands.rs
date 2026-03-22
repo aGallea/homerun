@@ -1,9 +1,9 @@
 use tauri::State;
 
 use crate::client::{
-    AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DeviceFlowResponse,
-    GroupActionResponse, LogEntry, MetricsResponse, Preferences, RepoInfo, RunnerInfo,
-    ScaleGroupResponse,
+    AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DaemonLogEntry,
+    DeviceFlowResponse, GroupActionResponse, LogEntry, MetricsResponse, Preferences, RepoInfo,
+    RunnerInfo, ScaleGroupResponse,
 };
 use crate::AppState;
 
@@ -212,4 +212,17 @@ pub async fn update_preferences(
 ) -> Result<Preferences, String> {
     let client = state.client.lock().await;
     client.update_preferences(&prefs).await
+}
+
+#[tauri::command]
+pub async fn get_daemon_logs_recent(
+    state: State<'_, AppState>,
+    level: Option<String>,
+    limit: Option<usize>,
+    search: Option<String>,
+) -> Result<Vec<DaemonLogEntry>, String> {
+    let client = state.client.lock().await;
+    client
+        .get_daemon_logs_recent(level.as_deref(), limit, search.as_deref())
+        .await
 }

@@ -45,6 +45,7 @@ pub fn run() {
             commands::scale_group,
             commands::get_preferences,
             commands::update_preferences,
+            commands::get_daemon_logs_recent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
