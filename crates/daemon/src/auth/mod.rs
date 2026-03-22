@@ -66,6 +66,20 @@ impl AuthManager {
         }
     }
 
+    /// Create an AuthManager that is already authenticated, for testing.
+    #[doc(hidden)]
+    pub fn new_test_authenticated() -> Self {
+        Self {
+            state: Arc::new(RwLock::new(Some(AuthState {
+                token: "ghp_test_token".to_string(),
+                user: GitHubUser {
+                    login: "test-user".to_string(),
+                    avatar_url: "https://example.com/avatar.png".to_string(),
+                },
+            }))),
+        }
+    }
+
     /// Attempt to restore a previously saved token from the keychain on startup.
     pub async fn try_restore(&self) -> Result<()> {
         if let Some(token) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)? {
@@ -118,13 +132,15 @@ impl AuthManager {
     }
 
     pub async fn status(&self) -> AuthStatus {
+        // Try to ensure token is loaded (triggers lazy keychain restore if needed)
+        let has_token = self.token().await.is_some();
         let state = self.state.read().await;
         match &*state {
-            Some(s) => AuthStatus {
+            Some(s) if has_token => AuthStatus {
                 authenticated: true,
                 user: Some(s.user.clone()),
             },
-            None => AuthStatus {
+            _ => AuthStatus {
                 authenticated: false,
                 user: None,
             },
@@ -132,8 +148,32 @@ impl AuthManager {
     }
 
     pub async fn token(&self) -> Option<String> {
-        let state = self.state.read().await;
-        state.as_ref().map(|s| s.token.clone())
+        // Fast path: token already in memory
+        {
+            let state = self.state.read().await;
+            if let Some(ref s) = *state {
+                return Some(s.token.clone());
+            }
+        }
+
+        // Slow path: try to restore from keychain (local-only, no network call)
+        if let Ok(Some(token)) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+            tracing::info!("Lazily restored auth token from keychain");
+            let mut state = self.state.write().await;
+            // Only set if still None (another task may have restored it)
+            if state.is_none() {
+                *state = Some(AuthState {
+                    token: token.clone(),
+                    user: GitHubUser {
+                        login: "unknown".to_string(),
+                        avatar_url: String::new(),
+                    },
+                });
+            }
+            return Some(state.as_ref().map(|s| s.token.clone()).unwrap_or(token));
+        }
+
+        None
     }
 
     /// Initiate a GitHub Device Flow. Returns the user_code and verification_uri

@@ -8,7 +8,9 @@ fn test_state() -> AppState {
     let dir = tempfile::tempdir().unwrap();
     let config = Config::with_base_dir(dir.keep().join(".homerun"));
     config.ensure_dirs().unwrap();
-    AppState::new(config)
+    let mut state = AppState::new(config);
+    state.auth = homerund::auth::AuthManager::new_test_authenticated();
+    state
 }
 
 #[tokio::test]
@@ -200,7 +202,10 @@ async fn test_create_multiple_runners_for_same_repo() {
 
 #[tokio::test]
 async fn test_auth_status_unauthenticated() {
-    let state = test_state();
+    let dir = tempfile::tempdir().unwrap();
+    let config = Config::with_base_dir(dir.keep().join(".homerun"));
+    config.ensure_dirs().unwrap();
+    let state = AppState::new(config);
     let app = create_router(state);
     let resp = app
         .oneshot(

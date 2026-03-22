@@ -24,20 +24,16 @@ pub async fn create_runner(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     // Spawn background task to register and start the runner
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     let manager = state.runner_manager.clone();
-    let auth = state.auth.clone();
     let runner_id = runner.config.id.clone();
     tokio::spawn(async move {
-        let token = match auth.token().await {
-            Some(t) => t,
-            None => {
-                tracing::error!("No auth token available for runner registration");
-                let _ = manager
-                    .update_state(&runner_id, crate::runner::state::RunnerState::Error)
-                    .await;
-                return;
-            }
-        };
         if let Err(e) = manager.register_and_start(&runner_id, &token).await {
             tracing::error!("Failed to register and start runner {}: {}", runner_id, e);
             let _ = manager
@@ -148,17 +144,16 @@ pub async fn start_runner(
         ));
     }
 
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     let manager = state.runner_manager.clone();
-    let auth = state.auth.clone();
     let runner_id = id.clone();
     tokio::spawn(async move {
-        let token = match auth.token().await {
-            Some(t) => t,
-            None => {
-                tracing::error!("No auth token available for runner start");
-                return;
-            }
-        };
         // Offline/Error -> Registering is a valid transition
         if let Err(e) = manager
             .update_state(&runner_id, crate::runner::state::RunnerState::Registering)
@@ -233,17 +228,16 @@ pub async fn restart_runner(
     }
 
     // Now start — stop_process already waited for process to fully exit
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     let manager = state.runner_manager.clone();
-    let auth = state.auth.clone();
     let runner_id = id.clone();
     tokio::spawn(async move {
-        let token = match auth.token().await {
-            Some(t) => t,
-            None => {
-                tracing::error!("No auth token available for runner restart");
-                return;
-            }
-        };
         if let Err(e) = manager
             .update_state(&runner_id, crate::runner::state::RunnerState::Registering)
             .await
@@ -274,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_list_runners() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
 
         // Create a runner
         let app = create_router(state.clone());
@@ -313,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_runner() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
 
         // Create
         let app = create_router(state.clone());
@@ -384,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_runner() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
 
         // Create
         let app = create_router(state.clone());
@@ -476,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn test_stop_runner_conflict_when_not_online() {
         // A newly created runner is in "creating" state → stop should return 409 CONFLICT
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let id = create_runner_and_get_id(&state).await;
 
         let app = create_router(state);
@@ -497,7 +491,7 @@ mod tests {
     async fn test_start_runner_conflict_when_not_offline_or_error() {
         // A newly created runner is in "creating" state → start should return 409 CONFLICT
         // because start only accepts Offline or Error states.
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let id = create_runner_and_get_id(&state).await;
 
         let app = create_router(state);
@@ -520,7 +514,7 @@ mod tests {
         // is async and we don't wait for it.  We just verify the HTTP response.
         use crate::runner::state::RunnerState;
 
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let id = create_runner_and_get_id(&state).await;
 
         // Manually transition to Offline so restart is valid.
@@ -574,7 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_runner_with_name_and_labels() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let app = create_router(state.clone());
         let response = app
             .oneshot(
@@ -640,7 +634,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_runner_mode() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let id = create_runner_and_get_id(&state).await;
 
         let app = create_router(state);
@@ -666,7 +660,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_runner_returns_correct_id() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let id = create_runner_and_get_id(&state).await;
 
         let app = create_router(state);

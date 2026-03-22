@@ -1,9 +1,13 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useRepos } from "../hooks/useRepos";
 import { useRunners } from "../hooks/useRunners";
+import { useAuth } from "../hooks/useAuth";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Repositories() {
+  const { auth } = useAuth();
+  const navigate = useNavigate();
   const { repos, loading: reposLoading, error: reposError } = useRepos();
   const { runners, createRunner, createBatch } = useRunners();
   const [search, setSearch] = useState("");
@@ -23,6 +27,27 @@ export function Repositories() {
     const q = search.toLowerCase();
     return repos.filter((r) => r.full_name.toLowerCase().includes(q));
   }, [repos, search]);
+
+  if (!auth.authenticated) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <h1 className="page-title">Repositories</h1>
+        </div>
+        <div className="card" style={{ textAlign: "center", padding: "60px 40px" }}>
+          <p style={{ fontSize: 15, color: "var(--text-primary)", marginBottom: 8 }}>
+            Sign in to view your repositories
+          </p>
+          <p className="text-muted" style={{ fontSize: 13, marginBottom: 20 }}>
+            Connect your GitHub account to browse repositories and add runners.
+          </p>
+          <button className="btn btn-primary" onClick={() => navigate("/settings")}>
+            Sign in with GitHub
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">

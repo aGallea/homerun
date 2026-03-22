@@ -42,6 +42,14 @@ impl AppState {
         config.ensure_dirs().unwrap();
         Self::new(config)
     }
+
+    /// Create a test AppState with a pre-authenticated AuthManager.
+    #[cfg(test)]
+    pub fn new_test_authenticated() -> Self {
+        let mut state = Self::new_test();
+        state.auth = AuthManager::new_test_authenticated();
+        state
+    }
 }
 
 pub fn create_router(state: AppState) -> Router {

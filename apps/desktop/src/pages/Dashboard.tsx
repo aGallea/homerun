@@ -1,11 +1,16 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
+import { useAuth } from "../hooks/useAuth";
 import { StatsCard } from "../components/StatsCard";
 import { RunnerTable } from "../components/RunnerTable";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Dashboard() {
+  const { auth } = useAuth();
+  const navigate = useNavigate();
+  const isAuthenticated = auth.authenticated;
   const {
     runners,
     loading,
@@ -106,11 +111,39 @@ export function Dashboard() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <button className="btn btn-primary" onClick={() => setShowWizard(true)}>
-            + New Runner
-          </button>
+          {isAuthenticated && (
+            <button className="btn btn-primary" onClick={() => setShowWizard(true)}>
+              + New Runner
+            </button>
+          )}
         </div>
       </div>
+
+      {!isAuthenticated && (
+        <div
+          className="card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 20,
+            padding: "12px 20px",
+            background: "rgba(210, 153, 34, 0.1)",
+            border: "1px solid rgba(210, 153, 34, 0.3)",
+          }}
+        >
+          <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+            Sign in with GitHub to create and manage runners.
+          </span>
+          <button
+            className="btn btn-primary"
+            style={{ fontSize: 12, padding: "4px 12px" }}
+            onClick={() => navigate("/settings")}
+          >
+            Sign in
+          </button>
+        </div>
+      )}
 
       <div className="stats-grid">
         <StatsCard label="Total Runners" value={runners.length} />
@@ -133,6 +166,7 @@ export function Dashboard() {
         metrics={cpuMap}
         forceExpandedGroups={forceExpandedGroups}
         pendingActions={pendingActions}
+        readOnly={!isAuthenticated}
       />
 
       {showWizard && (

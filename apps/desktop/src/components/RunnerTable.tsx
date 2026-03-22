@@ -19,6 +19,7 @@ interface RunnerTableProps {
   metrics?: Map<string, number>;
   forceExpandedGroups?: Set<string>;
   pendingActions?: Set<string>;
+  readOnly?: boolean;
 }
 
 export function RunnerTable({
@@ -35,6 +36,7 @@ export function RunnerTable({
   metrics,
   forceExpandedGroups,
   pendingActions,
+  readOnly = false,
 }: RunnerTableProps) {
   const navigate = useNavigate();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -114,6 +116,7 @@ export function RunnerTable({
                   onDeleteGroup={onDeleteGroup}
                   onScaleGroup={onScaleGroup}
                   loading={pendingActions?.has(groupId)}
+                  readOnly={readOnly}
                 />
                 {isExpanded &&
                   groupRunners.map((runner) => {
@@ -218,6 +221,7 @@ export function RunnerTable({
                             onRestart={onRestart}
                             onDelete={onDelete}
                             loading={rowLoading}
+                            readOnly={readOnly}
                           />
                         </td>
                       </tr>
@@ -315,6 +319,7 @@ export function RunnerTable({
                   onRestart={onRestart}
                   onDelete={onDelete}
                   loading={pendingActions?.has(runner.config.id)}
+                  readOnly={readOnly}
                 />
               </td>
             </tr>

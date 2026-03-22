@@ -9,6 +9,7 @@ interface RunnerActionsProps {
   onRestart: (id: string) => void;
   onDelete: (id: string) => void;
   loading?: boolean;
+  readOnly?: boolean;
 }
 
 export function RunnerActions({
@@ -18,7 +19,9 @@ export function RunnerActions({
   onRestart,
   onDelete,
   loading = false,
+  readOnly = false,
 }: RunnerActionsProps) {
+  if (readOnly) return null;
   const [confirm, setConfirm] = useState<"delete" | null>(null);
 
   const isRunning = runner.state === "online" || runner.state === "busy";
