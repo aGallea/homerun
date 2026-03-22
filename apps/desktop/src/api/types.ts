@@ -6,6 +6,7 @@ export interface RunnerConfig {
   labels: string[];
   mode: string;
   work_dir: string;
+  group_id?: string;
 }
 
 export type RunnerState =
@@ -94,4 +95,38 @@ export interface RunnerEvent {
   event_type: string;
   data: unknown;
   timestamp: string;
+}
+
+export interface CreateBatchRequest {
+  repo_full_name: string;
+  count: number;
+  labels?: string[];
+  mode?: string;
+}
+
+export interface BatchCreateResponse {
+  group_id: string;
+  runners: RunnerInfo[];
+  errors: { index: number; error: string }[];
+}
+
+export interface GroupActionResult {
+  runner_id: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface GroupActionResponse {
+  group_id: string;
+  results: GroupActionResult[];
+}
+
+export interface ScaleGroupResponse {
+  group_id: string;
+  previous_count: number;
+  target_count: number;
+  actual_count: number;
+  added: RunnerInfo[];
+  removed: string[];
+  skipped_busy: string[];
 }

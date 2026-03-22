@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 const navItems = [
@@ -9,6 +9,7 @@ const navItems = [
 
 export function Sidebar() {
   const { auth } = useAuth();
+  const navigate = useNavigate();
 
   return (
     <nav className="sidebar">
@@ -36,8 +37,18 @@ export function Sidebar() {
             <span className="sidebar-username">{auth.user.login}</span>
           </div>
         ) : (
-          <div className="sidebar-user">
+          <div
+            className="sidebar-user"
+            style={{ justifyContent: "space-between", alignItems: "center" }}
+          >
             <span className="sidebar-username text-muted">Not signed in</span>
+            <button
+              className="btn btn-sm"
+              onClick={() => navigate("/settings")}
+              style={{ fontSize: 11, padding: "3px 8px" }}
+            >
+              Sign in
+            </button>
           </div>
         )}
       </div>

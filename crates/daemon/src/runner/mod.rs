@@ -42,6 +42,7 @@ pub struct RunnerManager {
     log_tx: Arc<broadcast::Sender<LogEntry>>,
     event_tx: Arc<broadcast::Sender<RunnerEvent>>,
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
+    name_counters: Arc<RwLock<HashMap<String, u32>>>,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -86,7 +87,40 @@ impl RunnerManager {
             log_tx: Arc::new(log_tx),
             event_tx: Arc::new(event_tx),
             recent_logs: Arc::new(RwLock::new(HashMap::new())),
+            name_counters: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    async fn next_runner_number(&self, repo_name: &str) -> u32 {
+        // Find existing numbers for this repo to pick the next available one
+        let runners = self.runners.read().await;
+        let existing_nums: std::collections::HashSet<u32> = runners
+            .values()
+            .filter(|r| r.config.repo_name == repo_name)
+            .filter_map(|r| {
+                let prefix = format!("{}-runner-", repo_name);
+                r.config.name.strip_prefix(&prefix)?.parse::<u32>().ok()
+            })
+            .collect();
+        drop(runners);
+
+        // Find lowest unused number starting from 1
+        let mut num = 1;
+        while existing_nums.contains(&num) {
+            num += 1;
+        }
+
+        // Also check the counter to avoid reuse within the same session
+        // (e.g., during a batch create where runners are being added in a loop)
+        let mut counters = self.name_counters.write().await;
+        let counter = counters.entry(repo_name.to_string()).or_insert(0);
+        if num <= *counter {
+            *counter += 1;
+            num = *counter;
+        } else {
+            *counter = num;
+        }
+        num
     }
 
     pub fn subscribe_logs(&self) -> broadcast::Receiver<LogEntry> {
@@ -173,6 +207,7 @@ impl RunnerManager {
         name: Option<String>,
         labels: Option<Vec<String>>,
         mode: Option<RunnerMode>,
+        group_id: Option<String>,
     ) -> Result<RunnerInfo> {
         let parts: Vec<&str> = repo_full_name.split('/').collect();
         if parts.len() != 2 {
@@ -181,14 +216,13 @@ impl RunnerManager {
         let (owner, repo) = (parts[0], parts[1]);
 
         let id = uuid::Uuid::new_v4().to_string();
-        let count = self
-            .runners
-            .read()
-            .await
-            .values()
-            .filter(|r| r.config.repo_name == repo)
-            .count();
-        let name = name.unwrap_or_else(|| format!("{repo}-runner-{}", count + 1));
+        let name = match name {
+            Some(n) => n,
+            None => {
+                let num = self.next_runner_number(repo).await;
+                format!("{repo}-runner-{num}")
+            }
+        };
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
@@ -215,6 +249,7 @@ impl RunnerManager {
                 labels: default_labels,
                 mode: mode.unwrap_or(RunnerMode::App),
                 work_dir,
+                group_id,
             },
             state: RunnerState::Creating,
             pid: None,
@@ -228,6 +263,152 @@ impl RunnerManager {
         self.runners.write().await.insert(id, runner.clone());
         self.save_to_disk().await?;
         Ok(runner)
+    }
+
+    pub async fn create_batch(
+        &self,
+        repo_full_name: &str,
+        count: u8,
+        labels: Option<Vec<String>>,
+        mode: Option<RunnerMode>,
+    ) -> Result<(String, Vec<RunnerInfo>, Vec<types::BatchCreateError>)> {
+        let group_id = uuid::Uuid::new_v4().to_string();
+        let mut runners = Vec::new();
+        let mut errors = Vec::new();
+
+        for i in 0..count {
+            match self
+                .create(
+                    repo_full_name,
+                    None,
+                    labels.clone(),
+                    mode.clone(),
+                    Some(group_id.clone()),
+                )
+                .await
+            {
+                Ok(runner) => runners.push(runner),
+                Err(e) => errors.push(types::BatchCreateError {
+                    index: i,
+                    error: e.to_string(),
+                }),
+            }
+        }
+
+        Ok((group_id, runners, errors))
+    }
+
+    pub async fn list_by_group(&self, group_id: &str) -> Vec<RunnerInfo> {
+        self.runners
+            .read()
+            .await
+            .values()
+            .filter(|r| r.config.group_id.as_deref() == Some(group_id))
+            .cloned()
+            .map(Self::with_computed_uptime)
+            .collect()
+    }
+
+    pub async fn scale_group(
+        &self,
+        group_id: &str,
+        target_count: u8,
+    ) -> Result<types::ScaleGroupResponse> {
+        let runners = self.list_by_group(group_id).await;
+        if runners.is_empty() {
+            bail!("Group '{group_id}' not found");
+        }
+
+        let previous_count = runners.len() as u8;
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut skipped_busy = Vec::new();
+
+        if target_count > previous_count {
+            // Scale up — use config from first runner sorted by name
+            let mut sorted = runners.clone();
+            sorted.sort_by(|a, b| a.config.name.cmp(&b.config.name));
+            let template = &sorted[0];
+            let repo_full_name = format!(
+                "{}/{}",
+                template.config.repo_owner, template.config.repo_name
+            );
+            let to_add = target_count - previous_count;
+
+            for _ in 0..to_add {
+                match self
+                    .create(
+                        &repo_full_name,
+                        None,
+                        Some(template.config.labels.clone()),
+                        Some(template.config.mode.clone()),
+                        Some(group_id.to_string()),
+                    )
+                    .await
+                {
+                    Ok(runner) => added.push(runner),
+                    Err(e) => {
+                        tracing::error!("Failed to create runner during scale-up: {e}");
+                        break;
+                    }
+                }
+            }
+        } else if target_count < previous_count {
+            // Scale down — remove highest-numbered first, skip busy
+            let mut sorted = runners.clone();
+            sorted.sort_by(|a, b| {
+                let num_a = a
+                    .config
+                    .name
+                    .rsplit('-')
+                    .next()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                let num_b = b
+                    .config
+                    .name
+                    .rsplit('-')
+                    .next()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                num_b.cmp(&num_a)
+            });
+
+            let to_remove = (previous_count - target_count) as usize;
+            let mut removed_count = 0;
+
+            for runner in &sorted {
+                if removed_count >= to_remove {
+                    break;
+                }
+                if runner.state == RunnerState::Busy {
+                    skipped_busy.push(runner.config.id.clone());
+                    continue;
+                }
+                if let Err(e) = self.delete(&runner.config.id).await {
+                    tracing::error!(
+                        "Failed to delete runner {} during scale-down: {e}",
+                        runner.config.id
+                    );
+                    continue;
+                }
+                removed.push(runner.config.id.clone());
+                removed_count += 1;
+            }
+        }
+
+        let actual_count =
+            (previous_count as i16 + added.len() as i16 - removed.len() as i16) as u8;
+
+        Ok(types::ScaleGroupResponse {
+            group_id: group_id.to_string(),
+            previous_count,
+            target_count,
+            actual_count,
+            added,
+            removed,
+            skipped_busy,
+        })
     }
 
     pub async fn list(&self) -> Vec<RunnerInfo> {
@@ -498,8 +679,11 @@ impl RunnerManager {
             // Update state to Offline
             let mut runners = manager.runners.write().await;
             if let Some(r) = runners.get_mut(&runner_id) {
-                // Only transition if still Online or Busy (not if already Stopping/Deleting)
-                if r.state == RunnerState::Online || r.state == RunnerState::Busy {
+                // Transition to Offline if Online, Busy, or Stopping (not if Deleting)
+                if r.state == RunnerState::Online
+                    || r.state == RunnerState::Busy
+                    || r.state == RunnerState::Stopping
+                {
                     r.state = RunnerState::Offline;
                     r.pid = None;
                     r.started_at = None;
@@ -514,18 +698,43 @@ impl RunnerManager {
     }
 
     /// Stop a running runner process.
+    ///
+    /// Removes the process handle from the map, kills it, waits for exit,
+    /// then transitions to Offline. This is blocking but avoids deadlocks
+    /// because we take ownership of the process handle before killing.
     pub async fn stop_process(&self, id: &str) -> Result<()> {
         // Transition to Stopping
         self.update_state(id, RunnerState::Stopping).await?;
         self.emit_state_event(id, "stopping");
 
-        // Kill the child process
-        if let Some(child_arc) = self.processes.read().await.get(id).cloned() {
-            let mut child = child_arc.write().await;
-            let _ = child.kill().await;
-            // Wait for the process to fully exit
-            let _ = child.wait().await;
+        // Get the PID before killing — we use the PID directly to avoid
+        // deadlocking with the monitoring task which holds the Child write lock.
+        let pid = self.runners.read().await.get(id).and_then(|r| r.pid);
+
+        if let Some(pid) = pid {
+            // Send SIGTERM first for graceful shutdown, then SIGKILL
+            let pid_str = pid.to_string();
+            let _ = std::process::Command::new("kill").args([&pid_str]).output();
+
+            // Wait for process to exit (poll up to 10 seconds)
+            for _ in 0..20 {
+                let output = std::process::Command::new("kill")
+                    .args(["-0", &pid_str])
+                    .output();
+                match output {
+                    Ok(o) if !o.status.success() => break, // process gone
+                    _ => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+                }
+            }
+
+            // Force kill if still alive
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid_str])
+                .output();
         }
+
+        // Remove process handle from map
+        self.processes.write().await.remove(id);
 
         // Update to Offline
         {
@@ -533,9 +742,9 @@ impl RunnerManager {
             if let Some(r) = runners.get_mut(id) {
                 r.state = RunnerState::Offline;
                 r.pid = None;
+                r.started_at = None;
             }
         }
-        self.processes.write().await.remove(id);
         self.emit_state_event(id, "offline");
         Ok(())
     }
@@ -621,6 +830,13 @@ mod tests {
     use crate::config::Config;
     use state::RunnerState;
 
+    fn create_test_manager() -> RunnerManager {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        RunnerManager::new(config)
+    }
+
     #[tokio::test]
     async fn test_event_broadcast() {
         let dir = tempfile::tempdir().unwrap();
@@ -676,7 +892,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
 
@@ -696,11 +912,11 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
         manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
 
@@ -716,7 +932,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -734,7 +950,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
         assert_eq!(runner.state, RunnerState::Creating);
@@ -767,11 +983,11 @@ mod tests {
         // Create runners and save
         let manager = RunnerManager::new(config.clone());
         manager
-            .create("owner/repo1", None, None, None)
+            .create("owner/repo1", None, None, None, None)
             .await
             .unwrap();
         manager
-            .create("owner/repo2", None, None, None)
+            .create("owner/repo2", None, None, None, None)
             .await
             .unwrap();
         manager.save_to_disk().await.unwrap();
@@ -965,6 +1181,7 @@ mod tests {
                 labels: vec!["self-hosted".to_string()],
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp/runner-abc"),
+                group_id: None,
             },
             state: RunnerState::Busy,
             pid: Some(1234),
@@ -992,7 +1209,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -1056,7 +1273,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         // Creating -> Busy is not a valid transition
@@ -1087,6 +1304,7 @@ mod tests {
                 Some("my-runner".to_string()),
                 Some(vec!["gpu".to_string(), "macOS".to_string()]),
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1110,7 +1328,7 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let result = manager.create("nodash", None, None, None).await;
+        let result = manager.create("nodash", None, None, None, None).await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("Invalid repo name"), "unexpected: {msg}");
@@ -1138,7 +1356,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -1183,7 +1401,7 @@ mod tests {
         // emit_state_event is private but exercised via update_state (which calls it)
         // We can also trigger it via create + update_state.
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         manager
@@ -1234,6 +1452,7 @@ mod tests {
                 labels: vec![],
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
             },
             state: RunnerState::Online,
             pid: None,
@@ -1263,6 +1482,7 @@ mod tests {
                 labels: vec![],
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
             },
             state: RunnerState::Offline,
             pid: None,
@@ -1322,8 +1542,14 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let r1 = manager.create("org/myapp", None, None, None).await.unwrap();
-        let r2 = manager.create("org/myapp", None, None, None).await.unwrap();
+        let r1 = manager
+            .create("org/myapp", None, None, None, None)
+            .await
+            .unwrap();
+        let r2 = manager
+            .create("org/myapp", None, None, None, None)
+            .await
+            .unwrap();
 
         assert!(
             r1.config.name.contains("myapp-runner-1"),
@@ -1360,6 +1586,68 @@ mod tests {
         let line = "Job lint completed with result: Skipped";
         let event = parse_job_event(line);
         assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+    }
+
+    #[tokio::test]
+    async fn test_create_with_group_id() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("test-runner".to_string()),
+                None,
+                None,
+                Some("group-123".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(runner.config.group_id, Some("group-123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_without_group_id() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("test-runner".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(runner.config.group_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_next_runner_number_increments() {
+        let manager = create_test_manager();
+        let r1 = manager
+            .create("owner/myrepo", None, None, None, None)
+            .await
+            .unwrap();
+        let r2 = manager
+            .create("owner/myrepo", None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r1.config.name, "myrepo-runner-1");
+        assert_eq!(r2.config.name, "myrepo-runner-2");
+    }
+
+    #[tokio::test]
+    async fn test_next_runner_number_different_repos() {
+        let manager = create_test_manager();
+        let r1 = manager
+            .create("owner/repo-a", None, None, None, None)
+            .await
+            .unwrap();
+        let r2 = manager
+            .create("owner/repo-b", None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r1.config.name, "repo-a-runner-1");
+        assert_eq!(r2.config.name, "repo-b-runner-1");
     }
 
     #[test]
@@ -1404,6 +1692,7 @@ mod tests {
                 labels: vec![],
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp/runner-abc"),
+                group_id: None,
             },
             state: RunnerState::Online,
             pid: None,

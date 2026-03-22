@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::api::{service as api_service, updates as api_updates};
 use anyhow::Result;
 use axum::{
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use tokio::net::UnixListener;
@@ -66,6 +66,23 @@ pub fn create_router(state: AppState) -> Router {
         .route("/runners/{id}/start", post(api::runners::start_runner))
         .route("/runners/{id}/stop", post(api::runners::stop_runner))
         .route("/runners/{id}/restart", post(api::runners::restart_runner))
+        .route("/runners/batch", post(api::groups::create_batch))
+        .route(
+            "/runners/groups/{group_id}/start",
+            post(api::groups::start_group),
+        )
+        .route(
+            "/runners/groups/{group_id}/stop",
+            post(api::groups::stop_group),
+        )
+        .route(
+            "/runners/groups/{group_id}/restart",
+            post(api::groups::restart_group),
+        )
+        .route(
+            "/runners/groups/{group_id}",
+            patch(api::groups::scale_group).delete(api::groups::delete_group),
+        )
         .route("/runners/{id}/logs", get(api::logs::stream_logs))
         .route("/runners/{id}/logs/recent", get(api::logs::recent_logs))
         .route("/events", get(api::events::events_ws))

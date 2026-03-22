@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
 import { StatsCard } from "../components/StatsCard";
@@ -6,8 +6,22 @@ import { RunnerTable } from "../components/RunnerTable";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Dashboard() {
-  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner, createRunner } =
-    useRunners();
+  const {
+    runners,
+    loading,
+    pendingActions,
+    startRunner,
+    stopRunner,
+    restartRunner,
+    deleteRunner,
+    createRunner,
+    createBatch,
+    startGroup,
+    stopGroup,
+    restartGroup,
+    deleteGroup,
+    scaleGroup,
+  } = useRunners();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
   const [filter, setFilter] = useState("");
@@ -22,11 +36,56 @@ export function Dashboard() {
       ? metrics.runners.reduce((sum, r) => sum + r.cpu_percent, 0) / metrics.runners.length
       : 0;
 
-  const filtered = runners.filter(
-    (r) =>
-      r.config.name.toLowerCase().includes(filter.toLowerCase()) ||
-      `${r.config.repo_owner}/${r.config.repo_name}`.toLowerCase().includes(filter.toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    if (!filter) return runners;
+    const q = filter.toLowerCase();
+
+    // Find group IDs where any member matches
+    const matchingGroupIds = new Set<string>();
+    for (const runner of runners) {
+      if (runner.config.group_id) {
+        const nameMatch = runner.config.name.toLowerCase().includes(q);
+        const repoMatch = `${runner.config.repo_owner}/${runner.config.repo_name}`
+          .toLowerCase()
+          .includes(q);
+        // Also match on group name prefix
+        const prefix = runner.config.name.replace(/-\d+$/, "").toLowerCase();
+        const prefixMatch = prefix.includes(q);
+        if (nameMatch || repoMatch || prefixMatch) {
+          matchingGroupIds.add(runner.config.group_id);
+        }
+      }
+    }
+
+    return runners.filter((r) => {
+      // Include all runners from matching groups
+      if (r.config.group_id && matchingGroupIds.has(r.config.group_id)) return true;
+      // Include matching solo runners
+      if (!r.config.group_id) {
+        return (
+          r.config.name.toLowerCase().includes(q) ||
+          `${r.config.repo_owner}/${r.config.repo_name}`.toLowerCase().includes(q)
+        );
+      }
+      return false;
+    });
+  }, [runners, filter]);
+
+  const forceExpandedGroups = useMemo(() => {
+    if (!filter) return new Set<string>();
+    const forced = new Set<string>();
+    const q = filter.toLowerCase();
+    for (const runner of runners) {
+      if (
+        runner.config.group_id &&
+        (runner.config.name.toLowerCase().includes(q) ||
+          `${runner.config.repo_owner}/${runner.config.repo_name}`.toLowerCase().includes(q))
+      ) {
+        forced.add(runner.config.group_id);
+      }
+    }
+    return forced;
+  }, [runners, filter]);
 
   if (loading) {
     return (
@@ -66,11 +125,22 @@ export function Dashboard() {
         onStop={stopRunner}
         onRestart={restartRunner}
         onDelete={deleteRunner}
+        onStartGroup={startGroup}
+        onStopGroup={stopGroup}
+        onRestartGroup={restartGroup}
+        onDeleteGroup={deleteGroup}
+        onScaleGroup={scaleGroup}
         metrics={cpuMap}
+        forceExpandedGroups={forceExpandedGroups}
+        pendingActions={pendingActions}
       />
 
       {showWizard && (
-        <NewRunnerWizard onClose={() => setShowWizard(false)} onCreate={createRunner} />
+        <NewRunnerWizard
+          onClose={() => setShowWizard(false)}
+          onCreate={createRunner}
+          onCreateBatch={createBatch}
+        />
       )}
     </div>
   );

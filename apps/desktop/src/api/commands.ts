@@ -1,12 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AuthStatus,
+  BatchCreateResponse,
+  CreateBatchRequest,
   DeviceFlowResponse,
+  GroupActionResponse,
   LogEntry,
-  RunnerInfo,
-  RepoInfo,
   MetricsResponse,
+  RepoInfo,
+  RunnerInfo,
   CreateRunnerRequest,
+  ScaleGroupResponse,
 } from "./types";
 
 export const api = {
@@ -42,4 +46,16 @@ export const api = {
   // Health
   healthCheck: () => invoke<boolean>("health_check"),
   daemonAvailable: () => invoke<boolean>("daemon_available"),
+
+  // Batch / Groups
+  createBatch: (req: CreateBatchRequest) => invoke<BatchCreateResponse>("create_batch", { req }),
+  startGroup: (groupId: string) =>
+    invoke<GroupActionResponse>("start_group", { group_id: groupId }),
+  stopGroup: (groupId: string) => invoke<GroupActionResponse>("stop_group", { group_id: groupId }),
+  restartGroup: (groupId: string) =>
+    invoke<GroupActionResponse>("restart_group", { group_id: groupId }),
+  deleteGroup: (groupId: string) =>
+    invoke<GroupActionResponse>("delete_group", { group_id: groupId }),
+  scaleGroup: (groupId: string, count: number) =>
+    invoke<ScaleGroupResponse>("scale_group", { group_id: groupId, count }),
 };

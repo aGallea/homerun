@@ -88,6 +88,7 @@ async fn run_tui() -> Result<()> {
     // Initial data load
     if let Ok(runners) = client.list_runners().await {
         app.runners = runners;
+        app.rebuild_display_items();
     }
     if let Ok(auth) = client.auth_status().await {
         app.auth_status = Some(auth);
@@ -137,6 +138,7 @@ async fn run_tui() -> Result<()> {
                         {
                             app.selected_runner_index = app.runners.len() - 1;
                         }
+                        app.rebuild_display_items();
                     }
                     // Refresh metrics every 5 ticks (~10 seconds)
                     if poll_counter.is_multiple_of(5) {
@@ -149,6 +151,7 @@ async fn run_tui() -> Result<()> {
                     // Real-time event received — refresh runner list
                     if let Ok(runners) = client.list_runners().await {
                         app.runners = runners;
+                        app.rebuild_display_items();
                     }
                 }
             }
@@ -173,9 +176,32 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
         Action::StopRunner(id) => client.stop_runner(id).await,
         Action::RestartRunner(id) => client.restart_runner(id).await,
         Action::DeleteRunner(id) => client.delete_runner(id).await,
+        Action::StartGroup(gid) => client.start_group(gid).await.map(|_| ()),
+        Action::StopGroup(gid) => client.stop_group(gid).await.map(|_| ()),
+        Action::RestartGroup(gid) => client.restart_group(gid).await.map(|_| ()),
+        Action::DeleteGroup(gid) => client.delete_group(gid).await.map(|_| ()),
+        Action::ScaleUp(gid) => {
+            let runners = app
+                .runners
+                .iter()
+                .filter(|r| r.config.group_id.as_deref() == Some(gid))
+                .count();
+            let target = (runners + 1).min(10) as u8;
+            client.scale_group(gid, target).await.map(|_| ())
+        }
+        Action::ScaleDown(gid) => {
+            let runners = app
+                .runners
+                .iter()
+                .filter(|r| r.config.group_id.as_deref() == Some(gid))
+                .count();
+            let target = runners.saturating_sub(1).max(1) as u8;
+            client.scale_group(gid, target).await.map(|_| ())
+        }
         Action::RefreshRunners => {
             if let Ok(runners) = client.list_runners().await {
                 app.runners = runners;
+                app.rebuild_display_items();
             }
             Ok(())
         }
@@ -196,18 +222,25 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
     match result {
         Ok(_) => {
             app.status_message = Some(format!("{:?} succeeded", action));
-            // Refresh runners after any runner mutation action
+            // Refresh runners after any runner/group mutation action
             match &action {
                 Action::StartRunner(_)
                 | Action::StopRunner(_)
                 | Action::RestartRunner(_)
-                | Action::DeleteRunner(_) => {
+                | Action::DeleteRunner(_)
+                | Action::StartGroup(_)
+                | Action::StopGroup(_)
+                | Action::RestartGroup(_)
+                | Action::DeleteGroup(_)
+                | Action::ScaleUp(_)
+                | Action::ScaleDown(_) => {
                     if let Ok(runners) = client.list_runners().await {
                         app.runners = runners;
                         if app.selected_runner_index >= app.runners.len() && !app.runners.is_empty()
                         {
                             app.selected_runner_index = app.runners.len() - 1;
                         }
+                        app.rebuild_display_items();
                     }
                 }
                 _ => {}

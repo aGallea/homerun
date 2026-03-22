@@ -1,11 +1,17 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 
 use crate::runner::types::{CreateRunnerRequest, RunnerInfo, UpdateRunnerRequest};
 use crate::server::AppState;
+
+#[derive(Debug, Deserialize)]
+pub struct ListRunnersQuery {
+    pub group_id: Option<String>,
+}
 
 pub async fn create_runner(
     State(state): State<AppState>,
@@ -13,7 +19,7 @@ pub async fn create_runner(
 ) -> Result<(StatusCode, Json<RunnerInfo>), (StatusCode, String)> {
     let runner = state
         .runner_manager
-        .create(&req.repo_full_name, req.name, req.labels, req.mode)
+        .create(&req.repo_full_name, req.name, req.labels, req.mode, None)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -43,8 +49,14 @@ pub async fn create_runner(
     Ok((StatusCode::CREATED, Json(runner)))
 }
 
-pub async fn list_runners(State(state): State<AppState>) -> Json<Vec<RunnerInfo>> {
-    Json(state.runner_manager.list().await)
+pub async fn list_runners(
+    State(state): State<AppState>,
+    Query(query): Query<ListRunnersQuery>,
+) -> Json<Vec<RunnerInfo>> {
+    match query.group_id {
+        Some(gid) => Json(state.runner_manager.list_by_group(&gid).await),
+        None => Json(state.runner_manager.list().await),
+    }
 }
 
 pub async fn get_runner(
@@ -220,7 +232,7 @@ pub async fn restart_runner(
         })?;
     }
 
-    // Now start
+    // Now start — stop_process already waited for process to fully exit
     let manager = state.runner_manager.clone();
     let auth = state.auth.clone();
     let runner_id = id.clone();

@@ -31,12 +31,12 @@ export function StatusBadge({ state, currentJob }: { state: RunnerState; current
     <span className="status-badge" style={{ color: config.color }}>
       {isLoading ? (
         <svg
-          width="14"
-          height="14"
+          width="8"
+          height="8"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="3"
           style={{ animation: "spin 1s linear infinite", flexShrink: 0 }}
         >
           <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />

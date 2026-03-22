@@ -5,7 +5,7 @@ import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Repositories() {
   const { repos, loading: reposLoading, error: reposError } = useRepos();
-  const { runners, createRunner } = useRunners();
+  const { runners, createRunner, createBatch } = useRunners();
   const [search, setSearch] = useState("");
   const [wizardRepo, setWizardRepo] = useState<string | null>(null);
 
@@ -164,6 +164,7 @@ export function Repositories() {
         <NewRunnerWizard
           onClose={() => setWizardRepo(null)}
           onCreate={createRunner}
+          onCreateBatch={createBatch}
           preselectedRepo={wizardRepo || undefined}
         />
       )}

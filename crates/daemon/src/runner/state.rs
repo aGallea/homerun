@@ -26,6 +26,7 @@ impl RunnerState {
                 | (Online, Stopping)
                 | (Busy, Stopping)
                 | (Stopping, Offline)
+                | (Stopping, Registering)
                 | (Offline, Registering)
                 | (Offline, Online)
                 | (Offline, Deleting)

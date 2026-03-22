@@ -1,8 +1,8 @@
 use tauri::State;
 
 use crate::client::{
-    AuthStatus, CreateRunnerRequest, DeviceFlowResponse, LogEntry, MetricsResponse, RepoInfo,
-    RunnerInfo,
+    AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DeviceFlowResponse,
+    GroupActionResponse, LogEntry, MetricsResponse, RepoInfo, RunnerInfo, ScaleGroupResponse,
 };
 use crate::AppState;
 
@@ -135,4 +135,59 @@ pub async fn get_runner_logs(
 ) -> Result<Vec<LogEntry>, String> {
     let client = state.client.lock().await;
     client.get_runner_logs(&runner_id).await
+}
+
+#[tauri::command]
+pub async fn create_batch(
+    state: State<'_, AppState>,
+    req: CreateBatchRequest,
+) -> Result<BatchCreateResponse, String> {
+    let client = state.client.lock().await;
+    client.create_batch(&req).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn start_group(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<GroupActionResponse, String> {
+    let client = state.client.lock().await;
+    client.start_group(&group_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn stop_group(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<GroupActionResponse, String> {
+    let client = state.client.lock().await;
+    client.stop_group(&group_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn restart_group(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<GroupActionResponse, String> {
+    let client = state.client.lock().await;
+    client.restart_group(&group_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn delete_group(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<GroupActionResponse, String> {
+    let client = state.client.lock().await;
+    client.delete_group(&group_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn scale_group(
+    state: State<'_, AppState>,
+    group_id: String,
+    count: u8,
+) -> Result<ScaleGroupResponse, String> {
+    let client = state.client.lock().await;
+    client.scale_group(&group_id, count).await
 }
