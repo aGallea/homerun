@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::client::{AuthStatus, MetricsResponse, RepoInfo, RunnerInfo};
@@ -9,9 +11,29 @@ pub enum Action {
     StopRunner(String),
     RestartRunner(String),
     DeleteRunner(String),
+    StartGroup(String),
+    StopGroup(String),
+    RestartGroup(String),
+    DeleteGroup(String),
+    ScaleUp(String),
+    ScaleDown(String),
     RefreshRunners,
     RefreshRepos,
     RefreshMetrics,
+}
+
+#[derive(Debug, Clone)]
+pub enum DisplayItem {
+    GroupRow {
+        group_id: String,
+        name_prefix: String,
+        runner_count: usize,
+        status_summary: HashMap<String, usize>,
+    },
+    RunnerRow {
+        runner_index: usize,
+        group_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +86,9 @@ pub struct App {
     pub show_help: bool,
     pub status_message: Option<String>,
     pub daemon_connected: bool,
+    pub expanded_groups: HashSet<String>,
+    pub display_items: Vec<DisplayItem>,
+    pub selected_display_index: usize,
 }
 
 impl Default for App {
@@ -86,6 +111,9 @@ impl App {
             show_help: false,
             status_message: None,
             daemon_connected: false,
+            expanded_groups: HashSet::new(),
+            display_items: Vec::new(),
+            selected_display_index: 0,
         }
     }
 
@@ -100,8 +128,27 @@ impl App {
         self.selected_runner_index = self.selected_runner_index.saturating_sub(1);
     }
 
+    pub fn select_next(&mut self) {
+        if !self.display_items.is_empty() {
+            self.selected_display_index =
+                (self.selected_display_index + 1).min(self.display_items.len() - 1);
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        self.selected_display_index = self.selected_display_index.saturating_sub(1);
+    }
+
+    pub fn selected_display_item(&self) -> Option<&DisplayItem> {
+        self.display_items.get(self.selected_display_index)
+    }
+
+    /// Returns the RunnerInfo for the currently selected item, if it's a RunnerRow
     pub fn selected_runner(&self) -> Option<&RunnerInfo> {
-        self.runners.get(self.selected_runner_index)
+        match self.selected_display_item() {
+            Some(DisplayItem::RunnerRow { runner_index, .. }) => self.runners.get(*runner_index),
+            _ => None,
+        }
     }
 
     pub fn select_next_repo(&mut self) {
@@ -112,6 +159,83 @@ impl App {
 
     pub fn select_prev_repo(&mut self) {
         self.selected_repo_index = self.selected_repo_index.saturating_sub(1);
+    }
+
+    pub fn toggle_group(&mut self, group_id: &str) {
+        if self.expanded_groups.contains(group_id) {
+            self.expanded_groups.remove(group_id);
+        } else {
+            self.expanded_groups.insert(group_id.to_string());
+        }
+    }
+
+    pub fn rebuild_display_items(&mut self) {
+        let mut items = Vec::new();
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut solo_indices: Vec<usize> = Vec::new();
+
+        for (i, runner) in self.runners.iter().enumerate() {
+            if let Some(ref gid) = runner.config.group_id {
+                groups.entry(gid.clone()).or_default().push(i);
+            } else {
+                solo_indices.push(i);
+            }
+        }
+
+        // Sort groups by first runner's name for stable ordering
+        let mut sorted_groups: Vec<_> = groups.into_iter().collect();
+        sorted_groups.sort_by(|a, b| {
+            let name_a = &self.runners[a.1[0]].config.name;
+            let name_b = &self.runners[b.1[0]].config.name;
+            name_a.cmp(name_b)
+        });
+
+        for (group_id, indices) in &sorted_groups {
+            let first_runner = &self.runners[indices[0]];
+            let name_prefix = first_runner
+                .config
+                .name
+                .rsplit_once('-')
+                .map(|(prefix, _)| prefix.to_string())
+                .unwrap_or_else(|| first_runner.config.name.clone());
+
+            let mut status_summary = HashMap::new();
+            for &idx in indices {
+                *status_summary
+                    .entry(self.runners[idx].state.clone())
+                    .or_insert(0) += 1;
+            }
+
+            items.push(DisplayItem::GroupRow {
+                group_id: group_id.clone(),
+                name_prefix,
+                runner_count: indices.len(),
+                status_summary,
+            });
+
+            if self.expanded_groups.contains(group_id) {
+                for &idx in indices {
+                    items.push(DisplayItem::RunnerRow {
+                        runner_index: idx,
+                        group_id: Some(group_id.clone()),
+                    });
+                }
+            }
+        }
+
+        for idx in solo_indices {
+            items.push(DisplayItem::RunnerRow {
+                runner_index: idx,
+                group_id: None,
+            });
+        }
+
+        self.display_items = items;
+        // Clamp selection
+        if self.selected_display_index >= self.display_items.len() && !self.display_items.is_empty()
+        {
+            self.selected_display_index = self.display_items.len() - 1;
+        }
     }
 
     /// Handle a key event. Returns an optional Action requiring a daemon call.
@@ -152,7 +276,7 @@ impl App {
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 match self.active_tab {
-                    Tab::Runners => self.select_next_runner(),
+                    Tab::Runners => self.select_next(),
                     Tab::Repos => self.select_next_repo(),
                     _ => {}
                 }
@@ -160,33 +284,125 @@ impl App {
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 match self.active_tab {
-                    Tab::Runners => self.select_prev_runner(),
+                    Tab::Runners => self.select_prev(),
                     Tab::Repos => self.select_prev_repo(),
                     _ => {}
                 }
                 None
             }
+            KeyCode::Enter | KeyCode::Right => {
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::GroupRow { group_id, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        if !self.expanded_groups.contains(&group_id) {
+                            self.toggle_group(&group_id);
+                            self.rebuild_display_items();
+                        }
+                    }
+                }
+                None
+            }
+            KeyCode::Left => {
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::GroupRow { group_id, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        if self.expanded_groups.contains(&group_id) {
+                            self.toggle_group(&group_id);
+                            self.rebuild_display_items();
+                        }
+                    }
+                }
+                None
+            }
             KeyCode::Char('s') => {
-                if let Some(runner) = self.selected_runner() {
-                    let id = runner.config.id.clone();
-                    let action = if runner.state == "online" || runner.state == "busy" {
-                        Action::StopRunner(id)
-                    } else {
-                        Action::StartRunner(id)
-                    };
-                    return Some(action);
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::RunnerRow { runner_index, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        if let Some(runner) = self.runners.get(runner_index) {
+                            let id = runner.config.id.clone();
+                            let action = if runner.state == "online" || runner.state == "busy" {
+                                Action::StopRunner(id)
+                            } else {
+                                Action::StartRunner(id)
+                            };
+                            return Some(action);
+                        }
+                    }
+                }
+                None
+            }
+            KeyCode::Char('S') => {
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::GroupRow { group_id, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        return Some(Action::StartGroup(group_id));
+                    }
+                }
+                None
+            }
+            KeyCode::Char('X') => {
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::GroupRow { group_id, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        return Some(Action::StopGroup(group_id));
+                    }
                 }
                 None
             }
             KeyCode::Char('r') => {
-                if let Some(runner) = self.selected_runner() {
-                    return Some(Action::RestartRunner(runner.config.id.clone()));
+                if self.active_tab == Tab::Runners {
+                    match self.selected_display_item().cloned() {
+                        Some(DisplayItem::GroupRow { group_id, .. }) => {
+                            return Some(Action::RestartGroup(group_id));
+                        }
+                        Some(DisplayItem::RunnerRow { runner_index, .. }) => {
+                            if let Some(runner) = self.runners.get(runner_index) {
+                                return Some(Action::RestartRunner(runner.config.id.clone()));
+                            }
+                        }
+                        None => {}
+                    }
                 }
                 None
             }
             KeyCode::Char('d') => {
-                if let Some(runner) = self.selected_runner() {
-                    return Some(Action::DeleteRunner(runner.config.id.clone()));
+                if self.active_tab == Tab::Runners {
+                    match self.selected_display_item().cloned() {
+                        Some(DisplayItem::GroupRow { group_id, .. }) => {
+                            return Some(Action::DeleteGroup(group_id));
+                        }
+                        Some(DisplayItem::RunnerRow { runner_index, .. }) => {
+                            if let Some(runner) = self.runners.get(runner_index) {
+                                return Some(Action::DeleteRunner(runner.config.id.clone()));
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                None
+            }
+            KeyCode::Char('+') => {
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::GroupRow { group_id, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        return Some(Action::ScaleUp(group_id));
+                    }
+                }
+                None
+            }
+            KeyCode::Char('-') => {
+                if self.active_tab == Tab::Runners {
+                    if let Some(DisplayItem::GroupRow { group_id, .. }) =
+                        self.selected_display_item().cloned()
+                    {
+                        return Some(Action::ScaleDown(group_id));
+                    }
                 }
                 None
             }
@@ -248,6 +464,16 @@ mod tests {
         }
     }
 
+    fn make_test_runner_with_group(
+        id: &str,
+        state: &str,
+        group_id: Option<&str>,
+    ) -> crate::client::RunnerInfo {
+        let mut r = make_test_runner(id, state);
+        r.config.group_id = group_id.map(String::from);
+        r
+    }
+
     #[test]
     fn test_handle_key_quit() {
         let mut app = App::new();
@@ -284,15 +510,16 @@ mod tests {
             make_test_runner("r2", "busy"),
             make_test_runner("r3", "offline"),
         ];
-        assert_eq!(app.selected_runner_index, 0);
+        app.rebuild_display_items();
+        assert_eq!(app.selected_display_index, 0);
         app.handle_key(KeyCode::Down, KeyModifiers::NONE);
-        assert_eq!(app.selected_runner_index, 1);
+        assert_eq!(app.selected_display_index, 1);
         app.handle_key(KeyCode::Down, KeyModifiers::NONE);
-        assert_eq!(app.selected_runner_index, 2);
+        assert_eq!(app.selected_display_index, 2);
         app.handle_key(KeyCode::Down, KeyModifiers::NONE);
-        assert_eq!(app.selected_runner_index, 2); // stays at end
+        assert_eq!(app.selected_display_index, 2); // stays at end
         app.handle_key(KeyCode::Up, KeyModifiers::NONE);
-        assert_eq!(app.selected_runner_index, 1);
+        assert_eq!(app.selected_display_index, 1);
     }
 
     #[test]
@@ -302,9 +529,44 @@ mod tests {
             make_test_runner("r1", "online"),
             make_test_runner("r2", "busy"),
         ];
+        app.rebuild_display_items();
         app.handle_key(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(app.selected_runner_index, 1);
+        assert_eq!(app.selected_display_index, 1);
         app.handle_key(KeyCode::Char('k'), KeyModifiers::NONE);
-        assert_eq!(app.selected_runner_index, 0);
+        assert_eq!(app.selected_display_index, 0);
+    }
+
+    #[test]
+    fn test_group_expand_collapse() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_test_runner_with_group("r1", "online", Some("g1")),
+            make_test_runner_with_group("r2", "online", Some("g1")),
+            make_test_runner_with_group("r3", "offline", None),
+        ];
+        app.rebuild_display_items();
+        assert_eq!(app.display_items.len(), 2); // 1 group row + 1 solo
+
+        app.toggle_group("g1");
+        app.rebuild_display_items();
+        assert_eq!(app.display_items.len(), 4); // 1 group + 2 expanded + 1 solo
+    }
+
+    #[test]
+    fn test_solo_runners_no_group() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_test_runner("r1", "online"),
+            make_test_runner("r2", "offline"),
+        ];
+        app.rebuild_display_items();
+        assert_eq!(app.display_items.len(), 2);
+        assert!(matches!(
+            app.display_items[0],
+            DisplayItem::RunnerRow {
+                runner_index: 0,
+                group_id: None
+            }
+        ));
     }
 }

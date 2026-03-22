@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, DisplayItem};
 use crate::client::RunnerInfo;
 
 pub fn draw_runners(f: &mut Frame, app: &App, area: Rect) {
@@ -30,20 +30,104 @@ fn state_color(state: &str) -> Color {
 }
 
 fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
+    // Determine how many runners are in each group for tree markers
+    // We need to know if a runner is the last child in its group
+    let mut group_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for item in &app.display_items {
+        if let DisplayItem::RunnerRow {
+            group_id: Some(gid),
+            ..
+        } = item
+        {
+            *group_counts.entry(gid.clone()).or_insert(0) += 1;
+        }
+    }
+
+    // Track position of each runner within its group
+    let mut group_positions: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
     let items: Vec<ListItem> = app
-        .runners
+        .display_items
         .iter()
-        .map(|r| {
-            let status_color = state_color(&r.state);
-            let line = Line::from(vec![
-                Span::styled("● ", Style::default().fg(status_color)),
-                Span::raw(r.config.name.as_str()),
-                Span::styled(
-                    format!(" ({})", r.state),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]);
-            ListItem::new(line)
+        .map(|item| match item {
+            DisplayItem::GroupRow {
+                group_id,
+                name_prefix,
+                runner_count,
+                status_summary,
+            } => {
+                let expanded = app.expanded_groups.contains(group_id);
+                let arrow = if expanded { "▼" } else { "▶" };
+
+                // Build colored status dots
+                let mut spans = vec![
+                    Span::styled(format!("{arrow} "), Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        format!("{name_prefix} "),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("({runner_count}) "),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ];
+
+                // Add status dots sorted by state name for stability
+                let mut states: Vec<_> = status_summary.iter().collect();
+                states.sort_by_key(|(s, _)| s.as_str());
+                for (state, count) in states {
+                    let color = state_color(state);
+                    spans.push(Span::styled(
+                        format!("●×{count} "),
+                        Style::default().fg(color),
+                    ));
+                }
+
+                ListItem::new(Line::from(spans))
+            }
+            DisplayItem::RunnerRow {
+                runner_index,
+                group_id,
+            } => {
+                let runner = &app.runners[*runner_index];
+                let status_color = state_color(&runner.state);
+
+                if let Some(gid) = group_id {
+                    let pos = group_positions.entry(gid.clone()).or_insert(0);
+                    *pos += 1;
+                    let current_pos = *pos;
+                    let total = group_counts.get(gid).copied().unwrap_or(1);
+                    let tree_marker = if current_pos == total {
+                        "└─"
+                    } else {
+                        "├─"
+                    };
+
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!("  {tree_marker} "),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled("● ", Style::default().fg(status_color)),
+                        Span::raw(runner.config.name.as_str()),
+                        Span::styled(
+                            format!(" ({})", runner.state),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]))
+                } else {
+                    ListItem::new(Line::from(vec![
+                        Span::styled("● ", Style::default().fg(status_color)),
+                        Span::raw(runner.config.name.as_str()),
+                        Span::styled(
+                            format!(" ({})", runner.state),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]))
+                }
+            }
         })
         .collect();
 
@@ -61,16 +145,28 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
         .highlight_symbol("▶ ");
 
     let mut list_state = ListState::default();
-    if !app.runners.is_empty() {
-        list_state.select(Some(app.selected_runner_index));
+    if !app.display_items.is_empty() {
+        list_state.select(Some(app.selected_display_index));
     }
 
     f.render_stateful_widget(list, area, &mut list_state);
 }
 
 fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
-    let content = match app.selected_runner() {
-        Some(runner) => format_runner_detail(runner, app),
+    let content = match app.selected_display_item() {
+        Some(DisplayItem::RunnerRow { runner_index, .. }) => {
+            if let Some(runner) = app.runners.get(*runner_index) {
+                format_runner_detail(runner, app)
+            } else {
+                " No runner selected.\n\n Press 'a' to add a new runner.".to_string()
+            }
+        }
+        Some(DisplayItem::GroupRow {
+            group_id,
+            name_prefix,
+            runner_count,
+            status_summary,
+        }) => format_group_detail(group_id, name_prefix, *runner_count, status_summary),
         None => " No runner selected.\n\n Press 'a' to add a new runner.".to_string(),
     };
 
@@ -78,6 +174,33 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title(" Detail "));
 
     f.render_widget(paragraph, area);
+}
+
+fn format_group_detail(
+    group_id: &str,
+    name_prefix: &str,
+    runner_count: usize,
+    status_summary: &std::collections::HashMap<String, usize>,
+) -> String {
+    let mut states: Vec<_> = status_summary.iter().collect();
+    states.sort_by_key(|(s, _)| s.as_str());
+    let status_str: Vec<String> = states
+        .iter()
+        .map(|(state, count)| format!("{count} {state}"))
+        .collect();
+
+    format!(
+        " Group:   {name_prefix}\n\
+         \n\
+          ID:      {group_id}\n\
+          Runners: {runner_count}\n\
+          Status:  {}\n\
+         \n\
+          [S] start all  [X] stop all  [r] restart all  [d] delete all\n\
+          [+] scale up   [-] scale down\n\
+          [Enter/→] expand  [←] collapse",
+        status_str.join(", "),
+    )
 }
 
 fn format_runner_detail(runner: &RunnerInfo, app: &App) -> String {
