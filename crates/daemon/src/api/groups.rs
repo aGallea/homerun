@@ -186,55 +186,65 @@ pub async fn restart_group(
         ));
     }
 
-    let mut results = Vec::new();
-    for runner in &runners {
-        let id = runner.config.id.clone();
-        // Stop if running
-        if runner.state == RunnerState::Online || runner.state == RunnerState::Busy {
-            if let Err(e) = state.runner_manager.stop_process(&id).await {
-                results.push(GroupActionResult {
-                    runner_id: id,
-                    success: false,
-                    error: Some(format!("Failed to stop runner: {e}")),
-                });
-                continue;
-            }
-        }
-
-        // Spawn async restart
-        let manager = state.runner_manager.clone();
-        let auth = state.auth.clone();
-        let runner_id = id.clone();
-        tokio::spawn(async move {
-            let token = match auth.token().await {
-                Some(t) => t,
-                None => {
-                    tracing::error!("No auth token available for runner restart");
-                    return;
-                }
-            };
-            if let Err(e) = manager
-                .update_state(&runner_id, RunnerState::Registering)
-                .await
-            {
-                tracing::error!("Failed to transition runner {}: {}", runner_id, e);
-                return;
-            }
-            if let Err(e) = manager
-                .register_and_start_from_registering(&runner_id, &token)
-                .await
-            {
-                tracing::error!("Failed to restart runner {}: {}", runner_id, e);
-                let _ = manager.update_state(&runner_id, RunnerState::Error).await;
-            }
-        });
-
-        results.push(GroupActionResult {
-            runner_id: id,
+    let results: Vec<GroupActionResult> = runners
+        .iter()
+        .map(|r| GroupActionResult {
+            runner_id: r.config.id.clone(),
             success: true,
             error: None,
-        });
-    }
+        })
+        .collect();
+
+    // Spawn a single background task to stop all then restart all
+    let manager = state.runner_manager.clone();
+    let auth = state.auth.clone();
+    let group_id_clone = group_id.clone();
+    tokio::spawn(async move {
+        let token = match auth.token().await {
+            Some(t) => t,
+            None => {
+                tracing::error!("No auth token available for group restart");
+                return;
+            }
+        };
+
+        let runners = manager.list_by_group(&group_id_clone).await;
+
+        // Stop all running runners concurrently
+        let mut stop_handles = Vec::new();
+        for runner in &runners {
+            if runner.state == RunnerState::Online
+                || runner.state == RunnerState::Busy
+                || runner.state == RunnerState::Stopping
+            {
+                let mgr = manager.clone();
+                let rid = runner.config.id.clone();
+                stop_handles.push(tokio::spawn(async move {
+                    let _ = mgr.stop_process(&rid).await;
+                }));
+            }
+        }
+        for handle in stop_handles {
+            let _ = handle.await;
+        }
+
+        // Now restart all
+        for runner in &runners {
+            let mgr = manager.clone();
+            let rid = runner.config.id.clone();
+            let tok = token.clone();
+            tokio::spawn(async move {
+                if let Err(e) = mgr.update_state(&rid, RunnerState::Registering).await {
+                    tracing::error!("Failed to transition runner {}: {}", rid, e);
+                    return;
+                }
+                if let Err(e) = mgr.register_and_start_from_registering(&rid, &tok).await {
+                    tracing::error!("Failed to restart runner {}: {}", rid, e);
+                    let _ = mgr.update_state(&rid, RunnerState::Error).await;
+                }
+            });
+        }
+    });
 
     Ok(Json(GroupActionResponse { group_id, results }))
 }
