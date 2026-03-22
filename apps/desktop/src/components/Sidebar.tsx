@@ -39,7 +39,7 @@ export function Sidebar() {
         ) : (
           <div
             className="sidebar-user"
-            style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}
+            style={{ justifyContent: "space-between", alignItems: "center" }}
           >
             <span className="sidebar-username text-muted">Not signed in</span>
             <button
