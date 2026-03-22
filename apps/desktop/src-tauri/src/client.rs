@@ -348,7 +348,10 @@ impl DaemonClient {
 
     pub async fn service_status(&self) -> Result<bool, String> {
         let body = self.request("GET", "/service/status", None).await?;
-        serde_json::from_str(&body).map_err(|e| e.to_string())
+        let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+        json["installed"]
+            .as_bool()
+            .ok_or_else(|| "missing 'installed' field in service status response".to_string())
     }
 
     pub async fn install_service(&self) -> Result<(), String> {
