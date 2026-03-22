@@ -142,16 +142,60 @@ export function RunnerTable({
                         </td>
                         <td>
                           {runner.current_job ? (
-                            <a
-                              href="#"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                              }}
-                              style={{ color: "var(--accent-yellow)", fontSize: 12 }}
-                            >
-                              {runner.current_job}
-                            </a>
+                            <div>
+                              <a
+                                href="#"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const url =
+                                    runner.job_context?.run_url ??
+                                    `https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`;
+                                  import("@tauri-apps/plugin-shell").then(({ open }) => {
+                                    open(url);
+                                  });
+                                }}
+                                style={{
+                                  color: "var(--accent-yellow)",
+                                  fontSize: 12,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {runner.current_job}
+                              </a>
+                              {runner.job_context && (
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    color: "var(--text-secondary)",
+                                    marginTop: 2,
+                                  }}
+                                >
+                                  {runner.job_context.branch}
+                                  {runner.job_context.pr_number != null && (
+                                    <a
+                                      href="#"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (runner.job_context?.pr_url) {
+                                          import("@tauri-apps/plugin-shell").then(({ open }) => {
+                                            open(runner.job_context!.pr_url!);
+                                          });
+                                        }
+                                      }}
+                                      style={{
+                                        color: "var(--accent-blue)",
+                                        marginLeft: 6,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      PR #{runner.job_context.pr_number}
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-muted" style={{ fontSize: 12 }}>
                               —
@@ -205,21 +249,50 @@ export function RunnerTable({
               </td>
               <td>
                 {runner.current_job ? (
-                  <a
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      import("@tauri-apps/plugin-shell").then(({ open }) => {
-                        open(
-                          `https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`,
-                        );
-                      });
-                    }}
-                    style={{ color: "var(--accent-yellow)", fontSize: 12, cursor: "pointer" }}
-                  >
-                    {runner.current_job}
-                  </a>
+                  <div>
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const url =
+                          runner.job_context?.run_url ??
+                          `https://github.com/${runner.config.repo_owner}/${runner.config.repo_name}/actions?query=is%3Ain_progress`;
+                        import("@tauri-apps/plugin-shell").then(({ open }) => {
+                          open(url);
+                        });
+                      }}
+                      style={{ color: "var(--accent-yellow)", fontSize: 12, cursor: "pointer" }}
+                    >
+                      {runner.current_job}
+                    </a>
+                    {runner.job_context && (
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                        {runner.job_context.branch}
+                        {runner.job_context.pr_number != null && (
+                          <a
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (runner.job_context?.pr_url) {
+                                import("@tauri-apps/plugin-shell").then(({ open }) => {
+                                  open(runner.job_context!.pr_url!);
+                                });
+                              }
+                            }}
+                            style={{
+                              color: "var(--accent-blue)",
+                              marginLeft: 6,
+                              cursor: "pointer",
+                            }}
+                          >
+                            PR #{runner.job_context.pr_number}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-muted" style={{ fontSize: 12 }}>
                     —

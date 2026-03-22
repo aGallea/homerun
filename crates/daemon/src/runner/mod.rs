@@ -43,6 +43,7 @@ pub struct RunnerManager {
     event_tx: Arc<broadcast::Sender<RunnerEvent>>,
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
     name_counters: Arc<RwLock<HashMap<String, u32>>>,
+    auth_token: Arc<RwLock<Option<String>>>,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -88,7 +89,13 @@ impl RunnerManager {
             event_tx: Arc::new(event_tx),
             recent_logs: Arc::new(RwLock::new(HashMap::new())),
             name_counters: Arc::new(RwLock::new(HashMap::new())),
+            auth_token: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_auth_token(&self, token: Option<String>) {
+        let mut t = self.auth_token.write().await;
+        *t = token;
     }
 
     async fn next_runner_number(&self, repo_name: &str) -> u32 {
@@ -193,6 +200,7 @@ impl RunnerManager {
                     jobs_completed: 0,
                     jobs_failed: 0,
                     current_job: None,
+                    job_context: None,
                 },
             );
         }
@@ -258,6 +266,7 @@ impl RunnerManager {
             jobs_completed: 0,
             jobs_failed: 0,
             current_job: None,
+            job_context: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -507,6 +516,8 @@ impl RunnerManager {
     /// If the runner is already configured (.runner file exists), skip download + config
     /// and go straight to starting run.sh.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
+        self.set_auth_token(Some(auth_token.to_string())).await;
+
         let runner = self
             .get(id)
             .await
@@ -580,6 +591,7 @@ impl RunnerManager {
             let log_tx = self.log_tx.clone();
             let recent_logs = self.recent_logs.clone();
             let runners = self.runners.clone();
+            let auth_token = self.auth_token.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -611,6 +623,60 @@ impl RunnerManager {
                                 r.state = RunnerState::Busy;
                                 r.current_job = Some(job_name);
                             }
+                            // Fetch job context (branch/PR info) from GitHub API
+                            let runners_clone = runners.clone();
+                            let rid_clone = rid.clone();
+                            let auth_token_clone = auth_token.clone();
+                            let (runner_name, repo_owner, repo_name) = {
+                                let map = runners.read().await;
+                                if let Some(r) = map.get(&rid) {
+                                    (
+                                        r.config.name.clone(),
+                                        r.config.repo_owner.clone(),
+                                        r.config.repo_name.clone(),
+                                    )
+                                } else {
+                                    continue;
+                                }
+                            };
+                            tokio::spawn(async move {
+                                let token = {
+                                    let t = auth_token_clone.read().await;
+                                    t.clone()
+                                };
+                                if let Some(token) = token {
+                                    if let Ok(gh) = GitHubClient::new(Some(token)) {
+                                        match gh
+                                            .get_active_run_for_runner(
+                                                &repo_owner,
+                                                &repo_name,
+                                                &runner_name,
+                                            )
+                                            .await
+                                        {
+                                            Ok(Some(ctx)) => {
+                                                let mut map = runners_clone.write().await;
+                                                if let Some(r) = map.get_mut(&rid_clone) {
+                                                    r.job_context = Some(ctx);
+                                                }
+                                            }
+                                            Ok(None) => {
+                                                tracing::debug!(
+                                                    runner = %rid_clone,
+                                                    "No matching workflow run found for runner"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    runner = %rid_clone,
+                                                    error = %e,
+                                                    "Failed to fetch job context from GitHub"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            });
                         }
                         Some(JobEvent::Completed { succeeded }) => {
                             let mut map = runners.write().await;
@@ -622,6 +688,7 @@ impl RunnerManager {
                                 }
                                 r.state = RunnerState::Online;
                                 r.current_job = None;
+                                r.job_context = None;
                             }
                         }
                         None => {}
@@ -1190,6 +1257,7 @@ mod tests {
             jobs_completed: 3,
             jobs_failed: 1,
             current_job: Some("TypeScript (type check + build)".to_string()),
+            job_context: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -1461,6 +1529,7 @@ mod tests {
             jobs_completed: 0,
             jobs_failed: 0,
             current_job: None,
+            job_context: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -1491,6 +1560,7 @@ mod tests {
             jobs_completed: 0,
             jobs_failed: 0,
             current_job: None,
+            job_context: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
@@ -1701,6 +1771,7 @@ mod tests {
             jobs_completed: 0,
             jobs_failed: 0,
             current_job: None,
+            job_context: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();

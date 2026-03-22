@@ -139,7 +139,8 @@ export function RunnerDetail() {
     );
   }
 
-  const { config, state, uptime_secs, jobs_completed, jobs_failed, current_job } = runner;
+  const { config, state, uptime_secs, jobs_completed, jobs_failed, current_job, job_context } =
+    runner;
   const isRunning = state === "online" || state === "busy";
   const isStopped = state === "offline" || state === "error";
 
@@ -245,23 +246,48 @@ export function RunnerDetail() {
       >
         {current_job ? (
           <InfoCard label="Current Job">
-            <div className="flex items-center gap-8">
-              <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  import("@tauri-apps/plugin-shell").then(({ open }) => {
-                    open(
-                      `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`,
-                    );
-                  });
-                }}
-                style={{ fontSize: 11, color: "var(--accent-blue)", cursor: "pointer" }}
-              >
-                View →
-              </a>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div className="flex items-center gap-8">
+                <span style={{ color: "var(--accent-yellow)" }}>{current_job}</span>
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const url =
+                      job_context?.run_url ??
+                      `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
+                    import("@tauri-apps/plugin-shell").then(({ open }) => {
+                      open(url);
+                    });
+                  }}
+                  style={{ fontSize: 11, color: "var(--accent-blue)", cursor: "pointer" }}
+                >
+                  View →
+                </a>
+              </div>
+              {job_context && (
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  Branch: <span style={{ color: "var(--text-primary)" }}>{job_context.branch}</span>
+                  {job_context.pr_number != null && (
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (job_context.pr_url) {
+                          import("@tauri-apps/plugin-shell").then(({ open }) => {
+                            open(job_context.pr_url!);
+                          });
+                        }
+                      }}
+                      style={{ color: "var(--accent-blue)", marginLeft: 8, cursor: "pointer" }}
+                    >
+                      PR #{job_context.pr_number}
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </InfoCard>
         ) : (

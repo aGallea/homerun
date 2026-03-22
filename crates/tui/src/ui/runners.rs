@@ -230,6 +230,19 @@ fn format_runner_detail(runner: &RunnerInfo, app: &App) -> String {
         runner.jobs_failed,
     );
 
+    // Show current job and branch/PR info if busy
+    if let Some(job) = &runner.current_job {
+        lines.push_str(&format!("\n Current: {}\n", job));
+        if let Some(ctx) = &runner.job_context {
+            let branch_line = if let Some(pr_num) = ctx.pr_number {
+                format!(" Branch:  {} (PR #{})\n", ctx.branch, pr_num)
+            } else {
+                format!(" Branch:  {}\n", ctx.branch)
+            };
+            lines.push_str(&branch_line);
+        }
+    }
+
     // Show per-runner metrics if available
     if let Some(ref metrics) = app.metrics {
         if let Some(rm) = metrics
