@@ -707,15 +707,34 @@ impl RunnerManager {
         self.update_state(id, RunnerState::Stopping).await?;
         self.emit_state_event(id, "stopping");
 
-        // Remove the process handle from the map — this gives us exclusive access
-        // and prevents the monitoring task from interfering. The monitoring task
-        // still has its own Arc clone but will find the runner already Offline
-        // when it wakes up.
-        if let Some(child_arc) = self.processes.write().await.remove(id) {
-            let mut child = child_arc.write().await;
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+        // Get the PID before killing — we use the PID directly to avoid
+        // deadlocking with the monitoring task which holds the Child write lock.
+        let pid = self.runners.read().await.get(id).and_then(|r| r.pid);
+
+        if let Some(pid) = pid {
+            // Send SIGTERM first for graceful shutdown, then SIGKILL
+            let pid_str = pid.to_string();
+            let _ = std::process::Command::new("kill").args([&pid_str]).output();
+
+            // Wait for process to exit (poll up to 10 seconds)
+            for _ in 0..20 {
+                let output = std::process::Command::new("kill")
+                    .args(["-0", &pid_str])
+                    .output();
+                match output {
+                    Ok(o) if !o.status.success() => break, // process gone
+                    _ => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+                }
+            }
+
+            // Force kill if still alive
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid_str])
+                .output();
         }
+
+        // Remove process handle from map
+        self.processes.write().await.remove(id);
 
         // Update to Offline
         {
