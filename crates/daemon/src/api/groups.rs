@@ -7,6 +7,7 @@ use axum::{
 use crate::runner::state::RunnerState;
 use crate::runner::types::{
     BatchCreateResponse, CreateBatchRequest, GroupActionResponse, GroupActionResult,
+    ScaleGroupRequest, ScaleGroupResponse,
 };
 use crate::server::AppState;
 
@@ -238,6 +239,51 @@ pub async fn restart_group(
     Ok(Json(GroupActionResponse { group_id, results }))
 }
 
+pub async fn scale_group(
+    State(state): State<AppState>,
+    Path(group_id): Path<String>,
+    Json(req): Json<ScaleGroupRequest>,
+) -> Result<Json<ScaleGroupResponse>, (StatusCode, String)> {
+    if req.count < 1 || req.count > 10 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "count must be between 1 and 10".to_string(),
+        ));
+    }
+
+    let response = state
+        .runner_manager
+        .scale_group(&group_id, req.count)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    // Spawn registration for added runners
+    for runner in &response.added {
+        let manager = state.runner_manager.clone();
+        let auth = state.auth.clone();
+        let runner_id = runner.config.id.clone();
+        tokio::spawn(async move {
+            let token = match auth.token().await {
+                Some(t) => t,
+                None => {
+                    let _ = manager
+                        .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                        .await;
+                    return;
+                }
+            };
+            if let Err(e) = manager.register_and_start(&runner_id, &token).await {
+                tracing::error!("Failed to register runner {}: {}", runner_id, e);
+                let _ = manager
+                    .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                    .await;
+            }
+        });
+    }
+
+    Ok(Json(response))
+}
+
 pub async fn delete_group(
     State(state): State<AppState>,
     Path(group_id): Path<String>,
@@ -455,6 +501,147 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_scale_up_adds_runners() {
+        let state = AppState::new_test();
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners/batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"owner/repo","count":2}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let batch: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let group_id = batch["group_id"].as_str().unwrap();
+
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/runners/groups/{group_id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"count":4}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(resp["previous_count"].as_u64().unwrap(), 2);
+        assert_eq!(resp["actual_count"].as_u64().unwrap(), 4);
+        assert_eq!(resp["added"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_scale_down_removes_runners() {
+        let state = AppState::new_test();
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners/batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"owner/repo","count":3}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let batch: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let group_id = batch["group_id"].as_str().unwrap();
+
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/runners/groups/{group_id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"count":1}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(resp["previous_count"].as_u64().unwrap(), 3);
+        assert_eq!(resp["actual_count"].as_u64().unwrap(), 1);
+        assert_eq!(resp["removed"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_runners_filter_by_group_id() {
+        let state = AppState::new_test();
+        // Create a batch
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners/batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"owner/repo","count":2}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let batch: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let group_id = batch["group_id"].as_str().unwrap();
+
+        // Create a solo runner
+        let app = create_router(state.clone());
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/runners")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"repo_full_name":"owner/repo","name":"solo-runner"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Filter by group_id
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/runners?group_id={group_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runners: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(runners.len(), 2);
     }
 
     #[tokio::test]

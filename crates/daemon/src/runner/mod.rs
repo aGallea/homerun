@@ -296,6 +296,108 @@ impl RunnerManager {
             .collect()
     }
 
+    pub async fn scale_group(
+        &self,
+        group_id: &str,
+        target_count: u8,
+    ) -> Result<types::ScaleGroupResponse> {
+        let runners = self.list_by_group(group_id).await;
+        if runners.is_empty() {
+            bail!("Group '{group_id}' not found");
+        }
+
+        let previous_count = runners.len() as u8;
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut skipped_busy = Vec::new();
+
+        if target_count > previous_count {
+            // Scale up — use config from first runner sorted by name
+            let mut sorted = runners.clone();
+            sorted.sort_by(|a, b| a.config.name.cmp(&b.config.name));
+            let template = &sorted[0];
+            let repo_full_name = format!(
+                "{}/{}",
+                template.config.repo_owner, template.config.repo_name
+            );
+            let to_add = target_count - previous_count;
+
+            for _ in 0..to_add {
+                match self
+                    .create(
+                        &repo_full_name,
+                        None,
+                        Some(template.config.labels.clone()),
+                        Some(template.config.mode.clone()),
+                        Some(group_id.to_string()),
+                    )
+                    .await
+                {
+                    Ok(runner) => added.push(runner),
+                    Err(e) => {
+                        tracing::error!("Failed to create runner during scale-up: {e}");
+                        break;
+                    }
+                }
+            }
+        } else if target_count < previous_count {
+            // Scale down — remove highest-numbered first, skip busy
+            let mut sorted = runners.clone();
+            sorted.sort_by(|a, b| {
+                let num_a = a
+                    .config
+                    .name
+                    .rsplit('-')
+                    .next()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                let num_b = b
+                    .config
+                    .name
+                    .rsplit('-')
+                    .next()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                num_b.cmp(&num_a)
+            });
+
+            let to_remove = (previous_count - target_count) as usize;
+            let mut removed_count = 0;
+
+            for runner in &sorted {
+                if removed_count >= to_remove {
+                    break;
+                }
+                if runner.state == RunnerState::Busy {
+                    skipped_busy.push(runner.config.id.clone());
+                    continue;
+                }
+                if let Err(e) = self.delete(&runner.config.id).await {
+                    tracing::error!(
+                        "Failed to delete runner {} during scale-down: {e}",
+                        runner.config.id
+                    );
+                    continue;
+                }
+                removed.push(runner.config.id.clone());
+                removed_count += 1;
+            }
+        }
+
+        let actual_count =
+            (previous_count as i16 + added.len() as i16 - removed.len() as i16) as u8;
+
+        Ok(types::ScaleGroupResponse {
+            group_id: group_id.to_string(),
+            previous_count,
+            target_count,
+            actual_count,
+            added,
+            removed,
+            skipped_busy,
+        })
+    }
+
     pub async fn list(&self) -> Vec<RunnerInfo> {
         self.runners
             .read()
