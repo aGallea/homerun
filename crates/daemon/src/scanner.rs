@@ -169,6 +169,8 @@ async fn git_remote_full_name(repo_root: &Path) -> Option<String> {
     let output = Command::new("git")
         .args(["config", "--get", "remote.origin.url"])
         .current_dir(repo_root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .await
         .ok()?;
@@ -254,11 +256,15 @@ mod tests {
         std::process::Command::new("git")
             .args(["init"])
             .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .output()
             .unwrap();
         std::process::Command::new("git")
             .args(["remote", "add", "origin", remote_url])
             .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .output()
             .unwrap();
     }
