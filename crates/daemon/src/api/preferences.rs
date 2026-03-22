@@ -20,9 +20,12 @@ pub async fn update_preferences(
         .save(&config_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // TODO: uncomment after Task 4 adds these methods
-    // state.notifications.set_status_changes(prefs.notify_status_changes);
-    // state.notifications.set_job_completions(prefs.notify_job_completions);
+    state
+        .notifications
+        .set_status_changes(prefs.notify_status_changes);
+    state
+        .notifications
+        .set_job_completions(prefs.notify_job_completions);
 
     Ok(Json(prefs))
 }

@@ -28,12 +28,16 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: Config) -> Self {
         let runner_manager = RunnerManager::new(config.clone());
+        let notifications = Arc::new(NotificationManager::with_preferences(
+            config.preferences.notify_status_changes,
+            config.preferences.notify_job_completions,
+        ));
         Self {
             config: Arc::new(RwLock::new(config)),
             auth: AuthManager::new(),
             runner_manager,
             metrics: Arc::new(MetricsCollector::new()),
-            notifications: Arc::new(NotificationManager::new()),
+            notifications,
         }
     }
 
