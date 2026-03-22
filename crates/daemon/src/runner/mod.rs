@@ -623,18 +623,22 @@ impl RunnerManager {
                                 let mut map = runners.write().await;
                                 if let Some(r) = map.get_mut(&rid) {
                                     r.state = RunnerState::Busy;
+                                    let job_name_clone = job_name.clone();
                                     r.current_job = Some(job_name);
                                     Some((
                                         r.config.name.clone(),
                                         r.config.repo_owner.clone(),
                                         r.config.repo_name.clone(),
+                                        job_name_clone,
                                     ))
                                 } else {
                                     None
                                 }
                             };
                             // Fetch job context (branch/PR info) from GitHub API
-                            let Some((runner_name, repo_owner, repo_name)) = runner_config else {
+                            let Some((runner_name, repo_owner, repo_name, job_name)) =
+                                runner_config
+                            else {
                                 continue;
                             };
                             let runners_clone = runners.clone();
@@ -668,6 +672,7 @@ impl RunnerManager {
                                         &repo_owner,
                                         &repo_name,
                                         &runner_name,
+                                        &job_name,
                                     )
                                     .await
                                 {
