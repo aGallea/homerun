@@ -43,7 +43,11 @@ export function RunnerGroupRow({
 
   return (
     <>
-      <tr className="group-row" onClick={onToggle} style={{ cursor: "pointer" }}>
+      <tr
+        className="group-row"
+        onClick={onToggle}
+        style={{ cursor: "pointer", opacity: loading ? 0.6 : 1 }}
+      >
         <td>
           <span style={{ marginRight: 8 }}>{expanded ? "▼" : "▶"}</span>
           <span className="font-mono" style={{ fontWeight: 600 }}>
@@ -65,7 +69,8 @@ export function RunnerGroupRow({
         <td></td>
         <td></td>
         <td onClick={(e) => e.stopPropagation()}>
-          <div style={{ display: "flex", gap: 4, opacity: loading ? 0.5 : 1 }}>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            {loading && <Spinner />}
             {hasStopped && (
               <button
                 className="btn btn-sm"
@@ -112,7 +117,10 @@ export function RunnerGroupRow({
             </button>
             <button
               className="btn btn-sm"
-              style={{ color: "var(--accent-red)" }}
+              style={{
+                color: loading ? undefined : "var(--accent-red)",
+                opacity: loading ? 0.4 : 1,
+              }}
               onClick={() => setConfirmDelete(true)}
               title="Delete all"
               disabled={loading}
@@ -136,5 +144,21 @@ export function RunnerGroupRow({
         />
       )}
     </>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 14,
+        height: 14,
+        border: "2px solid var(--border)",
+        borderTopColor: "var(--text-muted)",
+        borderRadius: "50%",
+        animation: "spin 0.6s linear infinite",
+      }}
+    />
   );
 }

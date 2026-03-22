@@ -119,7 +119,10 @@ export function RunnerTable({
                   groupRunners.map((runner) => (
                     <tr
                       key={runner.config.id}
-                      style={{ cursor: "pointer" }}
+                      style={{
+                        cursor: "pointer",
+                        opacity: pendingActions?.has(runner.config.id) ? 0.6 : 1,
+                      }}
                       onClick={() => navigate(`/runners/${runner.config.id}`)}
                     >
                       <td>
@@ -177,7 +180,10 @@ export function RunnerTable({
           {soloRunners.map((runner) => (
             <tr
               key={runner.config.id}
-              style={{ cursor: "pointer" }}
+              style={{
+                cursor: "pointer",
+                opacity: pendingActions?.has(runner.config.id) ? 0.6 : 1,
+              }}
               onClick={() => navigate(`/runners/${runner.config.id}`)}
             >
               <td>

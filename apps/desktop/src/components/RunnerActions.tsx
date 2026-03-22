@@ -26,7 +26,7 @@ export function RunnerActions({
 
   // Ghost/outline style for individual runner buttons (visually distinct from group buttons)
   const ghostStyle: React.CSSProperties = {
-    opacity: 0.7,
+    opacity: loading ? 0.4 : 0.7,
     fontSize: 12,
     padding: "2px 6px",
     minWidth: 28,
@@ -37,7 +37,8 @@ export function RunnerActions({
   };
 
   return (
-    <div style={{ display: "flex", gap: 3, alignItems: "center", opacity: loading ? 0.5 : 1 }}>
+    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      {loading && <Spinner />}
       {isStopped && (
         <button
           className="btn btn-sm"
@@ -73,7 +74,7 @@ export function RunnerActions({
       )}
       <button
         className="btn btn-sm"
-        style={{ ...ghostStyle, color: "var(--accent-red)" }}
+        style={{ ...ghostStyle, color: loading ? undefined : "var(--accent-red)" }}
         onClick={() => setConfirm("delete")}
         title="Delete"
         disabled={loading}
@@ -94,5 +95,21 @@ export function RunnerActions({
         />
       )}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 14,
+        height: 14,
+        border: "2px solid var(--border)",
+        borderTopColor: "var(--text-muted)",
+        borderRadius: "50%",
+        animation: "spin 0.6s linear infinite",
+      }}
+    />
   );
 }
