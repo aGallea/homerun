@@ -27,10 +27,10 @@ export function RunnerActions({
   // Ghost/outline style for individual runner buttons (visually distinct from group buttons)
   const ghostStyle: React.CSSProperties = {
     opacity: loading ? 0.4 : 0.7,
-    fontSize: 12,
-    padding: "2px 6px",
-    minWidth: 28,
-    height: 24,
+    fontSize: 11,
+    padding: "2px 4px",
+    minWidth: 22,
+    height: 22,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",

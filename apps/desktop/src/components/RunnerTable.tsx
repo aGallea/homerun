@@ -95,7 +95,7 @@ export function RunnerTable({
             <th>Current Job</th>
             <th>Mode</th>
             <th>CPU</th>
-            <th style={{ width: 60 }}></th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
