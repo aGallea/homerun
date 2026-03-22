@@ -698,29 +698,31 @@ impl RunnerManager {
     }
 
     /// Stop a running runner process.
+    ///
+    /// Sends a kill signal and returns immediately. The monitoring task
+    /// (spawned in `start_runner_process`) will detect the exit and
+    /// transition the runner to Offline.
     pub async fn stop_process(&self, id: &str) -> Result<()> {
         // Transition to Stopping
         self.update_state(id, RunnerState::Stopping).await?;
         self.emit_state_event(id, "stopping");
 
-        // Kill the child process
+        // Send kill signal — don't wait for exit (the monitoring task handles that)
         if let Some(child_arc) = self.processes.read().await.get(id).cloned() {
-            let mut child = child_arc.write().await;
-            let _ = child.kill().await;
-            // Wait for the process to fully exit
-            let _ = child.wait().await;
-        }
-
-        // Update to Offline
-        {
-            let mut runners = self.runners.write().await;
-            if let Some(r) = runners.get_mut(id) {
-                r.state = RunnerState::Offline;
-                r.pid = None;
+            if let Ok(mut child) = child_arc.try_write() {
+                let _ = child.start_kill();
+            } else {
+                // Monitoring task holds the write lock (waiting for exit).
+                // Kill via PID using the system kill command.
+                let pid = self.runners.read().await.get(id).and_then(|r| r.pid);
+                if let Some(pid) = pid {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .output();
+                }
             }
         }
-        self.processes.write().await.remove(id);
-        self.emit_state_event(id, "offline");
+
         Ok(())
     }
 
