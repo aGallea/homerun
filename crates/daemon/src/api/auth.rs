@@ -14,17 +14,26 @@ pub async fn login_with_token(
     Json(body): Json<TokenRequest>,
 ) -> Result<Json<AuthStatus>, (StatusCode, String)> {
     match state.auth.login_with_pat(&body.token).await {
-        Ok(user) => Ok(Json(AuthStatus {
-            authenticated: true,
-            user: Some(user),
-        })),
+        Ok(user) => {
+            state
+                .runner_manager
+                .set_auth_token(Some(body.token.clone()))
+                .await;
+            Ok(Json(AuthStatus {
+                authenticated: true,
+                user: Some(user),
+            }))
+        }
         Err(e) => Err((StatusCode::UNAUTHORIZED, e.to_string())),
     }
 }
 
 pub async fn logout(State(state): State<AppState>) -> Result<StatusCode, (StatusCode, String)> {
     match state.auth.logout().await {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Ok(()) => {
+            state.runner_manager.set_auth_token(None).await;
+            Ok(StatusCode::NO_CONTENT)
+        }
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
@@ -58,10 +67,15 @@ pub async fn poll_device_flow(
         .poll_device_flow(&body.device_code, interval)
         .await
     {
-        Ok(user) => Ok(Json(AuthStatus {
-            authenticated: true,
-            user: Some(user),
-        })),
+        Ok(user) => {
+            if let Some(token) = state.auth.token().await {
+                state.runner_manager.set_auth_token(Some(token)).await;
+            }
+            Ok(Json(AuthStatus {
+                authenticated: true,
+                user: Some(user),
+            }))
+        }
         Err(e) => Err((StatusCode::UNAUTHORIZED, e.to_string())),
     }
 }

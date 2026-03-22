@@ -22,6 +22,14 @@ pub struct RunnerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobContext {
+    pub branch: String,
+    pub pr_number: Option<u64>,
+    pub pr_url: Option<String>,
+    pub run_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerInfo {
     pub config: RunnerConfig,
     pub state: RunnerState,
@@ -33,6 +41,8 @@ pub struct RunnerInfo {
     pub jobs_failed: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_job: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_context: Option<JobContext>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -131,6 +131,84 @@ impl GitHubClient {
             expires_at: response.expires_at,
         })
     }
+
+    pub async fn get_active_run_for_runner(
+        &self,
+        owner: &str,
+        repo: &str,
+        runner_name: &str,
+    ) -> Result<Option<crate::runner::types::JobContext>> {
+        #[derive(Deserialize)]
+        struct WorkflowRun {
+            id: u64,
+            head_branch: String,
+            html_url: String,
+            pull_requests: Vec<PullRequestRef>,
+        }
+
+        #[derive(Deserialize)]
+        struct PullRequestRef {
+            number: u64,
+            url: String,
+        }
+
+        #[derive(Deserialize)]
+        struct RunsResponse {
+            workflow_runs: Vec<WorkflowRun>,
+        }
+
+        #[derive(Deserialize)]
+        struct RunJob {
+            runner_name: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct JobsResponse {
+            jobs: Vec<RunJob>,
+        }
+
+        let route = format!("/repos/{owner}/{repo}/actions/runs?status=in_progress");
+        let runs: RunsResponse = match self.octocrab.get(&route, None::<&()>).await {
+            Ok(r) => r,
+            Err(_) => return Ok(None),
+        };
+
+        for run in runs.workflow_runs {
+            let jobs_route = format!("/repos/{owner}/{repo}/actions/runs/{}/jobs", run.id);
+            let jobs: JobsResponse = match self.octocrab.get(&jobs_route, None::<&()>).await {
+                Ok(j) => j,
+                Err(_) => continue,
+            };
+
+            let matched = jobs.jobs.iter().any(|j| {
+                j.runner_name
+                    .as_deref()
+                    .map(|name| name == runner_name)
+                    .unwrap_or(false)
+            });
+
+            if matched {
+                let (pr_number, pr_url) = if let Some(pr) = run.pull_requests.first() {
+                    let html_url = pr
+                        .url
+                        .replace("api.github.com/repos", "github.com")
+                        .replace("/pulls/", "/pull/");
+                    (Some(pr.number), Some(html_url))
+                } else {
+                    (None, None)
+                };
+
+                return Ok(Some(crate::runner::types::JobContext {
+                    branch: run.head_branch,
+                    pr_number,
+                    pr_url,
+                    run_url: run.html_url,
+                }));
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

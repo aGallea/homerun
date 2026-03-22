@@ -27,6 +27,14 @@ export interface RunnerInfo {
   jobs_completed: number;
   jobs_failed: number;
   current_job?: string | null;
+  job_context?: JobContext | null;
+}
+
+export interface JobContext {
+  branch: string;
+  pr_number: number | null;
+  pr_url: string | null;
+  run_url: string;
 }
 
 export interface LogEntry {

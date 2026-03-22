@@ -461,6 +461,8 @@ mod tests {
             uptime_secs: None,
             jobs_completed: 0,
             jobs_failed: 0,
+            current_job: None,
+            job_context: None,
         }
     }
 

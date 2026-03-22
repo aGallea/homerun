@@ -126,6 +126,11 @@ pub async fn serve(config: Config) -> Result<()> {
         tracing::warn!("Failed to restore auth from keychain: {}", e);
     }
 
+    // Sync auth token to runner manager so it can query GitHub API for job context
+    if let Some(token) = state.auth.token().await {
+        state.runner_manager.set_auth_token(Some(token)).await;
+    }
+
     // Load persisted runner configs from disk
     if let Err(e) = state.runner_manager.load_from_disk().await {
         tracing::warn!("Failed to load runners from disk: {}", e);
