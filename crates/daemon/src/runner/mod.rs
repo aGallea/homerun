@@ -42,6 +42,7 @@ pub struct RunnerManager {
     log_tx: Arc<broadcast::Sender<LogEntry>>,
     event_tx: Arc<broadcast::Sender<RunnerEvent>>,
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
+    name_counters: Arc<RwLock<HashMap<String, u32>>>,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -86,7 +87,15 @@ impl RunnerManager {
             log_tx: Arc::new(log_tx),
             event_tx: Arc::new(event_tx),
             recent_logs: Arc::new(RwLock::new(HashMap::new())),
+            name_counters: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    async fn next_runner_number(&self, repo_name: &str) -> u32 {
+        let mut counters = self.name_counters.write().await;
+        let counter = counters.entry(repo_name.to_string()).or_insert(0);
+        *counter += 1;
+        *counter
     }
 
     pub fn subscribe_logs(&self) -> broadcast::Receiver<LogEntry> {
@@ -162,6 +171,18 @@ impl RunnerManager {
                 },
             );
         }
+        // Initialize name counters from existing runner names
+        let mut counters = self.name_counters.write().await;
+        for info in runners.values() {
+            let repo = &info.config.repo_name;
+            let prefix = format!("{}-runner-", repo);
+            if let Some(num_str) = info.config.name.strip_prefix(&prefix) {
+                if let Ok(num) = num_str.parse::<u32>() {
+                    let entry = counters.entry(repo.clone()).or_insert(0);
+                    *entry = (*entry).max(num);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -173,6 +194,7 @@ impl RunnerManager {
         name: Option<String>,
         labels: Option<Vec<String>>,
         mode: Option<RunnerMode>,
+        group_id: Option<String>,
     ) -> Result<RunnerInfo> {
         let parts: Vec<&str> = repo_full_name.split('/').collect();
         if parts.len() != 2 {
@@ -181,14 +203,13 @@ impl RunnerManager {
         let (owner, repo) = (parts[0], parts[1]);
 
         let id = uuid::Uuid::new_v4().to_string();
-        let count = self
-            .runners
-            .read()
-            .await
-            .values()
-            .filter(|r| r.config.repo_name == repo)
-            .count();
-        let name = name.unwrap_or_else(|| format!("{repo}-runner-{}", count + 1));
+        let name = match name {
+            Some(n) => n,
+            None => {
+                let num = self.next_runner_number(repo).await;
+                format!("{repo}-runner-{num}")
+            }
+        };
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
@@ -215,7 +236,7 @@ impl RunnerManager {
                 labels: default_labels,
                 mode: mode.unwrap_or(RunnerMode::App),
                 work_dir,
-                group_id: None,
+                group_id,
             },
             state: RunnerState::Creating,
             pid: None,
@@ -622,6 +643,13 @@ mod tests {
     use crate::config::Config;
     use state::RunnerState;
 
+    fn create_test_manager() -> RunnerManager {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        RunnerManager::new(config)
+    }
+
     #[tokio::test]
     async fn test_event_broadcast() {
         let dir = tempfile::tempdir().unwrap();
@@ -677,7 +705,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
 
@@ -697,11 +725,11 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
         manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
 
@@ -717,7 +745,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -735,7 +763,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None)
+            .create("aGallea/gifted", None, None, None, None)
             .await
             .unwrap();
         assert_eq!(runner.state, RunnerState::Creating);
@@ -768,11 +796,11 @@ mod tests {
         // Create runners and save
         let manager = RunnerManager::new(config.clone());
         manager
-            .create("owner/repo1", None, None, None)
+            .create("owner/repo1", None, None, None, None)
             .await
             .unwrap();
         manager
-            .create("owner/repo2", None, None, None)
+            .create("owner/repo2", None, None, None, None)
             .await
             .unwrap();
         manager.save_to_disk().await.unwrap();
@@ -994,7 +1022,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -1058,7 +1086,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         // Creating -> Busy is not a valid transition
@@ -1089,6 +1117,7 @@ mod tests {
                 Some("my-runner".to_string()),
                 Some(vec!["gpu".to_string(), "macOS".to_string()]),
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1112,7 +1141,7 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let result = manager.create("nodash", None, None, None).await;
+        let result = manager.create("nodash", None, None, None, None).await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("Invalid repo name"), "unexpected: {msg}");
@@ -1140,7 +1169,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -1185,7 +1214,7 @@ mod tests {
         // emit_state_event is private but exercised via update_state (which calls it)
         // We can also trigger it via create + update_state.
         let runner = manager
-            .create("owner/repo", None, None, None)
+            .create("owner/repo", None, None, None, None)
             .await
             .unwrap();
         manager
@@ -1326,8 +1355,14 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let r1 = manager.create("org/myapp", None, None, None).await.unwrap();
-        let r2 = manager.create("org/myapp", None, None, None).await.unwrap();
+        let r1 = manager
+            .create("org/myapp", None, None, None, None)
+            .await
+            .unwrap();
+        let r2 = manager
+            .create("org/myapp", None, None, None, None)
+            .await
+            .unwrap();
 
         assert!(
             r1.config.name.contains("myapp-runner-1"),
@@ -1364,6 +1399,68 @@ mod tests {
         let line = "Job lint completed with result: Skipped";
         let event = parse_job_event(line);
         assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+    }
+
+    #[tokio::test]
+    async fn test_create_with_group_id() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("test-runner".to_string()),
+                None,
+                None,
+                Some("group-123".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(runner.config.group_id, Some("group-123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_without_group_id() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("test-runner".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(runner.config.group_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_next_runner_number_increments() {
+        let manager = create_test_manager();
+        let r1 = manager
+            .create("owner/myrepo", None, None, None, None)
+            .await
+            .unwrap();
+        let r2 = manager
+            .create("owner/myrepo", None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r1.config.name, "myrepo-runner-1");
+        assert_eq!(r2.config.name, "myrepo-runner-2");
+    }
+
+    #[tokio::test]
+    async fn test_next_runner_number_different_repos() {
+        let manager = create_test_manager();
+        let r1 = manager
+            .create("owner/repo-a", None, None, None, None)
+            .await
+            .unwrap();
+        let r2 = manager
+            .create("owner/repo-b", None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r1.config.name, "repo-a-runner-1");
+        assert_eq!(r2.config.name, "repo-b-runner-1");
     }
 
     #[test]

@@ -13,7 +13,7 @@ pub async fn create_runner(
 ) -> Result<(StatusCode, Json<RunnerInfo>), (StatusCode, String)> {
     let runner = state
         .runner_manager
-        .create(&req.repo_full_name, req.name, req.labels, req.mode)
+        .create(&req.repo_full_name, req.name, req.labels, req.mode, None)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
