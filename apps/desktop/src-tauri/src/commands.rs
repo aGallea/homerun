@@ -99,8 +99,14 @@ pub async fn poll_device_flow(
     device_code: String,
     interval: u64,
 ) -> Result<AuthStatus, String> {
-    let client = state.client.lock().await;
-    client.poll_device_flow(&device_code, interval).await
+    // Get the socket path, then drop the lock immediately so other commands
+    // are not blocked during the long-running poll.
+    let socket_path = {
+        let client = state.client.lock().await;
+        client.socket_path().to_path_buf()
+    };
+    let poll_client = crate::client::DaemonClient::new(socket_path);
+    poll_client.poll_device_flow(&device_code, interval).await
 }
 
 /// Check whether the daemon socket file exists (fast, no network call).

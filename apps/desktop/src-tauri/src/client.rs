@@ -271,7 +271,7 @@ impl DaemonClient {
     }
 
     pub async fn logout(&self) -> Result<(), String> {
-        self.request("POST", "/auth/logout", None).await?;
+        self.request("DELETE", "/auth", None).await?;
         Ok(())
     }
 

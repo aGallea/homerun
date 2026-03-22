@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
 import { invoke } from "@tauri-apps/api/core";
@@ -16,6 +16,15 @@ export function Settings() {
   // Device flow state
   const [deviceFlow, setDeviceFlow] = useState<DeviceFlowState>({ stage: "idle" });
   const [deviceFlowStarting, setDeviceFlowStarting] = useState(false);
+  const cancelledRef = useRef(false);
+
+  // Cancel any in-flight device flow poll on unmount
+  useEffect(() => {
+    cancelledRef.current = false;
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
 
   // PAT section
   const [patExpanded, setPatExpanded] = useState(false);
@@ -37,11 +46,29 @@ export function Settings() {
       .catch(() => {});
   }, []);
 
+  const pollInBackground = useCallback(
+    (flow: DeviceFlowResponse) => {
+      api
+        .pollDeviceFlow(flow.device_code, flow.interval)
+        .then(async () => {
+          if (cancelledRef.current) return;
+          setDeviceFlow({ stage: "success" });
+          await refresh();
+        })
+        .catch((e: unknown) => {
+          if (cancelledRef.current) return;
+          setDeviceFlow({ stage: "error", message: String(e) });
+        });
+    },
+    [refresh],
+  );
+
   async function handleStartDeviceFlow() {
     setDeviceFlowStarting(true);
     setDeviceFlow({ stage: "idle" });
     try {
       const flow = await api.startDeviceFlow();
+      if (cancelledRef.current) return;
       setDeviceFlow({ stage: "pending", flow });
       // Open the verification URL in the system browser
       try {
@@ -53,22 +80,13 @@ export function Settings() {
       // Begin polling in the background
       pollInBackground(flow);
     } catch (e) {
+      if (cancelledRef.current) return;
       setDeviceFlow({ stage: "error", message: String(e) });
     } finally {
-      setDeviceFlowStarting(false);
+      if (!cancelledRef.current) {
+        setDeviceFlowStarting(false);
+      }
     }
-  }
-
-  function pollInBackground(flow: DeviceFlowResponse) {
-    api
-      .pollDeviceFlow(flow.device_code, flow.interval)
-      .then(async () => {
-        setDeviceFlow({ stage: "success" });
-        await refresh();
-      })
-      .catch((e: unknown) => {
-        setDeviceFlow({ stage: "error", message: String(e) });
-      });
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -109,8 +127,8 @@ export function Settings() {
             <p className="text-muted">Loading...</p>
           ) : auth.authenticated && auth.user ? (
             /* Logged in state */
-            <div>
-              <div className="flex items-center gap-12" style={{ marginBottom: 16 }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-12">
                 <img
                   src={auth.user.avatar_url}
                   alt={auth.user.login}
