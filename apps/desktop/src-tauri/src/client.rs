@@ -89,6 +89,7 @@ pub struct RunnerMetrics {
 pub struct MetricsResponse {
     pub system: SystemMetrics,
     pub runners: Vec<RunnerMetrics>,
+    pub daemon: Option<DaemonMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +154,32 @@ pub struct ScaleGroupResponse {
     pub added: Vec<RunnerInfo>,
     pub removed: Vec<String>,
     pub skipped_busy: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonLogEntry {
+    pub timestamp: String,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonMetrics {
+    pub pid: u32,
+    pub uptime_seconds: u64,
+    pub cpu_percent: f32,
+    pub memory_bytes: u64,
+    pub child_processes: Vec<ChildProcessInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildProcessInfo {
+    pub pid: u32,
+    pub runner_id: String,
+    pub runner_name: String,
+    pub cpu_percent: f32,
+    pub memory_bytes: u64,
 }
 
 // --- Unix socket HTTP connector ---
@@ -398,5 +425,32 @@ impl DaemonClient {
         let body = serde_json::json!({ "count": count }).to_string();
         let text = self.request("PATCH", &format!("/runners/groups/{group_id}"), Some(body)).await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
+    pub async fn get_daemon_logs_recent(
+        &self,
+        level: Option<&str>,
+        limit: Option<usize>,
+        search: Option<&str>,
+    ) -> Result<Vec<DaemonLogEntry>, String> {
+        let mut params = Vec::new();
+        if let Some(l) = level {
+            params.push(format!("level={}", l));
+        }
+        if let Some(n) = limit {
+            params.push(format!("limit={}", n));
+        }
+        if let Some(s) = search {
+            params.push(format!("search={}", s));
+        }
+        let query = if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", params.join("&"))
+        };
+        let body = self
+            .request("GET", &format!("/daemon/logs/recent{}", query), None)
+            .await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 }
