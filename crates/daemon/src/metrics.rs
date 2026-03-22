@@ -44,6 +44,24 @@ pub struct RunnerMetrics {
     pub memory_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DaemonMetrics {
+    pub pid: u32,
+    pub uptime_seconds: u64,
+    pub cpu_percent: f64,
+    pub memory_bytes: u64,
+    pub child_processes: Vec<ChildProcessInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChildProcessInfo {
+    pub pid: u32,
+    pub runner_id: String,
+    pub runner_name: String,
+    pub cpu_percent: f64,
+    pub memory_bytes: u64,
+}
+
 pub struct MetricsCollector {
     system: std::sync::Mutex<System>,
 }
@@ -94,6 +112,11 @@ impl MetricsCollector {
     /// Call `refresh_processes()` once before calling this for each runner.
     pub fn runner_metrics(&self, pid: u32) -> Option<RunnerMetrics> {
         let sys = self.system.lock().unwrap();
+        Self::runner_metrics_with_sys(&sys, pid)
+    }
+
+    /// Internal: collect runner metrics using an already-locked System reference.
+    fn runner_metrics_with_sys(sys: &System, pid: u32) -> Option<RunnerMetrics> {
         let root_pid = Pid::from_u32(pid);
 
         // Check the root process exists
@@ -137,6 +160,45 @@ impl MetricsCollector {
             cpu_percent: total_cpu,
             memory_bytes: total_memory,
         })
+    }
+
+    /// Collect metrics for the daemon process and its child runner processes.
+    pub fn daemon_metrics(
+        &self,
+        daemon_pid: u32,
+        uptime: std::time::Duration,
+        runners: &[(String, String, Option<u32>)], // (runner_id, runner_name, pid)
+    ) -> DaemonMetrics {
+        let sys = self.system.lock().unwrap();
+        let pid = Pid::from_u32(daemon_pid);
+
+        let (cpu_percent, memory_bytes) = sys
+            .process(pid)
+            .map(|p| (p.cpu_usage() as f64, p.memory()))
+            .unwrap_or((0.0, 0));
+
+        let child_processes = runners
+            .iter()
+            .filter_map(|(id, name, runner_pid)| {
+                runner_pid.and_then(|rpid| {
+                    Self::runner_metrics_with_sys(&sys, rpid).map(|m| ChildProcessInfo {
+                        pid: rpid,
+                        runner_id: id.clone(),
+                        runner_name: name.clone(),
+                        cpu_percent: m.cpu_percent,
+                        memory_bytes: m.memory_bytes,
+                    })
+                })
+            })
+            .collect();
+
+        DaemonMetrics {
+            pid: daemon_pid,
+            uptime_seconds: uptime.as_secs(),
+            cpu_percent,
+            memory_bytes,
+            child_processes,
+        }
     }
 }
 

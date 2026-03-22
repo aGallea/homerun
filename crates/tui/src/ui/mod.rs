@@ -1,3 +1,4 @@
+pub mod daemon;
 pub mod monitoring;
 pub mod repos;
 pub mod runners;
@@ -25,6 +26,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         crate::app::Tab::Runners => runners::draw_runners(f, app, chunks[1]),
         crate::app::Tab::Repos => repos::draw_repos(f, app, chunks[1]),
         crate::app::Tab::Monitoring => monitoring::draw_monitoring(f, app, chunks[1]),
+        crate::app::Tab::Daemon => daemon::draw_daemon_tab(f, app, chunks[1]),
     }
 
     status_bar::draw_status_bar(f, app, chunks[2]);
@@ -50,7 +52,7 @@ fn draw_help_popup(f: &mut Frame) {
   Keybindings
 
   Up/Down    Navigate list
-  1-3        Switch tabs
+  1-4        Switch tabs
   s          Start/Stop runner
   r          Restart runner
   d          Delete runner (confirm)
