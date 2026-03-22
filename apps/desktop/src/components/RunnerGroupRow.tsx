@@ -1,0 +1,128 @@
+import { useState } from "react";
+import type { RunnerInfo, RunnerState } from "../api/types";
+import { StatusBadge } from "./StatusBadge";
+import { ConfirmDialog } from "./ConfirmDialog";
+
+interface RunnerGroupRowProps {
+  groupId: string;
+  runners: RunnerInfo[];
+  expanded: boolean;
+  onToggle: () => void;
+  onStartGroup: (groupId: string) => void;
+  onStopGroup: (groupId: string) => void;
+  onRestartGroup: (groupId: string) => void;
+  onDeleteGroup: (groupId: string) => void;
+  onScaleGroup: (groupId: string, count: number) => void;
+}
+
+export function RunnerGroupRow({
+  groupId,
+  runners,
+  expanded,
+  onToggle,
+  onStartGroup,
+  onStopGroup,
+  onRestartGroup,
+  onDeleteGroup,
+  onScaleGroup,
+}: RunnerGroupRowProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const namePrefix = runners[0]?.config.name.replace(/-\d+$/, "") ?? "group";
+
+  const statusCounts = new Map<string, number>();
+  for (const r of runners) {
+    statusCounts.set(r.state, (statusCounts.get(r.state) ?? 0) + 1);
+  }
+
+  const hasRunning = runners.some((r) => r.state === "online" || r.state === "busy");
+  const hasStopped = runners.some((r) => r.state === "offline" || r.state === "error");
+
+  return (
+    <>
+      <tr className="group-row" onClick={onToggle} style={{ cursor: "pointer" }}>
+        <td colSpan={2}>
+          <span style={{ marginRight: 8 }}>{expanded ? "▼" : "▶"}</span>
+          <span className="font-mono" style={{ fontWeight: 600 }}>
+            {namePrefix}
+          </span>
+          <span className="text-muted" style={{ marginLeft: 8 }}>
+            ({runners.length} instances)
+          </span>
+        </td>
+        <td>
+          {Array.from(statusCounts.entries()).map(([state, count]) => (
+            <span key={state} style={{ marginRight: 8 }}>
+              <StatusBadge state={state as RunnerState} /> {count}
+            </span>
+          ))}
+        </td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {hasStopped && (
+              <button
+                className="btn btn-sm"
+                onClick={() => onStartGroup(groupId)}
+                title="Start all"
+              >
+                ▶
+              </button>
+            )}
+            {hasRunning && (
+              <button className="btn btn-sm" onClick={() => onStopGroup(groupId)} title="Stop all">
+                ■
+              </button>
+            )}
+            <button
+              className="btn btn-sm"
+              onClick={() => onRestartGroup(groupId)}
+              title="Restart all"
+            >
+              ↻
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => onScaleGroup(groupId, runners.length + 1)}
+              title="Scale up"
+              disabled={runners.length >= 10}
+            >
+              +
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => onScaleGroup(groupId, runners.length - 1)}
+              title="Scale down"
+              disabled={runners.length <= 1}
+            >
+              −
+            </button>
+            <button
+              className="btn btn-sm"
+              style={{ color: "var(--accent-red)" }}
+              onClick={() => setConfirmDelete(true)}
+              title="Delete all"
+            >
+              ✕
+            </button>
+          </div>
+        </td>
+      </tr>
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete Group"
+          message={`Delete all ${runners.length} runners in this group? Busy runners will be skipped.`}
+          confirmLabel="Delete All"
+          danger
+          onConfirm={() => {
+            onDeleteGroup(groupId);
+            setConfirmDelete(false);
+          }}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
+    </>
+  );
+}
