@@ -136,6 +136,9 @@ pub async fn serve(config: Config) -> Result<()> {
         tracing::warn!("Failed to load runners from disk: {}", e);
     }
 
+    // Start background poller for job context (branch/PR info)
+    state.runner_manager.start_job_context_poller();
+
     let app = create_router(state);
 
     axum::serve(listener, app).await?;
