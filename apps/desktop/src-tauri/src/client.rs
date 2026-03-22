@@ -155,6 +155,13 @@ pub struct ScaleGroupResponse {
     pub skipped_busy: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Preferences {
+    pub start_runners_on_launch: bool,
+    pub notify_status_changes: bool,
+    pub notify_job_completions: bool,
+}
+
 // --- Unix socket HTTP connector ---
 
 /// A tower connector that dials a Unix socket instead of TCP.
@@ -400,6 +407,17 @@ impl DaemonClient {
     pub async fn scale_group(&self, group_id: &str, count: u8) -> Result<ScaleGroupResponse, String> {
         let body = serde_json::json!({ "count": count }).to_string();
         let text = self.request("PATCH", &format!("/runners/groups/{group_id}"), Some(body)).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
+    pub async fn get_preferences(&self) -> Result<Preferences, String> {
+        let body = self.request("GET", "/preferences", None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn update_preferences(&self, prefs: &Preferences) -> Result<Preferences, String> {
+        let body = serde_json::to_string(prefs).map_err(|e| e.to_string())?;
+        let text = self.request("PUT", "/preferences", Some(body)).await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 }

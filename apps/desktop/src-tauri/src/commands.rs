@@ -2,7 +2,8 @@ use tauri::State;
 
 use crate::client::{
     AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DeviceFlowResponse,
-    GroupActionResponse, LogEntry, MetricsResponse, RepoInfo, RunnerInfo, ScaleGroupResponse,
+    GroupActionResponse, LogEntry, MetricsResponse, Preferences, RepoInfo, RunnerInfo,
+    ScaleGroupResponse,
 };
 use crate::AppState;
 
@@ -196,4 +197,19 @@ pub async fn scale_group(
 ) -> Result<ScaleGroupResponse, String> {
     let client = state.client.lock().await;
     client.scale_group(&group_id, count).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_preferences(state: State<'_, AppState>) -> Result<Preferences, String> {
+    let client = state.client.lock().await;
+    client.get_preferences().await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn update_preferences(
+    state: State<'_, AppState>,
+    prefs: Preferences,
+) -> Result<Preferences, String> {
+    let client = state.client.lock().await;
+    client.update_preferences(&prefs).await
 }
