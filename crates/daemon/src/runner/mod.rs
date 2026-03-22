@@ -523,6 +523,14 @@ impl RunnerManager {
             .collect()
     }
 
+    pub async fn runner_pids_and_names(&self) -> Vec<(String, String, Option<u32>)> {
+        let runners = self.runners.read().await;
+        runners
+            .values()
+            .map(|r| (r.config.id.clone(), r.config.name.clone(), r.pid))
+            .collect()
+    }
+
     pub async fn get(&self, id: &str) -> Option<RunnerInfo> {
         self.runners
             .read()

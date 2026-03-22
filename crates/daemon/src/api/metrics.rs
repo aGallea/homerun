@@ -18,7 +18,13 @@ pub async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Valu
             })
         })
         .collect();
-    Json(serde_json::json!({ "system": system, "runners": runner_metrics }))
+    let runner_pids = state.runner_manager.runner_pids_and_names().await;
+    let uptime = state.daemon_start_time.elapsed();
+    let daemon = state
+        .metrics
+        .daemon_metrics(state.daemon_pid, uptime, &runner_pids);
+
+    Json(serde_json::json!({ "system": system, "runners": runner_metrics, "daemon": daemon }))
 }
 
 #[cfg(test)]
