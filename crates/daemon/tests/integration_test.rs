@@ -202,6 +202,8 @@ async fn test_create_multiple_runners_for_same_repo() {
 
 #[tokio::test]
 async fn test_auth_status_unauthenticated() {
+    // Prevent lazy keychain restore from picking up real tokens
+    std::env::set_var("HOMERUN_SKIP_KEYCHAIN", "1");
     let dir = tempfile::tempdir().unwrap();
     let config = Config::with_base_dir(dir.keep().join(".homerun"));
     config.ensure_dirs().unwrap();
