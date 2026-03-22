@@ -156,7 +156,9 @@ impl AuthManager {
             }
         }
 
-        // Slow path: try to restore from keychain (local-only, no network call)
+        // Slow path: try to restore from keychain (local-only, no network call).
+        // Skip in tests to avoid picking up real keychain tokens.
+        #[cfg(not(test))]
         if let Ok(Some(token)) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
             tracing::info!("Lazily restored auth token from keychain");
             let mut state = self.state.write().await;
