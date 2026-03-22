@@ -31,6 +31,7 @@ export function RunnerGroupRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const namePrefix = runners[0]?.config.name.replace(/-\d+$/, "") ?? "group";
+  const repo = runners[0] ? `${runners[0].config.repo_owner}/${runners[0].config.repo_name}` : "";
 
   const statusCounts = new Map<string, number>();
   for (const r of runners) {
@@ -43,15 +44,16 @@ export function RunnerGroupRow({
   return (
     <>
       <tr className="group-row" onClick={onToggle} style={{ cursor: "pointer" }}>
-        <td colSpan={2}>
+        <td>
           <span style={{ marginRight: 8 }}>{expanded ? "▼" : "▶"}</span>
           <span className="font-mono" style={{ fontWeight: 600 }}>
             {namePrefix}
           </span>
           <span className="text-muted" style={{ marginLeft: 8 }}>
-            ({runners.length} instances)
+            ({runners.length})
           </span>
         </td>
+        <td className="text-muted">{repo}</td>
         <td>
           {Array.from(statusCounts.entries()).map(([state, count]) => (
             <span key={state} style={{ marginRight: 8 }}>
