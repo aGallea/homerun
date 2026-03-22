@@ -37,21 +37,19 @@ export function Sidebar() {
             <span className="sidebar-username">{auth.user.login}</span>
           </div>
         ) : (
-          <button
-            className="btn btn-primary"
-            onClick={() => navigate("/settings")}
-            style={{
-              width: "100%",
-              fontSize: 13,
-              padding: "8px 12px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 6,
-            }}
+          <div
+            className="sidebar-user"
+            style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}
           >
-            Sign in with GitHub
-          </button>
+            <span className="sidebar-username text-muted">Not signed in</span>
+            <button
+              className="btn btn-sm"
+              onClick={() => navigate("/settings")}
+              style={{ fontSize: 11, padding: "3px 8px" }}
+            >
+              Sign in
+            </button>
+          </div>
         )}
       </div>
     </nav>
