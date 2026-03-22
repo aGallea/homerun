@@ -6,8 +6,16 @@ import { RunnerTable } from "../components/RunnerTable";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
 export function Dashboard() {
-  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner, createRunner } =
-    useRunners();
+  const {
+    runners,
+    loading,
+    startRunner,
+    stopRunner,
+    restartRunner,
+    deleteRunner,
+    createRunner,
+    createBatch,
+  } = useRunners();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
   const [filter, setFilter] = useState("");
@@ -70,7 +78,11 @@ export function Dashboard() {
       />
 
       {showWizard && (
-        <NewRunnerWizard onClose={() => setShowWizard(false)} onCreate={createRunner} />
+        <NewRunnerWizard
+          onClose={() => setShowWizard(false)}
+          onCreate={createRunner}
+          onCreateBatch={createBatch}
+        />
       )}
     </div>
   );
