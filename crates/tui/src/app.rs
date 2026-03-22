@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::client::{AuthStatus, MetricsResponse, RepoInfo, RunnerInfo};
+use crate::client::{AuthStatus, DaemonLogEntry, MetricsResponse, RepoInfo, RunnerInfo};
 
 /// Actions that require async daemon calls — returned from handle_key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +20,7 @@ pub enum Action {
     RefreshRunners,
     RefreshRepos,
     RefreshMetrics,
+    RefreshDaemonLogs,
 }
 
 #[derive(Debug, Clone)]
@@ -41,11 +42,12 @@ pub enum Tab {
     Runners,
     Repos,
     Monitoring,
+    Daemon,
 }
 
 impl Tab {
     pub fn all() -> &'static [Tab] {
-        &[Tab::Runners, Tab::Repos, Tab::Monitoring]
+        &[Tab::Runners, Tab::Repos, Tab::Monitoring, Tab::Daemon]
     }
 
     pub fn title(&self) -> &'static str {
@@ -53,6 +55,7 @@ impl Tab {
             Tab::Runners => "Runners",
             Tab::Repos => "Repos",
             Tab::Monitoring => "Monitoring",
+            Tab::Daemon => "Daemon",
         }
     }
 
@@ -61,6 +64,7 @@ impl Tab {
             Tab::Runners => 0,
             Tab::Repos => 1,
             Tab::Monitoring => 2,
+            Tab::Daemon => 3,
         }
     }
 
@@ -69,6 +73,7 @@ impl Tab {
             0 => Some(Tab::Runners),
             1 => Some(Tab::Repos),
             2 => Some(Tab::Monitoring),
+            3 => Some(Tab::Daemon),
             _ => None,
         }
     }
@@ -89,6 +94,12 @@ pub struct App {
     pub expanded_groups: HashSet<String>,
     pub display_items: Vec<DisplayItem>,
     pub selected_display_index: usize,
+    pub daemon_logs: Vec<DaemonLogEntry>,
+    pub daemon_log_scroll: usize,
+    pub daemon_follow: bool,
+    pub daemon_log_level: String,
+    pub daemon_search: String,
+    pub daemon_searching: bool,
 }
 
 impl Default for App {
@@ -114,6 +125,12 @@ impl App {
             expanded_groups: HashSet::new(),
             display_items: Vec::new(),
             selected_display_index: 0,
+            daemon_logs: Vec::new(),
+            daemon_log_scroll: 0,
+            daemon_follow: true,
+            daemon_log_level: "INFO".to_string(),
+            daemon_search: String::new(),
+            daemon_searching: false,
         }
     }
 
@@ -249,6 +266,81 @@ impl App {
             return None;
         }
 
+        // Daemon tab search mode captures all input
+        if self.active_tab == Tab::Daemon && self.daemon_searching {
+            match code {
+                KeyCode::Esc => {
+                    self.daemon_searching = false;
+                    self.daemon_search.clear();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Enter => {
+                    self.daemon_searching = false;
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Backspace => {
+                    self.daemon_search.pop();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Char(c) => {
+                    self.daemon_search.push(c);
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                _ => {}
+            }
+            return None;
+        }
+
+        // Daemon tab key handling (before global keys to intercept 1-5 for log levels)
+        if self.active_tab == Tab::Daemon {
+            match code {
+                KeyCode::Char('1') => {
+                    self.daemon_log_level = "TRACE".to_string();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Char('2') => {
+                    self.daemon_log_level = "DEBUG".to_string();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Char('3') => {
+                    self.daemon_log_level = "INFO".to_string();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Char('4') => {
+                    self.daemon_log_level = "WARN".to_string();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Char('5') => {
+                    self.daemon_log_level = "ERROR".to_string();
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                KeyCode::Char('/') => {
+                    self.daemon_searching = true;
+                    return None;
+                }
+                KeyCode::Char('f') => {
+                    self.daemon_follow = !self.daemon_follow;
+                    if self.daemon_follow && !self.daemon_logs.is_empty() {
+                        self.daemon_log_scroll = self.daemon_logs.len().saturating_sub(1);
+                    }
+                    return None;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if !self.daemon_logs.is_empty() {
+                        self.daemon_log_scroll = (self.daemon_log_scroll + 1)
+                            .min(self.daemon_logs.len().saturating_sub(1));
+                    }
+                    return None;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.daemon_log_scroll = self.daemon_log_scroll.saturating_sub(1);
+                    self.daemon_follow = false;
+                    return None;
+                }
+                _ => {} // Fall through to global keys
+            }
+        }
+
         match code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
@@ -273,6 +365,14 @@ impl App {
             KeyCode::Char('3') => {
                 self.active_tab = Tab::Monitoring;
                 None
+            }
+            KeyCode::Char('4') => {
+                self.active_tab = Tab::Daemon;
+                if self.daemon_logs.is_empty() {
+                    Some(Action::RefreshDaemonLogs)
+                } else {
+                    None
+                }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 match self.active_tab {
