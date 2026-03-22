@@ -62,11 +62,11 @@ export function RunnerGroupRow({
         </td>
         <td className="text-muted">{repo}</td>
         <td>
-          {Array.from(statusCounts.entries()).map(([state]) => (
-            <span key={state} style={{ marginRight: 6 }}>
-              <StatusBadge state={state as RunnerState} />
-            </span>
-          ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {Array.from(statusCounts.entries()).map(([state]) => (
+              <StatusBadge key={state} state={state as RunnerState} />
+            ))}
+          </div>
         </td>
         <td></td>
         <td></td>
