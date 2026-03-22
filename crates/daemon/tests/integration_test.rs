@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homerund::config::Config;
+use homerund::logging::DaemonLogState;
 use homerund::server::{create_router, AppState};
 use tower::ServiceExt;
 
@@ -8,7 +9,8 @@ fn test_state() -> AppState {
     let dir = tempfile::tempdir().unwrap();
     let config = Config::with_base_dir(dir.keep().join(".homerun"));
     config.ensure_dirs().unwrap();
-    let mut state = AppState::new(config);
+    let daemon_logs = DaemonLogState::new(&config.log_dir());
+    let mut state = AppState::new(config, daemon_logs);
     state.auth = homerund::auth::AuthManager::new_test_authenticated();
     state
 }
@@ -207,7 +209,8 @@ async fn test_auth_status_unauthenticated() {
     let dir = tempfile::tempdir().unwrap();
     let config = Config::with_base_dir(dir.keep().join(".homerun"));
     config.ensure_dirs().unwrap();
-    let state = AppState::new(config);
+    let daemon_logs = DaemonLogState::new(&config.log_dir());
+    let state = AppState::new(config, daemon_logs);
     let app = create_router(state);
     let resp = app
         .oneshot(

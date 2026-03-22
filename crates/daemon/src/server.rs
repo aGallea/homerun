@@ -11,6 +11,7 @@ use tokio::net::UnixListener;
 use crate::api;
 use crate::auth::AuthManager;
 use crate::config::Config;
+use crate::logging::DaemonLogState;
 use crate::metrics::MetricsCollector;
 use crate::notifications::NotificationManager;
 use crate::runner::RunnerManager;
@@ -22,10 +23,13 @@ pub struct AppState {
     pub runner_manager: RunnerManager,
     pub metrics: Arc<MetricsCollector>,
     pub notifications: Arc<NotificationManager>,
+    pub daemon_logs: DaemonLogState,
+    pub daemon_start_time: std::time::Instant,
+    pub daemon_pid: u32,
 }
 
 impl AppState {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, daemon_logs: DaemonLogState) -> Self {
         let runner_manager = RunnerManager::new(config.clone());
         Self {
             config: Arc::new(config),
@@ -33,6 +37,9 @@ impl AppState {
             runner_manager,
             metrics: Arc::new(MetricsCollector::new()),
             notifications: Arc::new(NotificationManager::new()),
+            daemon_logs,
+            daemon_start_time: std::time::Instant::now(),
+            daemon_pid: std::process::id(),
         }
     }
 
@@ -40,7 +47,8 @@ impl AppState {
     pub fn new_test() -> Self {
         let config = Config::with_base_dir(tempfile::tempdir().unwrap().keep().join(".homerun"));
         config.ensure_dirs().unwrap();
-        Self::new(config)
+        let daemon_logs = DaemonLogState::new(&config.log_dir());
+        Self::new(config, daemon_logs)
     }
 
     /// Create a test AppState with a pre-authenticated AuthManager.
@@ -111,7 +119,7 @@ async fn health() -> Json<serde_json::Value> {
     }))
 }
 
-pub async fn serve(config: Config) -> Result<()> {
+pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
     let socket_path = config.socket_path();
 
     // Remove stale socket file if it exists
@@ -127,7 +135,7 @@ pub async fn serve(config: Config) -> Result<()> {
     let listener = UnixListener::bind(&socket_path)?;
     tracing::info!("Listening on Unix socket: {}", socket_path.display());
 
-    let state = AppState::new(config);
+    let state = AppState::new(config, daemon_logs);
 
     // Restore auth token from macOS Keychain
     if let Err(e) = state.auth.try_restore().await {
