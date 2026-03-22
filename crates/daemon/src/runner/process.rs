@@ -37,11 +37,22 @@ pub async fn configure_runner(
 }
 
 pub async fn start_runner(runner_dir: &Path) -> Result<Child> {
-    let child = Command::new(runner_dir.join("run.sh"))
-        .current_dir(runner_dir)
+    let mut cmd = Command::new(runner_dir.join("run.sh"));
+    cmd.current_dir(runner_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+
+    // Spawn in its own process group so we can signal the entire tree
+    // (run.sh spawns child .NET processes that hold the GitHub session).
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+
+    let child = cmd.spawn()?;
     Ok(child)
 }
 

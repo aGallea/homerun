@@ -13,8 +13,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tokio::process::Child;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, watch, Notify, RwLock};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunnerEvent {
@@ -34,11 +33,21 @@ pub struct LogEntry {
 
 const RECENT_LOGS_MAX: usize = 500;
 
+/// Handle for communicating with a runner's monitoring task.
+/// The monitoring task owns the `Child` exclusively — no shared lock needed.
+#[derive(Clone)]
+struct ProcessHandle {
+    /// Signal the monitoring task to kill the child process.
+    kill_signal: Arc<Notify>,
+    /// Becomes `true` once the child process has fully exited.
+    exited: watch::Receiver<bool>,
+}
+
 #[derive(Clone)]
 pub struct RunnerManager {
     config: Arc<Config>,
     runners: Arc<RwLock<HashMap<String, RunnerInfo>>>,
-    processes: Arc<RwLock<HashMap<String, Arc<RwLock<Child>>>>>,
+    processes: Arc<RwLock<HashMap<String, ProcessHandle>>>,
     log_tx: Arc<broadcast::Sender<LogEntry>>,
     event_tx: Arc<broadcast::Sender<RunnerEvent>>,
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
@@ -754,28 +763,64 @@ impl RunnerManager {
             });
         }
 
-        // Store process handle
-        let child_arc = Arc::new(RwLock::new(child));
-        self.processes
-            .write()
-            .await
-            .insert(id.to_string(), child_arc.clone());
+        // Store process handle with kill signal + exit watch
+        let kill_signal = Arc::new(Notify::new());
+        let (exit_tx, exit_rx) = watch::channel(false);
 
-        // 7. Spawn background monitor task
+        let handle = ProcessHandle {
+            kill_signal: kill_signal.clone(),
+            exited: exit_rx,
+        };
+        self.processes.write().await.insert(id.to_string(), handle);
+
+        // 7. Spawn background monitor task — owns `child` exclusively
         let manager = self.clone();
         let runner_id = id.to_string();
         tokio::spawn(async move {
-            // Wait for child to exit
-            let exit_status = {
-                let mut child_guard = child_arc.write().await;
-                child_guard.wait().await
+            let exit_status = tokio::select! {
+                status = child.wait() => status,
+                _ = kill_signal.notified() => {
+                    // Kill signal received — gracefully stop the entire process group.
+                    // run.sh spawns .NET child processes that hold the GitHub session,
+                    // so we must signal the whole group to let them deregister cleanly.
+                    if let Some(pid) = child.id() {
+                        let pgid = pid as i32;
+                        // SIGTERM the process group for graceful shutdown
+                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
+
+                        // Wait up to 10s for graceful exit
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            child.wait(),
+                        )
+                        .await
+                        {
+                            Ok(status) => status,
+                            Err(_) => {
+                                tracing::warn!(
+                                    "Runner {} did not exit gracefully, sending SIGKILL",
+                                    runner_id
+                                );
+                                unsafe {
+                                    libc::kill(-pgid, libc::SIGKILL);
+                                }
+                                child.wait().await
+                            }
+                        }
+                    } else {
+                        // No PID — process already exited
+                        child.wait().await
+                    }
+                }
             };
             tracing::info!("Runner {} exited with status: {:?}", runner_id, exit_status);
+
+            // Signal that the process has fully exited
+            let _ = exit_tx.send(true);
 
             // Update state to Offline
             let mut runners = manager.runners.write().await;
             if let Some(r) = runners.get_mut(&runner_id) {
-                // Transition to Offline if Online, Busy, or Stopping (not if Deleting)
                 if r.state == RunnerState::Online
                     || r.state == RunnerState::Busy
                     || r.state == RunnerState::Stopping
@@ -795,50 +840,42 @@ impl RunnerManager {
 
     /// Stop a running runner process.
     ///
-    /// Removes the process handle from the map, kills it, waits for exit,
-    /// then transitions to Offline. This is blocking but avoids deadlocks
-    /// because we take ownership of the process handle before killing.
+    /// Signals the monitoring task to kill the child via `Notify`, then waits
+    /// for the `watch` channel to confirm the process has fully exited.
+    /// No shared lock on `Child` — eliminates the deadlock from issue #31.
     pub async fn stop_process(&self, id: &str) -> Result<()> {
         // Transition to Stopping
         self.update_state(id, RunnerState::Stopping).await?;
         self.emit_state_event(id, "stopping");
 
-        // Get the PID before killing — we use the PID directly to avoid
-        // deadlocking with the monitoring task which holds the Child write lock.
-        let pid = self.runners.read().await.get(id).and_then(|r| r.pid);
+        // Get the process handle
+        let handle = self.processes.read().await.get(id).cloned();
 
-        if let Some(pid) = pid {
-            // Send SIGTERM first for graceful shutdown, then SIGKILL
-            let pid_str = pid.to_string();
-            let _ = std::process::Command::new("kill").args([&pid_str]).output();
+        if let Some(handle) = handle {
+            // Signal the monitoring task to kill the child
+            handle.kill_signal.notify_one();
 
-            // Wait for process to exit (poll up to 10 seconds)
-            for _ in 0..20 {
-                let output = std::process::Command::new("kill")
-                    .args(["-0", &pid_str])
-                    .output();
-                match output {
-                    Ok(o) if !o.status.success() => break, // process gone
-                    _ => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
-                }
+            // Wait for the process to fully exit (with timeout)
+            let mut exited = handle.exited;
+            let timeout =
+                tokio::time::timeout(std::time::Duration::from_secs(15), exited.wait_for(|&v| v))
+                    .await;
+
+            if timeout.is_err() {
+                tracing::warn!("Timed out waiting for runner {} to exit", id);
             }
-
-            // Force kill if still alive
-            let _ = std::process::Command::new("kill")
-                .args(["-9", &pid_str])
-                .output();
         }
 
-        // Remove process handle from map
-        self.processes.write().await.remove(id);
-
-        // Update to Offline
+        // Ensure state is Offline (monitor task may have already done this,
+        // but handle the case where there was no process handle)
         {
             let mut runners = self.runners.write().await;
             if let Some(r) = runners.get_mut(id) {
-                r.state = RunnerState::Offline;
-                r.pid = None;
-                r.started_at = None;
+                if r.state == RunnerState::Stopping {
+                    r.state = RunnerState::Offline;
+                    r.pid = None;
+                    r.started_at = None;
+                }
             }
         }
         self.emit_state_event(id, "offline");
@@ -1806,5 +1843,69 @@ mod tests {
         let json = serde_json::to_value(&info).unwrap();
         // `current_job` is `skip_serializing_if = "Option::is_none"`, so the key must be absent.
         assert!(!json.as_object().unwrap().contains_key("current_job"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_process_signals_and_waits() {
+        let manager = create_test_manager();
+
+        // Simulate a running process by inserting a ProcessHandle manually
+        let kill_signal = Arc::new(Notify::new());
+        let (exit_tx, exit_rx) = watch::channel(false);
+
+        let handle = ProcessHandle {
+            kill_signal: kill_signal.clone(),
+            exited: exit_rx,
+        };
+
+        let runner_id = "test-runner-1";
+
+        // Create a runner in Online state
+        manager.runners.write().await.insert(
+            runner_id.to_string(),
+            RunnerInfo {
+                config: RunnerConfig {
+                    id: runner_id.to_string(),
+                    name: "test".to_string(),
+                    repo_owner: "owner".to_string(),
+                    repo_name: "repo".to_string(),
+                    labels: vec![],
+                    mode: RunnerMode::App,
+                    work_dir: std::path::PathBuf::from("/tmp/test"),
+                    group_id: None,
+                },
+                state: RunnerState::Online,
+                pid: Some(12345),
+                uptime_secs: None,
+                started_at: Some(chrono::Utc::now()),
+                jobs_completed: 0,
+                jobs_failed: 0,
+                current_job: None,
+                job_context: None,
+            },
+        );
+        manager
+            .processes
+            .write()
+            .await
+            .insert(runner_id.to_string(), handle);
+
+        // Spawn a task that simulates the monitoring task:
+        // waits for kill signal, then marks exited
+        let ks = kill_signal.clone();
+        tokio::spawn(async move {
+            ks.notified().await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let _ = exit_tx.send(true);
+        });
+
+        // stop_process should signal and wait
+        let result = manager.stop_process(runner_id).await;
+        assert!(result.is_ok());
+
+        // Runner should be Offline
+        let runner = manager.get(runner_id).await.unwrap();
+        assert_eq!(runner.state, RunnerState::Offline);
+        assert_eq!(runner.pid, None);
     }
 }
