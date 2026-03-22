@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { RunnerInfo } from "../api/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -30,6 +30,8 @@ export function RunnerGroupRow({
   readOnly = false,
 }: RunnerGroupRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const namePrefix = runners[0]?.config.name.replace(/-\d+$/, "") ?? "group";
   const repo = runners[0] ? `${runners[0].config.repo_owner}/${runners[0].config.repo_name}` : "";
@@ -37,6 +39,17 @@ export function RunnerGroupRow({
   const activeCount = runners.filter((r) => r.state === "online" || r.state === "busy").length;
   const hasRunning = activeCount > 0;
   const hasStopped = runners.some((r) => r.state === "offline" || r.state === "error");
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
 
   return (
     <>
@@ -71,63 +84,142 @@ export function RunnerGroupRow({
               {activeCount}/{runners.length} Online
             </span>
           </div>
+          <div className="runner-col-cpu"></div>
           <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
             {!readOnly && (
-              <div className="runner-actions-bar" style={{ marginLeft: "auto" }}>
-                {loading && <Spinner />}
-                {hasStopped && (
+              <>
+                {/* Inline buttons — hidden on small screens */}
+                <div className="runner-actions-bar actions-inline" style={{ marginLeft: "auto" }}>
+                  {loading && <Spinner />}
+                  {hasStopped && (
+                    <button
+                      className="icon-btn"
+                      onClick={() => onStartGroup(groupId)}
+                      title="Start all"
+                      disabled={loading}
+                    >
+                      ▶
+                    </button>
+                  )}
+                  {hasRunning && (
+                    <button
+                      className="icon-btn"
+                      onClick={() => onStopGroup(groupId)}
+                      title="Stop all"
+                      disabled={loading}
+                    >
+                      ■
+                    </button>
+                  )}
                   <button
                     className="icon-btn"
-                    onClick={() => onStartGroup(groupId)}
-                    title="Start all"
+                    onClick={() => onRestartGroup(groupId)}
+                    title="Restart all"
                     disabled={loading}
                   >
-                    ▶
+                    ↻
                   </button>
-                )}
-                {hasRunning && (
                   <button
                     className="icon-btn"
-                    onClick={() => onStopGroup(groupId)}
-                    title="Stop all"
+                    onClick={() => onScaleGroup(groupId, runners.length + 1)}
+                    title="Scale up"
+                    disabled={loading || runners.length >= 10}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    className="icon-btn"
+                    onClick={() => onScaleGroup(groupId, runners.length - 1)}
+                    title="Scale down"
+                    disabled={loading || runners.length <= 1}
+                  >
+                    ▼
+                  </button>
+                  <button
+                    className="icon-btn icon-btn-danger"
+                    onClick={() => setConfirmDelete(true)}
+                    title="Delete all"
                     disabled={loading}
                   >
-                    ■
+                    ✕
                   </button>
-                )}
-                <button
-                  className="icon-btn"
-                  onClick={() => onRestartGroup(groupId)}
-                  title="Restart all"
-                  disabled={loading}
-                >
-                  ↻
-                </button>
-                <button
-                  className="icon-btn"
-                  onClick={() => onScaleGroup(groupId, runners.length + 1)}
-                  title="Scale up"
-                  disabled={loading || runners.length >= 10}
-                >
-                  ▲
-                </button>
-                <button
-                  className="icon-btn"
-                  onClick={() => onScaleGroup(groupId, runners.length - 1)}
-                  title="Scale down"
-                  disabled={loading || runners.length <= 1}
-                >
-                  ▼
-                </button>
-                <button
-                  className="icon-btn icon-btn-danger"
-                  onClick={() => setConfirmDelete(true)}
-                  title="Delete all"
-                  disabled={loading}
-                >
-                  ✕
-                </button>
-              </div>
+                </div>
+
+                {/* Dots menu — shown on small screens */}
+                <div className="actions-dots" style={{ marginLeft: "auto" }} ref={menuRef}>
+                  <button
+                    className="icon-btn"
+                    onClick={() => setMenuOpen((v) => !v)}
+                    disabled={loading}
+                  >
+                    ⋯
+                  </button>
+                  {menuOpen && (
+                    <div className="actions-dropdown">
+                      {hasStopped && (
+                        <button
+                          className="actions-dropdown-item"
+                          onClick={() => {
+                            onStartGroup(groupId);
+                            setMenuOpen(false);
+                          }}
+                        >
+                          ▶ Start All
+                        </button>
+                      )}
+                      {hasRunning && (
+                        <button
+                          className="actions-dropdown-item"
+                          onClick={() => {
+                            onStopGroup(groupId);
+                            setMenuOpen(false);
+                          }}
+                        >
+                          ■ Stop All
+                        </button>
+                      )}
+                      <button
+                        className="actions-dropdown-item"
+                        onClick={() => {
+                          onRestartGroup(groupId);
+                          setMenuOpen(false);
+                        }}
+                      >
+                        ↻ Restart All
+                      </button>
+                      <button
+                        className="actions-dropdown-item"
+                        onClick={() => {
+                          onScaleGroup(groupId, runners.length + 1);
+                          setMenuOpen(false);
+                        }}
+                        disabled={runners.length >= 10}
+                      >
+                        ▲ Scale Up
+                      </button>
+                      <button
+                        className="actions-dropdown-item"
+                        onClick={() => {
+                          onScaleGroup(groupId, runners.length - 1);
+                          setMenuOpen(false);
+                        }}
+                        disabled={runners.length <= 1}
+                      >
+                        ▼ Scale Down
+                      </button>
+                      <button
+                        className="actions-dropdown-item actions-dropdown-item-danger"
+                        onClick={() => {
+                          setConfirmDelete(true);
+                          setMenuOpen(false);
+                        }}
+                      >
+                        ✕ Delete All
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>

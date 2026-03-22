@@ -116,6 +116,7 @@ export function RunnerTable({
           <div className="runner-col-name">NAME</div>
           <div className="runner-col-repo">REPOSITORY</div>
           <div className="runner-col-status">STATUS</div>
+          <div className="runner-col-cpu">CPU</div>
           <div className="runner-col-actions"></div>
         </div>
       </div>
@@ -230,8 +231,10 @@ function RunnerRow({
         <div className="runner-col-status">
           <StatusBadge state={runner.state} />
         </div>
-        <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
+        <div className="runner-col-cpu">
           <CpuValue value={cpuValue} />
+        </div>
+        <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
           <RunnerActions
             runner={runner}
             onStart={onStart}

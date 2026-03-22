@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { RunnerInfo } from "../api/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -23,49 +23,117 @@ export function RunnerActions({
 }: RunnerActionsProps) {
   if (readOnly) return null;
   const [confirm, setConfirm] = useState<"delete" | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const isRunning = runner.state === "online" || runner.state === "busy";
   const isStopped = runner.state === "offline" || runner.state === "error";
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
+
   return (
-    <div className="runner-actions-bar">
-      {loading && <Spinner />}
-      {isStopped && (
+    <>
+      {/* Inline buttons — hidden on small screens */}
+      <div className="runner-actions-bar actions-inline">
+        {loading && <Spinner />}
+        {isStopped && (
+          <button
+            className="icon-btn"
+            onClick={() => onStart(runner.config.id)}
+            title="Start"
+            disabled={loading}
+          >
+            ▶
+          </button>
+        )}
+        {isRunning && (
+          <button
+            className="icon-btn"
+            onClick={() => onStop(runner.config.id)}
+            title="Stop"
+            disabled={loading}
+          >
+            ■
+          </button>
+        )}
         <button
           className="icon-btn"
-          onClick={() => onStart(runner.config.id)}
-          title="Start"
+          onClick={() => onRestart(runner.config.id)}
+          title="Restart"
           disabled={loading}
         >
-          ▶
+          ↻
         </button>
-      )}
-      {isRunning && (
         <button
-          className="icon-btn"
-          onClick={() => onStop(runner.config.id)}
-          title="Stop"
+          className="icon-btn icon-btn-danger"
+          onClick={() => setConfirm("delete")}
+          title="Delete"
           disabled={loading}
         >
-          ■
+          ✕
         </button>
-      )}
-      <button
-        className="icon-btn"
-        onClick={() => onRestart(runner.config.id)}
-        title="Restart"
-        disabled={loading}
-      >
-        ↻
-      </button>
-      <button
-        className="icon-btn icon-btn-danger"
-        onClick={() => setConfirm("delete")}
-        title="Delete"
-        disabled={loading}
-      >
-        ✕
-      </button>
+      </div>
+
+      {/* Dots menu — shown on small screens */}
+      <div className="actions-dots" ref={menuRef}>
+        <button className="icon-btn" onClick={() => setMenuOpen((v) => !v)} disabled={loading}>
+          ⋯
+        </button>
+        {menuOpen && (
+          <div className="actions-dropdown">
+            {isStopped && (
+              <button
+                className="actions-dropdown-item"
+                onClick={() => {
+                  onStart(runner.config.id);
+                  setMenuOpen(false);
+                }}
+              >
+                ▶ Start
+              </button>
+            )}
+            {isRunning && (
+              <button
+                className="actions-dropdown-item"
+                onClick={() => {
+                  onStop(runner.config.id);
+                  setMenuOpen(false);
+                }}
+              >
+                ■ Stop
+              </button>
+            )}
+            <button
+              className="actions-dropdown-item"
+              onClick={() => {
+                onRestart(runner.config.id);
+                setMenuOpen(false);
+              }}
+            >
+              ↻ Restart
+            </button>
+            <button
+              className="actions-dropdown-item actions-dropdown-item-danger"
+              onClick={() => {
+                setConfirm("delete");
+                setMenuOpen(false);
+              }}
+            >
+              ✕ Delete
+            </button>
+          </div>
+        )}
+      </div>
+
       {confirm === "delete" && (
         <ConfirmDialog
           title="Delete Runner"
@@ -79,7 +147,7 @@ export function RunnerActions({
           onCancel={() => setConfirm(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 
