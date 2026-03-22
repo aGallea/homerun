@@ -120,8 +120,9 @@ export function RunnerTable({
                     <tr
                       key={runner.config.id}
                       style={{
-                        cursor: "pointer",
+                        cursor: pendingActions?.has(runner.config.id) ? "default" : "pointer",
                         opacity: pendingActions?.has(runner.config.id) ? 0.6 : 1,
+                        pointerEvents: pendingActions?.has(runner.config.id) ? "none" : undefined,
                       }}
                       onClick={() => navigate(`/runners/${runner.config.id}`)}
                     >
@@ -181,8 +182,9 @@ export function RunnerTable({
             <tr
               key={runner.config.id}
               style={{
-                cursor: "pointer",
+                cursor: pendingActions?.has(runner.config.id) ? "default" : "pointer",
                 opacity: pendingActions?.has(runner.config.id) ? 0.6 : 1,
+                pointerEvents: pendingActions?.has(runner.config.id) ? "none" : undefined,
               }}
               onClick={() => navigate(`/runners/${runner.config.id}`)}
             >

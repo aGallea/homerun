@@ -45,8 +45,11 @@ export function RunnerGroupRow({
     <>
       <tr
         className="group-row"
-        onClick={onToggle}
-        style={{ cursor: "pointer", opacity: loading ? 0.6 : 1 }}
+        onClick={loading ? undefined : onToggle}
+        style={{
+          cursor: loading ? "default" : "pointer",
+          opacity: loading ? 0.6 : 1,
+        }}
       >
         <td>
           <span style={{ marginRight: 8 }}>{expanded ? "▼" : "▶"}</span>
