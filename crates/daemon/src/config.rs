@@ -3,8 +3,28 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Preferences {
+    pub start_runners_on_launch: bool,
+    pub notify_status_changes: bool,
+    pub notify_job_completions: bool,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            start_runners_on_launch: false,
+            notify_status_changes: true,
+            notify_job_completions: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     base_dir: PathBuf,
+    #[serde(default)]
+    pub preferences: Preferences,
 }
 
 impl Default for Config {
@@ -12,13 +32,17 @@ impl Default for Config {
         let home = dirs::home_dir().expect("no home directory");
         Self {
             base_dir: home.join(".homerun"),
+            preferences: Preferences::default(),
         }
     }
 }
 
 impl Config {
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+        Self {
+            base_dir,
+            preferences: Preferences::default(),
+        }
     }
 
     pub fn base_dir(&self) -> &Path {
@@ -106,5 +130,19 @@ mod tests {
 
         let loaded = Config::load(&path).unwrap();
         assert_eq!(config, loaded);
+    }
+
+    #[test]
+    fn test_config_with_preferences_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let mut config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.preferences.notify_status_changes = false;
+        config.preferences.start_runners_on_launch = true;
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(config.preferences, loaded.preferences);
     }
 }
