@@ -61,7 +61,8 @@ export function RunnerGroupRow({
         <td>
           {Array.from(statusCounts.entries()).map(([state, count]) => (
             <span key={state} style={{ marginRight: 8 }}>
-              <StatusBadge state={state as RunnerState} /> {count}
+              <StatusBadge state={state as RunnerState} />
+              {statusCounts.size > 1 ? ` ${count}` : ""}
             </span>
           ))}
         </td>
