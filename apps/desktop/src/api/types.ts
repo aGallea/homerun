@@ -138,3 +138,9 @@ export interface ScaleGroupResponse {
   removed: string[];
   skipped_busy: string[];
 }
+
+export interface Preferences {
+  start_runners_on_launch: boolean;
+  notify_status_changes: boolean;
+  notify_job_completions: boolean;
+}
