@@ -116,65 +116,69 @@ export function RunnerTable({
                   loading={pendingActions?.has(groupId)}
                 />
                 {isExpanded &&
-                  groupRunners.map((runner) => (
-                    <tr
-                      key={runner.config.id}
-                      style={{
-                        cursor: pendingActions?.has(runner.config.id) ? "default" : "pointer",
-                        opacity: pendingActions?.has(runner.config.id) ? 0.6 : 1,
-                        pointerEvents: pendingActions?.has(runner.config.id) ? "none" : undefined,
-                      }}
-                      onClick={() => navigate(`/runners/${runner.config.id}`)}
-                    >
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <span className="font-mono" style={{ fontSize: 13, paddingLeft: 24 }}>
-                          {runner.config.name}
-                        </span>
-                      </td>
-                      <td className="text-muted">
-                        {runner.config.repo_owner}/{runner.config.repo_name}
-                      </td>
-                      <td>
-                        <StatusBadge state={runner.state} />
-                      </td>
-                      <td>
-                        {runner.current_job ? (
-                          <a
-                            href="#"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                            style={{ color: "var(--accent-yellow)", fontSize: 12 }}
-                          >
-                            {runner.current_job}
-                          </a>
-                        ) : (
-                          <span className="text-muted" style={{ fontSize: 12 }}>
-                            —
+                  groupRunners.map((runner) => {
+                    const rowLoading =
+                      pendingActions?.has(runner.config.id) || pendingActions?.has(groupId);
+                    return (
+                      <tr
+                        key={runner.config.id}
+                        style={{
+                          cursor: rowLoading ? "default" : "pointer",
+                          opacity: rowLoading ? 0.6 : 1,
+                          pointerEvents: rowLoading ? "none" : undefined,
+                        }}
+                        onClick={() => navigate(`/runners/${runner.config.id}`)}
+                      >
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <span className="font-mono" style={{ fontSize: 13, paddingLeft: 24 }}>
+                            {runner.config.name}
                           </span>
-                        )}
-                      </td>
-                      <td className="text-muted" style={{ textTransform: "capitalize" }}>
-                        {runner.config.mode}
-                      </td>
-                      <td className="font-mono text-muted">
-                        {metrics?.get(runner.config.id) != null
-                          ? `${metrics.get(runner.config.id)!.toFixed(1)}%`
-                          : "--"}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <RunnerActions
-                          runner={runner}
-                          onStart={onStart}
-                          onStop={onStop}
-                          onRestart={onRestart}
-                          onDelete={onDelete}
-                          loading={pendingActions?.has(runner.config.id)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="text-muted">
+                          {runner.config.repo_owner}/{runner.config.repo_name}
+                        </td>
+                        <td>
+                          <StatusBadge state={runner.state} />
+                        </td>
+                        <td>
+                          {runner.current_job ? (
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              style={{ color: "var(--accent-yellow)", fontSize: 12 }}
+                            >
+                              {runner.current_job}
+                            </a>
+                          ) : (
+                            <span className="text-muted" style={{ fontSize: 12 }}>
+                              —
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-muted" style={{ textTransform: "capitalize" }}>
+                          {runner.config.mode}
+                        </td>
+                        <td className="font-mono text-muted">
+                          {metrics?.get(runner.config.id) != null
+                            ? `${metrics.get(runner.config.id)!.toFixed(1)}%`
+                            : "--"}
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <RunnerActions
+                            runner={runner}
+                            onStart={onStart}
+                            onStop={onStop}
+                            onRestart={onRestart}
+                            onDelete={onDelete}
+                            loading={rowLoading}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
               </Fragment>
             );
           })}
