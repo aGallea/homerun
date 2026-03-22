@@ -132,11 +132,17 @@ impl GitHubClient {
         })
     }
 
+    /// Find the in-progress workflow run that matches this runner.
+    ///
+    /// Matches by job name (from runner stdout) against the GitHub API's job
+    /// list, since the `runner_name` field on jobs may not be populated yet
+    /// while a job is still in progress.
     pub async fn get_active_run_for_runner(
         &self,
         owner: &str,
         repo: &str,
         runner_name: &str,
+        job_name: &str,
     ) -> Result<Option<crate::runner::types::JobContext>> {
         #[derive(Deserialize)]
         struct WorkflowRun {
@@ -159,6 +165,7 @@ impl GitHubClient {
 
         #[derive(Deserialize)]
         struct RunJob {
+            name: String,
             runner_name: Option<String>,
         }
 
@@ -180,11 +187,13 @@ impl GitHubClient {
                 Err(_) => continue,
             };
 
+            // Match by runner_name if available, otherwise fall back to job name
             let matched = jobs.jobs.iter().any(|j| {
-                j.runner_name
-                    .as_deref()
-                    .map(|name| name == runner_name)
-                    .unwrap_or(false)
+                if let Some(rn) = j.runner_name.as_deref() {
+                    rn == runner_name
+                } else {
+                    j.name == job_name
+                }
             });
 
             if matched {

@@ -98,6 +98,90 @@ impl RunnerManager {
         *t = token;
     }
 
+    /// Spawn a background task that periodically checks busy runners missing
+    /// `job_context` and fetches branch/PR info from the GitHub API.
+    pub fn start_job_context_poller(&self) {
+        let runners = self.runners.clone();
+        let auth_token = self.auth_token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+
+                // Collect busy runners missing job_context
+                let needs_context: Vec<(String, String, String, String, String)> = {
+                    let map = runners.read().await;
+                    map.values()
+                        .filter(|r| {
+                            r.state == RunnerState::Busy
+                                && r.job_context.is_none()
+                                && r.current_job.is_some()
+                        })
+                        .map(|r| {
+                            (
+                                r.config.id.clone(),
+                                r.config.name.clone(),
+                                r.config.repo_owner.clone(),
+                                r.config.repo_name.clone(),
+                                r.current_job.clone().unwrap(),
+                            )
+                        })
+                        .collect()
+                };
+
+                if needs_context.is_empty() {
+                    continue;
+                }
+
+                let token = {
+                    let t = auth_token.read().await;
+                    t.clone()
+                };
+                let Some(token) = token else {
+                    continue;
+                };
+                let Ok(gh) = GitHubClient::new(Some(token)) else {
+                    continue;
+                };
+
+                for (runner_id, runner_name, owner, repo, job_name) in needs_context {
+                    match gh
+                        .get_active_run_for_runner(&owner, &repo, &runner_name, &job_name)
+                        .await
+                    {
+                        Ok(Some(ctx)) => {
+                            tracing::info!(
+                                runner = %runner_id,
+                                branch = %ctx.branch,
+                                pr = ?ctx.pr_number,
+                                "Job context fetched"
+                            );
+                            let mut map = runners.write().await;
+                            if let Some(r) = map.get_mut(&runner_id) {
+                                r.job_context = Some(ctx);
+                            }
+                        }
+                        Ok(None) => {
+                            tracing::debug!(
+                                runner = %runner_id,
+                                runner_name = %runner_name,
+                                job_name = %job_name,
+                                "No matching workflow run found yet"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                runner = %runner_id,
+                                error = %e,
+                                "Failed to fetch job context"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     async fn next_runner_number(&self, repo_name: &str) -> u32 {
         // Find existing numbers for this repo to pick the next available one
         let runners = self.runners.read().await;
@@ -591,7 +675,6 @@ impl RunnerManager {
             let log_tx = self.log_tx.clone();
             let recent_logs = self.recent_logs.clone();
             let runners = self.runners.clone();
-            let auth_token = self.auth_token.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -618,66 +701,11 @@ impl RunnerManager {
                     // Lines look like: "2026-03-21 19:49:31Z: Running job: TypeScript (type check + build)"
                     match parse_job_event(&line) {
                         Some(JobEvent::Started(job_name)) => {
-                            // Update state and extract config while holding the write lock
-                            let runner_config = {
-                                let mut map = runners.write().await;
-                                if let Some(r) = map.get_mut(&rid) {
-                                    r.state = RunnerState::Busy;
-                                    r.current_job = Some(job_name);
-                                    Some((
-                                        r.config.name.clone(),
-                                        r.config.repo_owner.clone(),
-                                        r.config.repo_name.clone(),
-                                    ))
-                                } else {
-                                    None
-                                }
-                            };
-                            // Fetch job context (branch/PR info) from GitHub API
-                            let Some((runner_name, repo_owner, repo_name)) = runner_config else {
-                                continue;
-                            };
-                            let runners_clone = runners.clone();
-                            let rid_clone = rid.clone();
-                            let auth_token_clone = auth_token.clone();
-                            tokio::spawn(async move {
-                                let token = {
-                                    let t = auth_token_clone.read().await;
-                                    t.clone()
-                                };
-                                if let Some(token) = token {
-                                    if let Ok(gh) = GitHubClient::new(Some(token)) {
-                                        match gh
-                                            .get_active_run_for_runner(
-                                                &repo_owner,
-                                                &repo_name,
-                                                &runner_name,
-                                            )
-                                            .await
-                                        {
-                                            Ok(Some(ctx)) => {
-                                                let mut map = runners_clone.write().await;
-                                                if let Some(r) = map.get_mut(&rid_clone) {
-                                                    r.job_context = Some(ctx);
-                                                }
-                                            }
-                                            Ok(None) => {
-                                                tracing::debug!(
-                                                    runner = %rid_clone,
-                                                    "No matching workflow run found for runner"
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    runner = %rid_clone,
-                                                    error = %e,
-                                                    "Failed to fetch job context from GitHub"
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            });
+                            let mut map = runners.write().await;
+                            if let Some(r) = map.get_mut(&rid) {
+                                r.state = RunnerState::Busy;
+                                r.current_job = Some(job_name);
+                            }
                         }
                         Some(JobEvent::Completed { succeeded }) => {
                             let mut map = runners.write().await;
