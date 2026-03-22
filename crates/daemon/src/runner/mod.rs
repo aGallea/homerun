@@ -252,6 +252,50 @@ impl RunnerManager {
         Ok(runner)
     }
 
+    pub async fn create_batch(
+        &self,
+        repo_full_name: &str,
+        count: u8,
+        labels: Option<Vec<String>>,
+        mode: Option<RunnerMode>,
+    ) -> Result<(String, Vec<RunnerInfo>, Vec<types::BatchCreateError>)> {
+        let group_id = uuid::Uuid::new_v4().to_string();
+        let mut runners = Vec::new();
+        let mut errors = Vec::new();
+
+        for i in 0..count {
+            match self
+                .create(
+                    repo_full_name,
+                    None,
+                    labels.clone(),
+                    mode.clone(),
+                    Some(group_id.clone()),
+                )
+                .await
+            {
+                Ok(runner) => runners.push(runner),
+                Err(e) => errors.push(types::BatchCreateError {
+                    index: i,
+                    error: e.to_string(),
+                }),
+            }
+        }
+
+        Ok((group_id, runners, errors))
+    }
+
+    pub async fn list_by_group(&self, group_id: &str) -> Vec<RunnerInfo> {
+        self.runners
+            .read()
+            .await
+            .values()
+            .filter(|r| r.config.group_id.as_deref() == Some(group_id))
+            .cloned()
+            .map(Self::with_computed_uptime)
+            .collect()
+    }
+
     pub async fn list(&self) -> Vec<RunnerInfo> {
         self.runners
             .read()
