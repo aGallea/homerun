@@ -51,7 +51,7 @@ export function RunnerGroupRow({
           opacity: loading ? 0.6 : 1,
         }}
       >
-        <td>
+        <td style={{ whiteSpace: "nowrap" }}>
           <span style={{ marginRight: 8 }}>{expanded ? "▼" : "▶"}</span>
           <span className="font-mono" style={{ fontWeight: 600 }}>
             {namePrefix}
@@ -62,10 +62,9 @@ export function RunnerGroupRow({
         </td>
         <td className="text-muted">{repo}</td>
         <td>
-          {Array.from(statusCounts.entries()).map(([state, count]) => (
-            <span key={state} style={{ marginRight: 8 }}>
+          {Array.from(statusCounts.entries()).map(([state]) => (
+            <span key={state} style={{ marginRight: 6 }}>
               <StatusBadge state={state as RunnerState} />
-              {statusCounts.size > 1 ? ` ${count}` : ""}
             </span>
           ))}
         </td>

@@ -126,7 +126,7 @@ export function RunnerTable({
                       }}
                       onClick={() => navigate(`/runners/${runner.config.id}`)}
                     >
-                      <td>
+                      <td style={{ whiteSpace: "nowrap" }}>
                         <span className="font-mono" style={{ fontSize: 13, paddingLeft: 24 }}>
                           {runner.config.name}
                         </span>
@@ -188,7 +188,7 @@ export function RunnerTable({
               }}
               onClick={() => navigate(`/runners/${runner.config.id}`)}
             >
-              <td>
+              <td style={{ whiteSpace: "nowrap" }}>
                 <span className="font-mono" style={{ fontSize: 13 }}>
                   {runner.config.name}
                 </span>
