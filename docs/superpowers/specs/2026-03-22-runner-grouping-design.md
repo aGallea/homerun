@@ -110,11 +110,13 @@ pub struct ScaleGroupResponse {
 
 ## Naming Strategy
 
-Runner names within a group use a **repo-scoped monotonic counter** to avoid collisions across batches. The daemon tracks the highest runner number ever assigned for each repo (derived from existing runners at startup). For example:
+Runner names within a group use a **repo-scoped monotonic counter** to avoid collisions across batches. The counter key is `repo_name` (the repository name portion only, not `owner/repo`). The name prefix is also `repo_name`. The daemon derives the highest runner number for each repo from existing runners at startup (by parsing `{repo_name}-runner-{N}` patterns). The counter is not separately persisted — if all runners for a repo are deleted and the daemon restarts, numbering starts from 1 again (acceptable since GitHub runner names are independent of registration).
 
-- First batch for `myrepo`: `myrepo-runner-1`, `myrepo-runner-2`, `myrepo-runner-3`
-- Second batch for `myrepo`: `myrepo-runner-4`, `myrepo-runner-5`
-- Scale-up of first batch: `myrepo-runner-6` (continues from global counter, not from group)
+Examples:
+
+- First batch for repo `myrepo`: `myrepo-runner-1`, `myrepo-runner-2`, `myrepo-runner-3`
+- Second batch for same repo: `myrepo-runner-4`, `myrepo-runner-5`
+- Scale-up of first batch: `myrepo-runner-6` (continues from repo counter, not group)
 
 This avoids name collisions without requiring complex uniqueness checks.
 
@@ -144,13 +146,15 @@ This avoids name collisions without requiring complex uniqueness checks.
 
 - `POST /runners/batch`: Generates a single `group_id` UUID. Creates `count` runners, each with that `group_id`. Auto-generates names using the repo-scoped monotonic counter. Spawns async registration for each. Returns created runners, `group_id`, and any per-index errors. HTTP 201 if all succeed, 207 if partial.
 - Group action endpoints: Iterate runners matching `group_id`, apply the action to each runner in a valid state for that transition, skip others. Return per-runner results. Partial success is expected and normal.
+- All group endpoints (`/runners/groups/{group_id}/*`) return **404 Not Found** if no runners exist with the given `group_id`.
+- `DELETE /runners/groups/{group_id}`: Deletes all runners in the group. **Busy runners are skipped** (same partial-success pattern as scale-down). Returns `GroupActionResponse` with per-runner results.
 
 ### Scale Endpoint Behavior
 
 `PATCH /runners/groups/{group_id}` with `{ "count": N }`:
 
-- **Scale up** (target > current): Creates `target - current` new runners with the same `group_id`, repo, labels, and mode as existing group members. Names continue from the repo-scoped counter.
-- **Scale down** (target < current): Removes runners from highest-numbered name first. **Busy runners are skipped** — they cannot be removed. If skipping busy runners means the target count can't be reached, the response reports the actual count achieved and lists skipped runners. Removed runners go through the same delete flow as `DELETE /runners/{id}`.
+- **Scale up** (target > current): Creates `target - current` new runners with the same `group_id`, repo, labels, and mode as the first runner in the group (sorted by name). Names continue from the repo-scoped counter.
+- **Scale down** (target < current): Removes runners from highest-numbered name first. **Busy runners are skipped** — they cannot be removed. If skipping busy runners means the target count can't be reached, the response reports the actual count achieved and lists skipped runners. Removed runners go through the same delete flow as `DELETE /runners/{id}`. Scale-down is **best-effort** — if busy runners block removal, the user must retry after jobs complete. The daemon does not remember or reconcile a desired count automatically.
 - **No change** (target == current): Returns 200 with no additions or removals.
 - **Validation**: `count` must be 1-10. Returns 400 if out of range. Scaling to 1 is allowed (leaves one runner, group still exists).
 
@@ -176,7 +180,7 @@ Real-time events via `/events` continue to fire per-runner as today. UIs correla
 
 - Runners with a `group_id` are collected into collapsible group rows
 - Solo runners (no `group_id`) render as flat rows, same as today
-- **Group row shows:** collapse chevron, group name (derived from shared name prefix), instance count, aggregated status summary (e.g. `2 online, 1 busy`), batch action buttons (start all, stop all, restart all, delete all), and a scale control (+/- buttons or input to set target count)
+- **Group row shows:** collapse chevron, group name (derived from shared name prefix), instance count, aggregated status summary (e.g. `2 online, 1 busy`), batch action buttons (start all, stop all, restart all, delete all), and +/- buttons to scale up/down by 1
 - **Expanded state:** individual runner rows indented below the group row, each with their own actions
 - Groups start **collapsed** by default
 - Delete all triggers a confirmation dialog showing the count
@@ -204,9 +208,10 @@ Real-time events via `/events` continue to fire per-runner as today. UIs correla
 
 ### Actions on Group Rows
 
-- `s` on a group row applies start to all startable runners (Offline/Error) AND stop to all stoppable runners (Online/Busy) — it normalizes the group toward a toggled state
-- `r` restart all, `d` delete all (with confirmation)
-- `+` / `-` scale up / scale down by 1
+- `S` (shift-s) start all startable runners (Offline/Error) in the group
+- `X` stop all stoppable runners (Online/Busy) in the group
+- `r` restart all, `d` delete all (with confirmation, skips busy runners)
+- `+` / `-` scale up / scale down by 1 (clamped to 1-10 range)
 
 ### Actions on Individual Runners Within a Group
 
