@@ -65,67 +65,61 @@ export function RunnerGroupRow({
         <td></td>
         <td></td>
         <td onClick={(e) => e.stopPropagation()}>
-          {loading ? (
-            <span className="text-muted" style={{ fontSize: 12 }}>
-              ...
-            </span>
-          ) : (
-            <div style={{ display: "flex", gap: 4 }}>
-              {hasStopped && (
-                <button
-                  className="btn btn-sm"
-                  onClick={() => onStartGroup(groupId)}
-                  title="Start all"
-                  disabled={loading}
-                >
-                  ▶
-                </button>
-              )}
-              {hasRunning && (
-                <button
-                  className="btn btn-sm"
-                  onClick={() => onStopGroup(groupId)}
-                  title="Stop all"
-                  disabled={loading}
-                >
-                  ■
-                </button>
-              )}
+          <div style={{ display: "flex", gap: 4, opacity: loading ? 0.5 : 1 }}>
+            {hasStopped && (
               <button
                 className="btn btn-sm"
-                onClick={() => onRestartGroup(groupId)}
-                title="Restart all"
+                onClick={() => onStartGroup(groupId)}
+                title="Start all"
                 disabled={loading}
               >
-                ↻
+                ▶
               </button>
+            )}
+            {hasRunning && (
               <button
                 className="btn btn-sm"
-                onClick={() => onScaleGroup(groupId, runners.length + 1)}
-                title="Scale up"
-                disabled={loading || runners.length >= 10}
-              >
-                +
-              </button>
-              <button
-                className="btn btn-sm"
-                onClick={() => onScaleGroup(groupId, runners.length - 1)}
-                title="Scale down"
-                disabled={loading || runners.length <= 1}
-              >
-                −
-              </button>
-              <button
-                className="btn btn-sm"
-                style={{ color: "var(--accent-red)" }}
-                onClick={() => setConfirmDelete(true)}
-                title="Delete all"
+                onClick={() => onStopGroup(groupId)}
+                title="Stop all"
                 disabled={loading}
               >
-                ✕
+                ■
               </button>
-            </div>
-          )}
+            )}
+            <button
+              className="btn btn-sm"
+              onClick={() => onRestartGroup(groupId)}
+              title="Restart all"
+              disabled={loading}
+            >
+              ↻
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => onScaleGroup(groupId, runners.length + 1)}
+              title="Scale up"
+              disabled={loading || runners.length >= 10}
+            >
+              +
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={() => onScaleGroup(groupId, runners.length - 1)}
+              title="Scale down"
+              disabled={loading || runners.length <= 1}
+            >
+              −
+            </button>
+            <button
+              className="btn btn-sm"
+              style={{ color: "var(--accent-red)" }}
+              onClick={() => setConfirmDelete(true)}
+              title="Delete all"
+              disabled={loading}
+            >
+              ✕
+            </button>
+          </div>
         </td>
       </tr>
       {confirmDelete && (

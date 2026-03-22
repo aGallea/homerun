@@ -37,53 +37,49 @@ export function RunnerActions({
   };
 
   return (
-    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-      {loading ? (
-        <span className="text-muted" style={{ fontSize: 12 }}>
-          ...
-        </span>
-      ) : (
-        <>
-          {isStopped && (
-            <button
-              className="btn btn-sm"
-              style={ghostStyle}
-              onClick={() => onStart(runner.config.id)}
-              title="Start"
-            >
-              ▶
-            </button>
-          )}
-          {isRunning && (
-            <button
-              className="btn btn-sm"
-              style={ghostStyle}
-              onClick={() => onStop(runner.config.id)}
-              title="Stop"
-            >
-              ■
-            </button>
-          )}
-          {isRunning && (
-            <button
-              className="btn btn-sm"
-              style={ghostStyle}
-              onClick={() => onRestart(runner.config.id)}
-              title="Restart"
-            >
-              ↻
-            </button>
-          )}
-          <button
-            className="btn btn-sm"
-            style={{ ...ghostStyle, color: "var(--accent-red)" }}
-            onClick={() => setConfirm("delete")}
-            title="Delete"
-          >
-            ✕
-          </button>
-        </>
+    <div style={{ display: "flex", gap: 3, alignItems: "center", opacity: loading ? 0.5 : 1 }}>
+      {isStopped && (
+        <button
+          className="btn btn-sm"
+          style={ghostStyle}
+          onClick={() => onStart(runner.config.id)}
+          title="Start"
+          disabled={loading}
+        >
+          ▶
+        </button>
       )}
+      {isRunning && (
+        <button
+          className="btn btn-sm"
+          style={ghostStyle}
+          onClick={() => onStop(runner.config.id)}
+          title="Stop"
+          disabled={loading}
+        >
+          ■
+        </button>
+      )}
+      {isRunning && (
+        <button
+          className="btn btn-sm"
+          style={ghostStyle}
+          onClick={() => onRestart(runner.config.id)}
+          title="Restart"
+          disabled={loading}
+        >
+          ↻
+        </button>
+      )}
+      <button
+        className="btn btn-sm"
+        style={{ ...ghostStyle, color: "var(--accent-red)" }}
+        onClick={() => setConfirm("delete")}
+        title="Delete"
+        disabled={loading}
+      >
+        ✕
+      </button>
       {confirm === "delete" && (
         <ConfirmDialog
           title="Delete Runner"
