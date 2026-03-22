@@ -74,6 +74,10 @@ mod tests {
             "response should have 'runners' key"
         );
         assert!(json["runners"].is_array());
+        assert!(
+            json.get("daemon").is_some(),
+            "response should have 'daemon' key"
+        );
     }
 
     #[tokio::test]

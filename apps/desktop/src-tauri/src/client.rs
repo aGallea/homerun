@@ -1,6 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Percent-encode a string for use in a URL query parameter.
+fn url_encode(s: &str) -> String {
+    let mut encoded = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    encoded
+}
+
 use hyper::Request;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
@@ -168,7 +184,7 @@ pub struct DaemonLogEntry {
 pub struct DaemonMetrics {
     pub pid: u32,
     pub uptime_seconds: u64,
-    pub cpu_percent: f32,
+    pub cpu_percent: f64,
     pub memory_bytes: u64,
     pub child_processes: Vec<ChildProcessInfo>,
 }
@@ -178,7 +194,7 @@ pub struct ChildProcessInfo {
     pub pid: u32,
     pub runner_id: String,
     pub runner_name: String,
-    pub cpu_percent: f32,
+    pub cpu_percent: f64,
     pub memory_bytes: u64,
 }
 
@@ -441,7 +457,7 @@ impl DaemonClient {
             params.push(format!("limit={}", n));
         }
         if let Some(s) = search {
-            params.push(format!("search={}", s));
+            params.push(format!("search={}", url_encode(s)));
         }
         let query = if params.is_empty() {
             String::new()

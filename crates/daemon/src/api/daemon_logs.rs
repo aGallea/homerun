@@ -59,9 +59,11 @@ pub async fn recent_daemon_logs(
 
 #[cfg(test)]
 mod tests {
+    use crate::logging::DaemonLogEntry;
     use crate::server::{create_router, AppState};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use chrono::Utc;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -104,5 +106,73 @@ mod tests {
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn test_stream_daemon_logs_returns_sse_content_type() {
+        let state = AppState::new_test();
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/daemon/logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .expect("should have content-type header")
+            .to_str()
+            .unwrap();
+        assert!(
+            content_type.contains("text/event-stream"),
+            "SSE endpoint should return text/event-stream, got: {}",
+            content_type
+        );
+    }
+
+    #[tokio::test]
+    async fn test_recent_daemon_logs_with_entries() {
+        let state = AppState::new_test();
+
+        // Push some entries into the daemon log state
+        state
+            .daemon_logs
+            .push(DaemonLogEntry {
+                timestamp: Utc::now(),
+                level: "INFO".to_string(),
+                target: "test".to_string(),
+                message: "test entry".to_string(),
+            })
+            .await;
+
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/daemon/logs/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["message"], "test entry");
+        assert_eq!(arr[0]["level"], "INFO");
     }
 }
