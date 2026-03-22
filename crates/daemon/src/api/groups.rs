@@ -29,21 +29,18 @@ pub async fn create_batch(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     // Spawn background registration for each runner
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     for runner in &runners {
         let manager = state.runner_manager.clone();
-        let auth = state.auth.clone();
         let runner_id = runner.config.id.clone();
+        let token = token.clone();
         tokio::spawn(async move {
-            let token = match auth.token().await {
-                Some(t) => t,
-                None => {
-                    tracing::error!("No auth token available for runner registration");
-                    let _ = manager
-                        .update_state(&runner_id, crate::runner::state::RunnerState::Error)
-                        .await;
-                    return;
-                }
-            };
             if let Err(e) = manager.register_and_start(&runner_id, &token).await {
                 tracing::error!("Failed to register runner {}: {}", runner_id, e);
                 let _ = manager
@@ -81,21 +78,21 @@ pub async fn start_group(
         ));
     }
 
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     let mut results = Vec::new();
     for runner in &runners {
         let id = runner.config.id.clone();
         if runner.state == RunnerState::Offline || runner.state == RunnerState::Error {
             let manager = state.runner_manager.clone();
-            let auth = state.auth.clone();
             let runner_id = id.clone();
+            let token = token.clone();
             tokio::spawn(async move {
-                let token = match auth.token().await {
-                    Some(t) => t,
-                    None => {
-                        tracing::error!("No auth token available for runner start");
-                        return;
-                    }
-                };
                 if let Err(e) = manager
                     .update_state(&runner_id, RunnerState::Registering)
                     .await
@@ -196,18 +193,16 @@ pub async fn restart_group(
         .collect();
 
     // Spawn a single background task to stop all then restart all
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     let manager = state.runner_manager.clone();
-    let auth = state.auth.clone();
     let group_id_clone = group_id.clone();
     tokio::spawn(async move {
-        let token = match auth.token().await {
-            Some(t) => t,
-            None => {
-                tracing::error!("No auth token available for group restart");
-                return;
-            }
-        };
-
         let runners = manager.list_by_group(&group_id_clone).await;
 
         // Stop all running runners (stop_process blocks until process exits)
@@ -257,20 +252,18 @@ pub async fn scale_group(
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     // Spawn registration for added runners
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available. Please authenticate first.".to_string(),
+        )
+    })?;
+
     for runner in &response.added {
         let manager = state.runner_manager.clone();
-        let auth = state.auth.clone();
         let runner_id = runner.config.id.clone();
+        let token = token.clone();
         tokio::spawn(async move {
-            let token = match auth.token().await {
-                Some(t) => t,
-                None => {
-                    let _ = manager
-                        .update_state(&runner_id, crate::runner::state::RunnerState::Error)
-                        .await;
-                    return;
-                }
-            };
             if let Err(e) = manager.register_and_start(&runner_id, &token).await {
                 tracing::error!("Failed to register runner {}: {}", runner_id, e);
                 let _ = manager
@@ -349,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_create_returns_group_id_and_runners() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let app = create_router(state);
         let response = app
             .oneshot(
@@ -380,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_create_auto_names_with_counter() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let app = create_router(state);
         let response = app
             .oneshot(
@@ -444,7 +437,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_start_returns_results() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         // Create a batch
         let app = create_router(state.clone());
         let response = app
@@ -504,7 +497,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scale_up_adds_runners() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let app = create_router(state.clone());
         let response = app
             .oneshot(
@@ -547,7 +540,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scale_down_removes_runners() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         let app = create_router(state.clone());
         let response = app
             .oneshot(
@@ -590,7 +583,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_runners_filter_by_group_id() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         // Create a batch
         let app = create_router(state.clone());
         let response = app
@@ -645,7 +638,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_delete_removes_runners() {
-        let state = AppState::new_test();
+        let state = AppState::new_test_authenticated();
         // Create batch
         let app = create_router(state.clone());
         let response = app

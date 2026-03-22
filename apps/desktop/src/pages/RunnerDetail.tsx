@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
+import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
 import type { LogEntry } from "../api/types";
 import { StatusBadge } from "../components/StatusBadge";
@@ -82,6 +83,8 @@ function ResourceBar({
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { auth } = useAuth();
+  const isAuthenticated = auth.authenticated;
   const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } = useRunners();
   const { metrics } = useMetrics();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -206,27 +209,29 @@ export function RunnerDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-8">
-          {isStopped && (
-            <button
-              className="btn btn-primary"
-              onClick={() => doAction(() => startRunner(config.id))}
-            >
-              ▶ Start
+        {isAuthenticated && (
+          <div className="flex items-center gap-8">
+            {isStopped && (
+              <button
+                className="btn btn-primary"
+                onClick={() => doAction(() => startRunner(config.id))}
+              >
+                ▶ Start
+              </button>
+            )}
+            {isRunning && (
+              <button className="btn" onClick={() => doAction(() => stopRunner(config.id))}>
+                ■ Stop
+              </button>
+            )}
+            <button className="btn" onClick={() => doAction(() => restartRunner(config.id))}>
+              ↺ Restart
             </button>
-          )}
-          {isRunning && (
-            <button className="btn" onClick={() => doAction(() => stopRunner(config.id))}>
-              ■ Stop
+            <button className="btn btn-danger" onClick={() => setConfirmDelete(true)}>
+              Delete
             </button>
-          )}
-          <button className="btn" onClick={() => doAction(() => restartRunner(config.id))}>
-            ↺ Restart
-          </button>
-          <button className="btn btn-danger" onClick={() => setConfirmDelete(true)}>
-            Delete
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       {actionError && (

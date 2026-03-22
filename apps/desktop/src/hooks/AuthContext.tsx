@@ -9,6 +9,8 @@ interface AuthContextValue {
   loginWithToken: (token: string) => Promise<AuthStatus>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** Call when an API returns 401 to re-sync auth state from the daemon. */
+  handleUnauthorized: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -32,6 +34,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  const handleUnauthorized = useCallback(() => {
+    refresh();
+  }, [refresh]);
 
   useEffect(() => {
     refresh();
@@ -60,7 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ auth, loading, error, loginWithToken, logout, refresh }}>
+    <AuthContext.Provider
+      value={{ auth, loading, error, loginWithToken, logout, refresh, handleUnauthorized }}
+    >
       {children}
     </AuthContext.Provider>
   );
