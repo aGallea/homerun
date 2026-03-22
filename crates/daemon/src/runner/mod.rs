@@ -553,15 +553,7 @@ impl RunnerManager {
             );
         }
 
-        // 5. Ensure no old process is still running for this runner
-        if let Some(old_child) = self.processes.write().await.remove(id) {
-            if let Ok(mut child) = old_child.try_write() {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-            }
-        }
-
-        // 5a. Spawn run.sh
+        // 5. Spawn run.sh
         let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
@@ -707,30 +699,34 @@ impl RunnerManager {
 
     /// Stop a running runner process.
     ///
-    /// Sends a kill signal and returns immediately. The monitoring task
-    /// (spawned in `start_runner_process`) will detect the exit and
-    /// transition the runner to Offline.
+    /// Removes the process handle from the map, kills it, waits for exit,
+    /// then transitions to Offline. This is blocking but avoids deadlocks
+    /// because we take ownership of the process handle before killing.
     pub async fn stop_process(&self, id: &str) -> Result<()> {
         // Transition to Stopping
         self.update_state(id, RunnerState::Stopping).await?;
         self.emit_state_event(id, "stopping");
 
-        // Send kill signal — don't wait for exit (the monitoring task handles that)
-        if let Some(child_arc) = self.processes.read().await.get(id).cloned() {
-            if let Ok(mut child) = child_arc.try_write() {
-                let _ = child.start_kill();
-            } else {
-                // Monitoring task holds the write lock (waiting for exit).
-                // Kill via PID using the system kill command.
-                let pid = self.runners.read().await.get(id).and_then(|r| r.pid);
-                if let Some(pid) = pid {
-                    let _ = std::process::Command::new("kill")
-                        .args(["-9", &pid.to_string()])
-                        .output();
-                }
-            }
+        // Remove the process handle from the map — this gives us exclusive access
+        // and prevents the monitoring task from interfering. The monitoring task
+        // still has its own Arc clone but will find the runner already Offline
+        // when it wakes up.
+        if let Some(child_arc) = self.processes.write().await.remove(id) {
+            let mut child = child_arc.write().await;
+            let _ = child.kill().await;
+            let _ = child.wait().await;
         }
 
+        // Update to Offline
+        {
+            let mut runners = self.runners.write().await;
+            if let Some(r) = runners.get_mut(id) {
+                r.state = RunnerState::Offline;
+                r.pid = None;
+                r.started_at = None;
+            }
+        }
+        self.emit_state_event(id, "offline");
         Ok(())
     }
 
