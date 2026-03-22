@@ -1040,6 +1040,7 @@ dependencies = [
  "futures",
  "hyper",
  "hyper-util",
+ "libc",
  "notify-rust",
  "octocrab",
  "reqwest",

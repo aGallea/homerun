@@ -30,6 +30,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 reqwest = { version = "0.12", features = ["json"] }
 notify-rust = "4"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
