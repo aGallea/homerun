@@ -158,21 +158,25 @@ impl AuthManager {
 
         // Slow path: try to restore from keychain (local-only, no network call).
         // Skip in tests to avoid picking up real keychain tokens.
+        // The #[cfg(test)] guard only works for unit tests within this crate;
+        // integration tests (separate binaries) use the env var instead.
         #[cfg(not(test))]
-        if let Ok(Some(token)) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-            tracing::info!("Lazily restored auth token from keychain");
-            let mut state = self.state.write().await;
-            // Only set if still None (another task may have restored it)
-            if state.is_none() {
-                *state = Some(AuthState {
-                    token: token.clone(),
-                    user: GitHubUser {
-                        login: "unknown".to_string(),
-                        avatar_url: String::new(),
-                    },
-                });
+        if std::env::var("HOMERUN_SKIP_KEYCHAIN").is_err() {
+            if let Ok(Some(token)) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+                tracing::info!("Lazily restored auth token from keychain");
+                let mut state = self.state.write().await;
+                // Only set if still None (another task may have restored it)
+                if state.is_none() {
+                    *state = Some(AuthState {
+                        token: token.clone(),
+                        user: GitHubUser {
+                            login: "unknown".to_string(),
+                            avatar_url: String::new(),
+                        },
+                    });
+                }
+                return Some(state.as_ref().map(|s| s.token.clone()).unwrap_or(token));
             }
-            return Some(state.as_ref().map(|s| s.token.clone()).unwrap_or(token));
         }
 
         None
