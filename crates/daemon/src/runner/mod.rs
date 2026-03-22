@@ -618,27 +618,28 @@ impl RunnerManager {
                     // Lines look like: "2026-03-21 19:49:31Z: Running job: TypeScript (type check + build)"
                     match parse_job_event(&line) {
                         Some(JobEvent::Started(job_name)) => {
-                            let mut map = runners.write().await;
-                            if let Some(r) = map.get_mut(&rid) {
-                                r.state = RunnerState::Busy;
-                                r.current_job = Some(job_name);
-                            }
-                            // Fetch job context (branch/PR info) from GitHub API
-                            let runners_clone = runners.clone();
-                            let rid_clone = rid.clone();
-                            let auth_token_clone = auth_token.clone();
-                            let (runner_name, repo_owner, repo_name) = {
-                                let map = runners.read().await;
-                                if let Some(r) = map.get(&rid) {
-                                    (
+                            // Update state and extract config while holding the write lock
+                            let runner_config = {
+                                let mut map = runners.write().await;
+                                if let Some(r) = map.get_mut(&rid) {
+                                    r.state = RunnerState::Busy;
+                                    r.current_job = Some(job_name);
+                                    Some((
                                         r.config.name.clone(),
                                         r.config.repo_owner.clone(),
                                         r.config.repo_name.clone(),
-                                    )
+                                    ))
                                 } else {
-                                    continue;
+                                    None
                                 }
                             };
+                            // Fetch job context (branch/PR info) from GitHub API
+                            let Some((runner_name, repo_owner, repo_name)) = runner_config else {
+                                continue;
+                            };
+                            let runners_clone = runners.clone();
+                            let rid_clone = rid.clone();
+                            let auth_token_clone = auth_token.clone();
                             tokio::spawn(async move {
                                 let token = {
                                     let t = auth_token_clone.read().await;

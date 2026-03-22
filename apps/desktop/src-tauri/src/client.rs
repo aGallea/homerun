@@ -21,6 +21,14 @@ pub struct RunnerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobContext {
+    pub branch: String,
+    pub pr_number: Option<u64>,
+    pub pr_url: Option<String>,
+    pub run_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerInfo {
     pub config: RunnerConfig,
     pub state: String,
@@ -29,6 +37,7 @@ pub struct RunnerInfo {
     pub jobs_completed: u32,
     pub jobs_failed: u32,
     pub current_job: Option<String>,
+    pub job_context: Option<JobContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
