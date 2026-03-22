@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { RunnerInfo, CreateRunnerRequest } from "../api/types";
+import type {
+  BatchCreateResponse,
+  CreateBatchRequest,
+  CreateRunnerRequest,
+  GroupActionResponse,
+  RunnerInfo,
+  ScaleGroupResponse,
+} from "../api/types";
 import { api } from "../api/commands";
 
 export function useRunners() {
@@ -70,6 +77,60 @@ export function useRunners() {
     [refresh],
   );
 
+  const createBatch = useCallback(
+    async (req: CreateBatchRequest): Promise<BatchCreateResponse> => {
+      const result = await api.createBatch(req);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
+  const startGroup = useCallback(
+    async (groupId: string): Promise<GroupActionResponse> => {
+      const result = await api.startGroup(groupId);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
+  const stopGroup = useCallback(
+    async (groupId: string): Promise<GroupActionResponse> => {
+      const result = await api.stopGroup(groupId);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
+  const restartGroup = useCallback(
+    async (groupId: string): Promise<GroupActionResponse> => {
+      const result = await api.restartGroup(groupId);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
+  const deleteGroup = useCallback(
+    async (groupId: string): Promise<GroupActionResponse> => {
+      const result = await api.deleteGroup(groupId);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
+  const scaleGroup = useCallback(
+    async (groupId: string, count: number): Promise<ScaleGroupResponse> => {
+      const result = await api.scaleGroup(groupId, count);
+      await refresh();
+      return result;
+    },
+    [refresh],
+  );
+
   return {
     runners,
     loading,
@@ -80,5 +141,11 @@ export function useRunners() {
     startRunner,
     stopRunner,
     restartRunner,
+    createBatch,
+    startGroup,
+    stopGroup,
+    restartGroup,
+    deleteGroup,
+    scaleGroup,
   };
 }
