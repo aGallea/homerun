@@ -553,7 +553,15 @@ impl RunnerManager {
             );
         }
 
-        // 5. Spawn run.sh
+        // 5. Ensure no old process is still running for this runner
+        if let Some(old_child) = self.processes.write().await.remove(id) {
+            if let Ok(mut child) = old_child.try_write() {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+            }
+        }
+
+        // 5a. Spawn run.sh
         let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
