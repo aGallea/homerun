@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import type { RunnerInfo } from "../api/types";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -8,6 +8,7 @@ interface RunnerActionsProps {
   onStop: (id: string) => void;
   onRestart: (id: string) => void;
   onDelete: (id: string) => void;
+  loading?: boolean;
 }
 
 export function RunnerActions({
@@ -16,74 +17,72 @@ export function RunnerActions({
   onStop,
   onRestart,
   onDelete,
+  loading = false,
 }: RunnerActionsProps) {
-  const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState<"delete" | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
 
   const isRunning = runner.state === "online" || runner.state === "busy";
   const isStopped = runner.state === "offline" || runner.state === "error";
 
+  // Ghost/outline style for individual runner buttons (visually distinct from group buttons)
+  const ghostStyle: React.CSSProperties = {
+    opacity: 0.7,
+    fontSize: 12,
+    padding: "2px 6px",
+    minWidth: 28,
+    height: 24,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
   return (
-    <div className="runner-actions" ref={menuRef}>
-      <button className="btn btn-sm" onClick={() => setOpen(!open)}>
-        ⋯
-      </button>
-      {open && (
-        <div className="actions-menu">
+    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      {loading ? (
+        <span className="text-muted" style={{ fontSize: 12 }}>
+          ...
+        </span>
+      ) : (
+        <>
           {isStopped && (
             <button
-              className="actions-item"
-              onClick={() => {
-                onStart(runner.config.id);
-                setOpen(false);
-              }}
+              className="btn btn-sm"
+              style={ghostStyle}
+              onClick={() => onStart(runner.config.id)}
+              title="Start"
             >
-              Start
+              ▶
             </button>
           )}
           {isRunning && (
             <button
-              className="actions-item"
-              onClick={() => {
-                onStop(runner.config.id);
-                setOpen(false);
-              }}
+              className="btn btn-sm"
+              style={ghostStyle}
+              onClick={() => onStop(runner.config.id)}
+              title="Stop"
             >
-              Stop
+              ■
             </button>
           )}
           {isRunning && (
             <button
-              className="actions-item"
-              onClick={() => {
-                onRestart(runner.config.id);
-                setOpen(false);
-              }}
+              className="btn btn-sm"
+              style={ghostStyle}
+              onClick={() => onRestart(runner.config.id)}
+              title="Restart"
             >
-              Restart
+              ↻
             </button>
           )}
           <button
-            className="actions-item actions-item-danger"
-            onClick={() => {
-              setConfirm("delete");
-              setOpen(false);
-            }}
+            className="btn btn-sm"
+            style={{ ...ghostStyle, color: "var(--accent-red)" }}
+            onClick={() => setConfirm("delete")}
+            title="Delete"
           >
-            Delete
+            ✕
           </button>
-        </div>
+        </>
       )}
       {confirm === "delete" && (
         <ConfirmDialog

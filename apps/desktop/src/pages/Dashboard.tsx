@@ -9,6 +9,7 @@ export function Dashboard() {
   const {
     runners,
     loading,
+    pendingActions,
     startRunner,
     stopRunner,
     restartRunner,
@@ -131,6 +132,7 @@ export function Dashboard() {
         onScaleGroup={scaleGroup}
         metrics={cpuMap}
         forceExpandedGroups={forceExpandedGroups}
+        pendingActions={pendingActions}
       />
 
       {showWizard && (

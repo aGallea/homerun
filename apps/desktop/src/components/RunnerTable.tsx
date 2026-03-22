@@ -18,6 +18,7 @@ interface RunnerTableProps {
   onScaleGroup: (groupId: string, count: number) => void;
   metrics?: Map<string, number>;
   forceExpandedGroups?: Set<string>;
+  pendingActions?: Set<string>;
 }
 
 export function RunnerTable({
@@ -33,6 +34,7 @@ export function RunnerTable({
   onScaleGroup,
   metrics,
   forceExpandedGroups,
+  pendingActions,
 }: RunnerTableProps) {
   const navigate = useNavigate();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -111,6 +113,7 @@ export function RunnerTable({
                   onRestartGroup={onRestartGroup}
                   onDeleteGroup={onDeleteGroup}
                   onScaleGroup={onScaleGroup}
+                  loading={pendingActions?.has(groupId)}
                 />
                 {isExpanded &&
                   groupRunners.map((runner) => (
@@ -163,6 +166,7 @@ export function RunnerTable({
                           onStop={onStop}
                           onRestart={onRestart}
                           onDelete={onDelete}
+                          loading={pendingActions?.has(runner.config.id)}
                         />
                       </td>
                     </tr>
@@ -225,6 +229,7 @@ export function RunnerTable({
                   onStop={onStop}
                   onRestart={onRestart}
                   onDelete={onDelete}
+                  loading={pendingActions?.has(runner.config.id)}
                 />
               </td>
             </tr>

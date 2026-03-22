@@ -13,7 +13,16 @@ export function useRunners() {
   const [runners, setRunners] = useState<RunnerInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const initialFetch = useRef(true);
+
+  const addPending = (id: string) => setPendingActions((prev) => new Set(prev).add(id));
+  const removePending = (id: string) =>
+    setPendingActions((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   const refresh = useCallback(async () => {
     try {
@@ -47,32 +56,52 @@ export function useRunners() {
 
   const deleteRunner = useCallback(
     async (id: string) => {
-      await api.deleteRunner(id);
-      await refresh();
+      addPending(id);
+      try {
+        await api.deleteRunner(id);
+        await refresh();
+      } finally {
+        removePending(id);
+      }
     },
     [refresh],
   );
 
   const startRunner = useCallback(
     async (id: string) => {
-      await api.startRunner(id);
-      await refresh();
+      addPending(id);
+      try {
+        await api.startRunner(id);
+        await refresh();
+      } finally {
+        removePending(id);
+      }
     },
     [refresh],
   );
 
   const stopRunner = useCallback(
     async (id: string) => {
-      await api.stopRunner(id);
-      await refresh();
+      addPending(id);
+      try {
+        await api.stopRunner(id);
+        await refresh();
+      } finally {
+        removePending(id);
+      }
     },
     [refresh],
   );
 
   const restartRunner = useCallback(
     async (id: string) => {
-      await api.restartRunner(id);
-      await refresh();
+      addPending(id);
+      try {
+        await api.restartRunner(id);
+        await refresh();
+      } finally {
+        removePending(id);
+      }
     },
     [refresh],
   );
@@ -88,45 +117,70 @@ export function useRunners() {
 
   const startGroup = useCallback(
     async (groupId: string): Promise<GroupActionResponse> => {
-      const result = await api.startGroup(groupId);
-      await refresh();
-      return result;
+      addPending(groupId);
+      try {
+        const result = await api.startGroup(groupId);
+        await refresh();
+        return result;
+      } finally {
+        removePending(groupId);
+      }
     },
     [refresh],
   );
 
   const stopGroup = useCallback(
     async (groupId: string): Promise<GroupActionResponse> => {
-      const result = await api.stopGroup(groupId);
-      await refresh();
-      return result;
+      addPending(groupId);
+      try {
+        const result = await api.stopGroup(groupId);
+        await refresh();
+        return result;
+      } finally {
+        removePending(groupId);
+      }
     },
     [refresh],
   );
 
   const restartGroup = useCallback(
     async (groupId: string): Promise<GroupActionResponse> => {
-      const result = await api.restartGroup(groupId);
-      await refresh();
-      return result;
+      addPending(groupId);
+      try {
+        const result = await api.restartGroup(groupId);
+        await refresh();
+        return result;
+      } finally {
+        removePending(groupId);
+      }
     },
     [refresh],
   );
 
   const deleteGroup = useCallback(
     async (groupId: string): Promise<GroupActionResponse> => {
-      const result = await api.deleteGroup(groupId);
-      await refresh();
-      return result;
+      addPending(groupId);
+      try {
+        const result = await api.deleteGroup(groupId);
+        await refresh();
+        return result;
+      } finally {
+        removePending(groupId);
+      }
     },
     [refresh],
   );
 
   const scaleGroup = useCallback(
     async (groupId: string, count: number): Promise<ScaleGroupResponse> => {
-      const result = await api.scaleGroup(groupId, count);
-      await refresh();
-      return result;
+      addPending(groupId);
+      try {
+        const result = await api.scaleGroup(groupId, count);
+        await refresh();
+        return result;
+      } finally {
+        removePending(groupId);
+      }
     },
     [refresh],
   );
@@ -136,6 +190,7 @@ export function useRunners() {
     loading,
     error,
     refresh,
+    pendingActions,
     createRunner,
     deleteRunner,
     startRunner,
