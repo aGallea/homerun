@@ -556,9 +556,7 @@ p {
 }
 
 .runner-row-grid {
-  display: grid;
-  grid-template-columns: 2fr 2fr 1fr 60px auto;
-  gap: 16px;
+  display: flex;
   align-items: center;
 }
 
@@ -567,6 +565,8 @@ p {
   align-items: center;
   gap: 8px;
   overflow: hidden;
+  width: 25%;
+  flex-shrink: 0;
 }
 
 .runner-expand-icon {
@@ -581,6 +581,8 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  width: 20%;
+  flex-shrink: 0;
 }
 
 .runner-col-status {
@@ -588,17 +590,22 @@ p {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  width: 15%;
+  flex-shrink: 0;
 }
 
 .runner-col-cpu {
   text-align: right;
   white-space: nowrap;
+  width: 60px;
+  flex-shrink: 0;
 }
 
 .runner-col-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex: 1;
 }
 
 /* Icon buttons for runner actions */
