@@ -210,37 +210,47 @@ pub async fn restart_group(
 
         let runners = manager.list_by_group(&group_id_clone).await;
 
-        // Stop all running runners concurrently
-        let mut stop_handles = Vec::new();
+        // Stop all running runners
         for runner in &runners {
-            if runner.state == RunnerState::Online
-                || runner.state == RunnerState::Busy
-                || runner.state == RunnerState::Stopping
-            {
-                let mgr = manager.clone();
-                let rid = runner.config.id.clone();
-                stop_handles.push(tokio::spawn(async move {
-                    let _ = mgr.stop_process(&rid).await;
-                }));
+            if runner.state == RunnerState::Online || runner.state == RunnerState::Busy {
+                let _ = manager.stop_process(&runner.config.id).await;
             }
         }
-        for handle in stop_handles {
-            let _ = handle.await;
+
+        // Wait for all runners to reach Offline (monitoring task handles transition)
+        let runner_ids: Vec<String> = runners.iter().map(|r| r.config.id.clone()).collect();
+        for _ in 0..30 {
+            let all_offline = {
+                let mut ready = true;
+                for rid in &runner_ids {
+                    if let Some(r) = manager.get(rid).await {
+                        if r.state != RunnerState::Offline && r.state != RunnerState::Error {
+                            ready = false;
+                            break;
+                        }
+                    }
+                }
+                ready
+            };
+            if all_offline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
 
         // Now restart all
-        for runner in &runners {
+        for rid in &runner_ids {
             let mgr = manager.clone();
-            let rid = runner.config.id.clone();
+            let r_id = rid.clone();
             let tok = token.clone();
             tokio::spawn(async move {
-                if let Err(e) = mgr.update_state(&rid, RunnerState::Registering).await {
-                    tracing::error!("Failed to transition runner {}: {}", rid, e);
+                if let Err(e) = mgr.update_state(&r_id, RunnerState::Registering).await {
+                    tracing::error!("Failed to transition runner {}: {}", r_id, e);
                     return;
                 }
-                if let Err(e) = mgr.register_and_start_from_registering(&rid, &tok).await {
-                    tracing::error!("Failed to restart runner {}: {}", rid, e);
-                    let _ = mgr.update_state(&rid, RunnerState::Error).await;
+                if let Err(e) = mgr.register_and_start_from_registering(&r_id, &tok).await {
+                    tracing::error!("Failed to restart runner {}: {}", r_id, e);
+                    let _ = mgr.update_state(&r_id, RunnerState::Error).await;
                 }
             });
         }

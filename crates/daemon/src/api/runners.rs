@@ -232,11 +232,23 @@ pub async fn restart_runner(
         })?;
     }
 
-    // Now start
+    // Now start (in background, waiting for runner to reach Offline first)
     let manager = state.runner_manager.clone();
     let auth = state.auth.clone();
     let runner_id = id.clone();
     tokio::spawn(async move {
+        // Wait for runner to reach Offline/Error (monitoring task handles transition)
+        for _ in 0..30 {
+            if let Some(r) = manager.get(&runner_id).await {
+                if r.state == crate::runner::state::RunnerState::Offline
+                    || r.state == crate::runner::state::RunnerState::Error
+                {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
         let token = match auth.token().await {
             Some(t) => t,
             None => {
