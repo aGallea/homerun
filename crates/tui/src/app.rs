@@ -238,6 +238,7 @@ mod tests {
                 labels: vec!["self-hosted".to_string()],
                 mode: "app".to_string(),
                 work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
             },
             state: state.to_string(),
             pid: None,

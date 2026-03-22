@@ -20,6 +20,8 @@ pub struct RunnerConfig {
     pub labels: Vec<String>,
     pub mode: String,
     pub work_dir: PathBuf,
+    #[serde(default)]
+    pub group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +106,43 @@ pub struct RunnerEvent {
     pub event_type: String,
     pub data: serde_json::Value,
     pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchCreateResponse {
+    pub group_id: String,
+    pub runners: Vec<RunnerInfo>,
+    pub errors: Vec<BatchCreateError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchCreateError {
+    pub index: u8,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupActionResult {
+    pub runner_id: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupActionResponse {
+    pub group_id: String,
+    pub results: Vec<GroupActionResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScaleGroupResponse {
+    pub group_id: String,
+    pub previous_count: u8,
+    pub target_count: u8,
+    pub actual_count: u8,
+    pub added: Vec<RunnerInfo>,
+    pub removed: Vec<String>,
+    pub skipped_busy: Vec<String>,
 }
 
 // --- Unix socket HTTP connector ---
@@ -272,6 +311,65 @@ impl DaemonClient {
     pub async fn scan_remote(&self) -> Result<Vec<DiscoveredRepo>> {
         let body = self.request("POST", "/scan/remote", None).await?;
         Ok(serde_json::from_str(&body)?)
+    }
+
+    pub async fn create_batch(
+        &self,
+        repo_full_name: &str,
+        count: u8,
+        labels: Option<Vec<String>>,
+        mode: Option<String>,
+    ) -> Result<BatchCreateResponse> {
+        let body = serde_json::json!({
+            "repo_full_name": repo_full_name,
+            "count": count,
+            "labels": labels,
+            "mode": mode,
+        });
+        let text = self
+            .request("POST", "/runners/batch", Some(body.to_string()))
+            .await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    pub async fn start_group(&self, group_id: &str) -> Result<GroupActionResponse> {
+        let text = self
+            .request("POST", &format!("/runners/groups/{group_id}/start"), None)
+            .await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    pub async fn stop_group(&self, group_id: &str) -> Result<GroupActionResponse> {
+        let text = self
+            .request("POST", &format!("/runners/groups/{group_id}/stop"), None)
+            .await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    pub async fn restart_group(&self, group_id: &str) -> Result<GroupActionResponse> {
+        let text = self
+            .request("POST", &format!("/runners/groups/{group_id}/restart"), None)
+            .await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    pub async fn delete_group(&self, group_id: &str) -> Result<GroupActionResponse> {
+        let text = self
+            .request("DELETE", &format!("/runners/groups/{group_id}"), None)
+            .await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    pub async fn scale_group(&self, group_id: &str, count: u8) -> Result<ScaleGroupResponse> {
+        let body = serde_json::json!({ "count": count });
+        let text = self
+            .request(
+                "PATCH",
+                &format!("/runners/groups/{group_id}"),
+                Some(body.to_string()),
+            )
+            .await?;
+        Ok(serde_json::from_str(&text)?)
     }
 
     /// Connect to the daemon's WebSocket endpoint for real-time events.
