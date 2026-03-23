@@ -106,6 +106,11 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/runners/{id}/logs", get(api::logs::stream_logs))
         .route("/runners/{id}/logs/recent", get(api::logs::recent_logs))
+        .route("/runners/{id}/steps", get(api::steps::get_steps))
+        .route(
+            "/runners/{id}/steps/{step_number}/logs",
+            get(api::steps::get_step_logs),
+        )
         .route("/daemon/logs", get(api::daemon_logs::stream_daemon_logs))
         .route(
             "/daemon/logs/recent",

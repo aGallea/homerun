@@ -552,6 +552,55 @@ impl RunnerManager {
         self.step_watcher.get_steps(runner_id).await
     }
 
+    /// Get the log lines for a specific step of a running job.
+    pub async fn get_step_logs(
+        &self,
+        runner_id: &str,
+        step_number: u16,
+    ) -> Option<crate::api::steps::StepLogsResponse> {
+        // 1. Get step info to find the step name
+        let steps_response = self.get_steps(runner_id).await?;
+        let step = steps_response
+            .steps
+            .iter()
+            .find(|s| s.number == step_number)?;
+        let step_name = step.name.clone();
+
+        // 2. Get job_id from job_context
+        let runners = self.runners.read().await;
+        let runner = runners.get(runner_id)?;
+        let job_id = runner.job_context.as_ref()?.job_id?;
+        let owner = runner.config.repo_owner.clone();
+        let repo = runner.config.repo_name.clone();
+        drop(runners);
+
+        // 3. Get auth token (same pattern as start_job_context_poller)
+        let token = {
+            let t = self.auth_token.read().await;
+            t.clone()
+        };
+        let token = token?;
+        let gh = crate::github::GitHubClient::new(Some(token)).ok()?;
+
+        // 4. Fetch via cache
+        let raw_log = self
+            .step_log_cache
+            .get_or_fetch(job_id, &gh, &owner, &repo)
+            .await
+            .ok()?;
+        let sections = crate::github::parse_job_log_sections(&raw_log);
+
+        // 5. Match by step name (not index)
+        let section = sections.iter().find(|(name, _)| name == &step_name)?;
+        let lines: Vec<String> = section.1.lines().map(|l| l.to_string()).collect();
+
+        Some(crate::api::steps::StepLogsResponse {
+            step_number,
+            step_name,
+            lines,
+        })
+    }
+
     pub async fn delete(&self, id: &str) -> Result<()> {
         let mut runners = self.runners.write().await;
         if let Some(runner) = runners.remove(id) {
