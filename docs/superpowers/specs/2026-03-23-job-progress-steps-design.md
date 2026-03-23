@@ -52,15 +52,15 @@ New `WorkerLogWatcher` struct in `crates/daemon/src/runner/`:
 - **Stores step state** in a `Vec<StepInfo>` per runner, behind an `RwLock`
 - **Deactivates** when `JobEvent::Completed` fires — keeps last job's steps briefly, then clears
 
-**Step state machine:** `Pending → Running → Succeeded | Failed`
+**Step state machine:** `Pending → Running → Succeeded | Failed | Skipped`
 
 **Data structure:**
 
 ```rust
 pub struct StepInfo {
-    pub number: u16,        // 1-based step index
+    pub number: u16,        // 1-based step index, by order of appearance in Worker log
     pub name: String,       // from DisplayName
-    pub status: StepStatus, // Pending | Running | Succeeded | Failed
+    pub status: StepStatus, // Pending | Running | Succeeded | Failed | Skipped
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
 }
@@ -70,26 +70,34 @@ pub enum StepStatus {
     Running,
     Succeeded,
     Failed,
+    Skipped,
 }
 ```
+
+**Watcher lifecycle:** Runs as a spawned tokio task per runner. The task is aborted when the runner is deleted or when `JobEvent::Completed` fires (after capturing final state).
 
 **Edge cases:**
 
 - Runner restarts mid-job → watcher resets, re-parses from beginning of latest Worker log
 - Multiple Worker logs → always pick newest by modification time
 - Worker log doesn't exist yet when job starts → retry finding it for a few seconds
+- Worker log unreadable (permissions) → log warning, return empty steps, retry on next poll
+- Step result is `'Skipped'` → transitions to `StepStatus::Skipped`
+- After a step fails, subsequent steps may be skipped by the runner — the watcher continues parsing to capture their status
 
 ### 2. JobContext Enhancement
 
 The existing `JobContext` struct and job context poller (`get_active_run_for_runner()`) already fetch workflow run + jobs data from GitHub API. Enhancement: store `job_id: Option<u64>` in `JobContext` when the poller matches the current job. This ID is needed for the step logs API call.
+
+The existing `RunJob` deserialization struct in `github/mod.rs` needs a new `id: u64` field so we can capture the matched job's ID.
 
 ```rust
 pub struct JobContext {
     pub branch: String,
     pub pr_number: Option<u64>,
     pub pr_url: Option<String>,
-    pub run_url: Option<String>,
-    pub job_id: Option<u64>,  // NEW — GitHub Actions job ID
+    pub run_url: String,          // existing field, stays non-optional
+    pub job_id: Option<u64>,      // NEW — GitHub Actions job ID from RunJob.id
 }
 ```
 
@@ -125,7 +133,7 @@ Returns current step state parsed from Worker log. No API call, instant response
       "completed_at": null
     }
   ],
-  "total_steps": 9
+  "steps_discovered": 9
 }
 ```
 
@@ -159,7 +167,7 @@ Returns 404 if no step data is available (runner not busy, no Worker log found).
 
 - Polls `GET /runners/{id}/steps` every 1s when runner is busy
 - Stops polling when runner state is not busy
-- Returns `{ steps, totalSteps, jobName, loading }`
+- Returns `{ steps, stepsDiscovered, jobName, loading }`
 
 **New component: `JobProgress`**
 
@@ -191,12 +199,20 @@ Returns 404 if no step data is available (runner not busy, no Worker log found).
 
 ## Step Log Content Parsing
 
-The GitHub API returns the full job log as plain text with step boundaries marked by `##[group]Step Name` and `##[endgroup]`. To extract logs for a specific step:
+The GitHub API endpoint `GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs` returns the full job log as plain text. The exact format of step boundaries in the raw log should be verified against a real downloaded log during implementation — it may use `##[group]`/`##[endgroup]` markers, numbered step headers, or another delimiter format.
 
-1. Fetch full log from `GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`
-2. Parse sections between `##[group]` and `##[endgroup]` markers
-3. Map sections to step numbers by order of appearance
+**Implementation approach:**
+
+1. Fetch full log from the API endpoint
+2. Download and inspect a real job log to determine the actual step boundary format
+3. Build parser based on observed format, mapping sections to step numbers by order of appearance
 4. Cache the parsed result keyed by `job_id`
+
+**Caching details:**
+
+- Cache is in-memory, keyed by `job_id`
+- For running steps, the client polls every 5s; the daemon re-fetches from GitHub API if the cached data is older than 5s
+- Cache evicted when `JobEvent::Completed` fires + 5 minute TTL (in-memory, so naturally cleared on daemon restart)
 
 ## Not In Scope
 
