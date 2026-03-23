@@ -2,6 +2,7 @@ pub mod auth;
 pub mod daemon_logs;
 pub mod events;
 pub mod groups;
+pub mod history;
 pub mod logs;
 pub mod metrics;
 pub mod preferences;
