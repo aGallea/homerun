@@ -162,9 +162,9 @@ export function RunnerDetail() {
   );
   const { history } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
-  const [logsHeight, setLogsHeight] = useState(250);
+  const [logsHeight, setLogsHeight] = useState(150);
   const [stepsHeight, setStepsHeight] = useState(300);
-  const [historyHeight, setHistoryHeight] = useState(300);
+  const [historyHeight, setHistoryHeight] = useState(250);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -283,114 +283,117 @@ export function RunnerDetail() {
         {state === "error" && runner.error_message && !actionError && (
           <div className="error-banner">{runner.error_message}</div>
         )}
-        {/* Action buttons */}
-        {isAuthenticated && (
-          <div className="flex items-center gap-8" style={{ marginBottom: 16 }}>
-            {isTransient && (
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 16,
-                  height: 16,
-                  border: "2px solid var(--border)",
-                  borderTopColor: "var(--text-primary)",
-                  borderRadius: "50%",
-                  animation: "spin 0.6s linear infinite",
-                }}
-              />
-            )}
-            {isStopped && (
-              <button
-                className="btn btn-primary"
-                onClick={() => doAction(() => startRunner(config.id))}
-              >
-                ▶ Start
-              </button>
-            )}
-            {isRunning && (
-              <button
-                className="runner-action-btn"
-                onClick={() => doAction(() => stopRunner(config.id))}
-              >
-                ■ Stop
-              </button>
-            )}
-            <button
-              className="runner-action-btn"
-              onClick={() => doAction(() => restartRunner(config.id))}
-              disabled={!canRestart}
-            >
-              ↺ Restart
-            </button>
-            <button
-              className="runner-action-btn runner-action-btn-danger"
-              onClick={() => setConfirmDelete(true)}
-              disabled={!canDelete}
-            >
-              Delete
-            </button>
-          </div>
-        )}
-
-        {/* Compact stats row */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-          <div className="flex items-center gap-8" style={{ fontSize: 13 }}>
-            <span
-              className="job-stat-icon job-stat-icon-green"
-              style={{ width: 20, height: 20, fontSize: 11 }}
-            >
-              ✓
-            </span>
-            <span style={{ fontWeight: 600, color: "var(--accent-green)" }}>{jobs_completed}</span>
-            <span style={{ color: "var(--text-secondary)" }}>passed</span>
-          </div>
-          <div className="flex items-center gap-8" style={{ fontSize: 13 }}>
-            <span
-              className="job-stat-icon job-stat-icon-red"
-              style={{ width: 20, height: 20, fontSize: 11 }}
-            >
-              ✕
-            </span>
-            <span
-              style={{
-                fontWeight: 600,
-                color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
-              }}
-            >
-              {jobs_failed}
-            </span>
-            <span style={{ color: "var(--text-secondary)" }}>failed</span>
-          </div>
-          {runnerMetrics && (
-            <>
-              <span style={{ color: "var(--border)" }}>|</span>
-              <div className="flex items-center gap-4" style={{ fontSize: 13 }}>
-                <span style={{ color: "var(--text-secondary)" }}>CPU</span>
-                <span
-                  className="font-mono"
-                  style={{ fontWeight: 600, color: cpuColor(cpuPercent) }}
+        {/* Top section: actions + stats on left, current job card on right */}
+        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Action buttons */}
+            {isAuthenticated && (
+              <div className="flex items-center gap-8" style={{ marginBottom: 16 }}>
+                {isTransient && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 16,
+                      height: 16,
+                      border: "2px solid var(--border)",
+                      borderTopColor: "var(--text-primary)",
+                      borderRadius: "50%",
+                      animation: "spin 0.6s linear infinite",
+                    }}
+                  />
+                )}
+                {isStopped && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => doAction(() => startRunner(config.id))}
+                  >
+                    ▶ Start
+                  </button>
+                )}
+                {isRunning && (
+                  <button
+                    className="runner-action-btn"
+                    onClick={() => doAction(() => stopRunner(config.id))}
+                  >
+                    ■ Stop
+                  </button>
+                )}
+                <button
+                  className="runner-action-btn"
+                  onClick={() => doAction(() => restartRunner(config.id))}
+                  disabled={!canRestart}
                 >
-                  {cpuPercent.toFixed(1)}%
-                </span>
-              </div>
-              <div className="flex items-center gap-4" style={{ fontSize: 13 }}>
-                <span style={{ color: "var(--text-secondary)" }}>MEM</span>
-                <span
-                  className="font-mono"
-                  style={{ fontWeight: 600, color: "var(--accent-blue)" }}
+                  ↺ Restart
+                </button>
+                <button
+                  className="runner-action-btn runner-action-btn-danger"
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={!canDelete}
                 >
-                  {formatBytes(runnerMetrics.memory_bytes)}
-                </span>
+                  Delete
+                </button>
               </div>
-            </>
-          )}
-        </div>
+            )}
 
-        {/* Main content: Current Job (30%) + Logs (70%) */}
-        <div style={{ display: "flex", gap: 12, height: logsHeight }}>
-          {/* Left: Current Job */}
-          <div style={{ flex: "0 0 30%", minWidth: 0, display: "flex" }}>
-            <div className="runner-card runner-card-job" style={{ flex: 1, overflow: "hidden" }}>
+            {/* Compact stats row */}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+              <div className="flex items-center gap-8" style={{ fontSize: 13 }}>
+                <span
+                  className="job-stat-icon job-stat-icon-green"
+                  style={{ width: 20, height: 20, fontSize: 11 }}
+                >
+                  ✓
+                </span>
+                <span style={{ fontWeight: 600, color: "var(--accent-green)" }}>
+                  {jobs_completed}
+                </span>
+                <span style={{ color: "var(--text-secondary)" }}>passed</span>
+              </div>
+              <div className="flex items-center gap-8" style={{ fontSize: 13 }}>
+                <span
+                  className="job-stat-icon job-stat-icon-red"
+                  style={{ width: 20, height: 20, fontSize: 11 }}
+                >
+                  ✕
+                </span>
+                <span
+                  style={{
+                    fontWeight: 600,
+                    color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
+                  }}
+                >
+                  {jobs_failed}
+                </span>
+                <span style={{ color: "var(--text-secondary)" }}>failed</span>
+              </div>
+              {runnerMetrics && (
+                <>
+                  <span style={{ color: "var(--border)" }}>|</span>
+                  <div className="flex items-center gap-4" style={{ fontSize: 13 }}>
+                    <span style={{ color: "var(--text-secondary)" }}>CPU</span>
+                    <span
+                      className="font-mono"
+                      style={{ fontWeight: 600, color: cpuColor(cpuPercent) }}
+                    >
+                      {cpuPercent.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4" style={{ fontSize: 13 }}>
+                    <span style={{ color: "var(--text-secondary)" }}>MEM</span>
+                    <span
+                      className="font-mono"
+                      style={{ fontWeight: 600, color: "var(--accent-blue)" }}
+                    >
+                      {formatBytes(runnerMetrics.memory_bytes)}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          {/* Right: Current Job card */}
+          <div style={{ flex: "0 0 280px" }}>
+            <div className="runner-card runner-card-job" style={{ overflow: "hidden" }}>
               <div className="runner-card-glow runner-card-glow-blue" />
               <div className="flex items-center justify-between">
                 <h3 className="runner-card-label">Current Job</h3>
@@ -540,81 +543,78 @@ export function RunnerDetail() {
               )}
             </div>
           </div>
-
-          {/* Right: Logs panel */}
-          <div
-            className="logs-panel"
-            style={{
-              flex: "1 1 70%",
-              minWidth: 0,
-              display: "flex",
-              flexDirection: "column",
-              position: "relative",
-            }}
-          >
-            <div className="logs-header">
-              <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
-                Runner Process Logs
-              </span>
-              <div className="flex items-center gap-16">
-                <div className="logs-search-wrapper">
-                  <span className="logs-search-icon">⌕</span>
-                  <input
-                    className="logs-search-input"
-                    placeholder="Search"
-                    value={logSearch}
-                    onChange={(e) => setLogSearch(e.target.value)}
-                  />
-                </div>
-                <label className="follow-toggle">
-                  <input
-                    type="checkbox"
-                    checked={followLogs}
-                    onChange={(e) => setFollowLogs(e.target.checked)}
-                  />
-                  <span className="follow-toggle-track">
-                    <span className="follow-toggle-thumb" />
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Follow</span>
-                </label>
-              </div>
-            </div>
-            <div
-              ref={logContainerRef}
-              className="logs-content font-mono"
-              style={{ flex: 1, minHeight: 0, overflow: "auto" }}
-            >
-              {filteredLogs.length === 0 ? (
-                <div className="logs-empty">
-                  {runner.state === "online" || runner.state === "busy"
-                    ? "Waiting for log output..."
-                    : "Runner is not active."}
-                </div>
-              ) : (
-                <table className="logs-table">
-                  <tbody>
-                    {filteredLogs.map((entry, i) => (
-                      <tr key={i}>
-                        <td
-                          style={{
-                            color:
-                              entry.stream === "stderr"
-                                ? "var(--accent-red)"
-                                : "var(--text-primary)",
-                          }}
-                        >
-                          {entry.line}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
-          </div>
         </div>
-        {/* end side-by-side */}
+
+        {/* Runner Process Logs — full width */}
+        <div
+          className="logs-panel"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            position: "relative",
+            height: logsHeight,
+            flex: "none",
+          }}
+        >
+          <div className="logs-header">
+            <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
+              Runner Process Logs
+            </span>
+            <div className="flex items-center gap-16">
+              <div className="logs-search-wrapper">
+                <span className="logs-search-icon">⌕</span>
+                <input
+                  className="logs-search-input"
+                  placeholder="Search"
+                  value={logSearch}
+                  onChange={(e) => setLogSearch(e.target.value)}
+                />
+              </div>
+              <label className="follow-toggle">
+                <input
+                  type="checkbox"
+                  checked={followLogs}
+                  onChange={(e) => setFollowLogs(e.target.checked)}
+                />
+                <span className="follow-toggle-track">
+                  <span className="follow-toggle-thumb" />
+                </span>
+                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Follow</span>
+              </label>
+            </div>
+          </div>
+          <div
+            ref={logContainerRef}
+            className="logs-content font-mono"
+            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+          >
+            {filteredLogs.length === 0 ? (
+              <div className="logs-empty">
+                {runner.state === "online" || runner.state === "busy"
+                  ? "Waiting for log output..."
+                  : "Runner is not active."}
+              </div>
+            ) : (
+              <table className="logs-table">
+                <tbody>
+                  {filteredLogs.map((entry, i) => (
+                    <tr key={i}>
+                      <td
+                        style={{
+                          color:
+                            entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)",
+                        }}
+                      >
+                        {entry.line}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
+        </div>
 
         {/* Job Progress — full width, only when busy */}
         {state === "busy" && steps.length > 0 && (
