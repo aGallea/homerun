@@ -31,6 +31,7 @@ export function useRunners() {
       setError(null);
     } catch (e) {
       setError(String(e));
+      setRunners([]);
     } finally {
       if (initialFetch.current) {
         initialFetch.current = false;
