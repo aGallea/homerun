@@ -140,6 +140,19 @@ async fn run_tui() -> Result<()> {
                         }
                         app.rebuild_display_items();
                     }
+                    // Fetch steps for selected runner if it's busy
+                    if let Some(runner) = app.selected_runner() {
+                        if runner.state == "busy" {
+                            let rid = runner.config.id.clone();
+                            if let Ok(steps) = client.get_runner_steps(&rid).await {
+                                app.selected_runner_steps = Some(steps);
+                            }
+                        } else {
+                            app.selected_runner_steps = None;
+                        }
+                    } else {
+                        app.selected_runner_steps = None;
+                    }
                     // Refresh metrics every 5 ticks (~10 seconds)
                     if poll_counter.is_multiple_of(5) {
                         if let Ok(metrics) = client.get_metrics().await {

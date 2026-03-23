@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::client::{AuthStatus, DaemonLogEntry, MetricsResponse, RepoInfo, RunnerInfo};
+use crate::client::{
+    AuthStatus, DaemonLogEntry, MetricsResponse, RepoInfo, RunnerInfo, StepsResponse,
+};
 
 /// Actions that require async daemon calls — returned from handle_key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +102,7 @@ pub struct App {
     pub daemon_log_level: String,
     pub daemon_search: String,
     pub daemon_searching: bool,
+    pub selected_runner_steps: Option<StepsResponse>,
 }
 
 impl Default for App {
@@ -131,6 +134,7 @@ impl App {
             daemon_log_level: "INFO".to_string(),
             daemon_search: String::new(),
             daemon_searching: false,
+            selected_runner_steps: None,
         }
     }
 
