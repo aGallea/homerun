@@ -39,7 +39,7 @@ export function Layout() {
       </div>
       <main className="main-content">
         {!daemonConnected && (
-          <div className="error-banner" style={{ marginBottom: 12, padding: "12px 16px" }}>
+          <div className="error-banner" style={{ margin: "16px 24px 0", padding: "12px 16px" }}>
             Unable to connect to the HomeRun daemon. Make sure it is running.
           </div>
         )}
