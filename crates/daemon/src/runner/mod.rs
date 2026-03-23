@@ -1234,6 +1234,18 @@ impl RunnerManager {
                                 step_watcher
                                     .start_watching(&rid, &job_name, &work_dir)
                                     .await;
+                                // Spawn step-watcher polling task
+                                let sw = step_watcher.clone();
+                                let rid_poll = rid.clone();
+                                tokio::spawn(async move {
+                                    loop {
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
+                                        if !sw.poll(&rid_poll).await {
+                                            break;
+                                        }
+                                    }
+                                });
                             }
                         }
                         Some(JobEvent::Completed { succeeded }) => {
