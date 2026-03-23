@@ -618,6 +618,7 @@ export function RunnerDetail() {
               flexDirection: "column",
               position: "relative",
               height: historyHeight,
+              flex: "none",
             }}
           >
             <div className="logs-header">
