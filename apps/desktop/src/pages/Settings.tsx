@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
 import { invoke } from "@tauri-apps/api/core";
-import type { DeviceFlowResponse } from "../api/types";
+import type { DeviceFlowResponse, Preferences } from "../api/types";
 
 type DeviceFlowState =
   | { stage: "idle" }
@@ -35,16 +35,36 @@ export function Settings() {
 
   // Settings toggles
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
-  const [startRunnersOnLaunch, setStartRunnersOnLaunch] = useState(false);
-  const [notifyStatusChanges, setNotifyStatusChanges] = useState(true);
-  const [notifyJobCompletions, setNotifyJobCompletions] = useState(true);
+  const [preferences, setPreferences] = useState<Preferences>({
+    start_runners_on_launch: false,
+    notify_status_changes: true,
+    notify_job_completions: true,
+  });
 
   // Check launch-at-login status on mount
   useEffect(() => {
     invoke<boolean>("service_status")
       .then(setLaunchAtLogin)
       .catch(() => {});
+    api
+      .getPreferences()
+      .then(setPreferences)
+      .catch(() => {});
   }, []);
+
+  function updatePreference(key: keyof Preferences, value: boolean) {
+    setPreferences((prev) => {
+      const updated = { ...prev, [key]: value };
+      api
+        .updatePreferences(updated)
+        .then(setPreferences)
+        .catch((e) => {
+          console.error("Failed to update preference:", e);
+          setPreferences(prev);
+        });
+      return updated;
+    });
+  }
 
   const pollInBackground = useCallback(
     (flow: DeviceFlowResponse) => {
@@ -430,8 +450,8 @@ export function Settings() {
           <ToggleSetting
             label="Start runners on launch"
             description="Resume all runners that were running when the app was last closed."
-            checked={startRunnersOnLaunch}
-            onChange={(checked) => setStartRunnersOnLaunch(checked)}
+            checked={preferences.start_runners_on_launch}
+            onChange={(checked) => updatePreference("start_runners_on_launch", checked)}
           />
         </div>
       </section>
@@ -443,15 +463,15 @@ export function Settings() {
           <ToggleSetting
             label="Runner status changes"
             description="Notify when a runner goes online, offline, or encounters an error."
-            checked={notifyStatusChanges}
-            onChange={(checked) => setNotifyStatusChanges(checked)}
+            checked={preferences.notify_status_changes}
+            onChange={(checked) => updatePreference("notify_status_changes", checked)}
           />
           <Divider />
           <ToggleSetting
             label="Job completions"
             description="Notify when a job completes or fails on a self-hosted runner."
-            checked={notifyJobCompletions}
-            onChange={(checked) => setNotifyJobCompletions(checked)}
+            checked={preferences.notify_job_completions}
+            onChange={(checked) => updatePreference("notify_job_completions", checked)}
           />
         </div>
       </section>

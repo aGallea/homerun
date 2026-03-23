@@ -12,8 +12,9 @@ pub async fn install_service(
     crate::launchd::install_daemon_service(&daemon_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    let config = state.config.read().await;
     tracing::info!(
-        config = ?state.config,
+        config = ?*config,
         "Daemon service installed"
     );
 

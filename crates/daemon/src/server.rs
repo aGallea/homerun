@@ -7,6 +7,7 @@ use axum::{
     Json, Router,
 };
 use tokio::net::UnixListener;
+use tokio::sync::RwLock;
 
 use crate::api;
 use crate::auth::AuthManager;
@@ -18,7 +19,7 @@ use crate::runner::RunnerManager;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<Config>,
+    pub config: Arc<RwLock<Config>>,
     pub auth: AuthManager,
     pub runner_manager: RunnerManager,
     pub metrics: Arc<MetricsCollector>,
@@ -31,12 +32,16 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: Config, daemon_logs: DaemonLogState) -> Self {
         let runner_manager = RunnerManager::new(config.clone());
+        let notifications = Arc::new(NotificationManager::with_preferences(
+            config.preferences.notify_status_changes,
+            config.preferences.notify_job_completions,
+        ));
         Self {
-            config: Arc::new(config),
+            config: Arc::new(RwLock::new(config)),
             auth: AuthManager::new(),
             runner_manager,
             metrics: Arc::new(MetricsCollector::new()),
-            notifications: Arc::new(NotificationManager::new()),
+            notifications,
             daemon_logs,
             daemon_start_time: std::time::Instant::now(),
             daemon_pid: std::process::id(),
@@ -114,6 +119,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/service/uninstall", post(api_service::uninstall_service))
         .route("/service/status", get(api_service::service_status))
         .route("/updates/check", get(api_updates::check_updates))
+        .route(
+            "/preferences",
+            get(api::preferences::get_preferences).put(api::preferences::update_preferences),
+        )
         .with_state(state)
 }
 

@@ -8,6 +8,7 @@ import type {
   GroupActionResponse,
   LogEntry,
   MetricsResponse,
+  Preferences,
   RepoInfo,
   RunnerInfo,
   CreateRunnerRequest,
@@ -61,4 +62,8 @@ export const api = {
     invoke<GroupActionResponse>("delete_group", { group_id: groupId }),
   scaleGroup: (groupId: string, count: number) =>
     invoke<ScaleGroupResponse>("scale_group", { group_id: groupId, count }),
+
+  // Preferences
+  getPreferences: () => invoke<Preferences>("get_preferences"),
+  updatePreferences: (prefs: Preferences) => invoke<Preferences>("update_preferences", { prefs }),
 };

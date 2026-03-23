@@ -43,6 +43,8 @@ pub fn run() {
             commands::restart_group,
             commands::delete_group,
             commands::scale_group,
+            commands::get_preferences,
+            commands::update_preferences,
             commands::get_daemon_logs_recent,
         ])
         .run(tauri::generate_context!())

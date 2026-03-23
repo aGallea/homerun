@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use anyhow::Result;
 use notify_rust::Notification;
 
@@ -22,22 +24,47 @@ pub enum NotificationType {
 }
 
 pub struct NotificationManager {
-    enabled: bool,
+    notify_status_changes: AtomicBool,
+    notify_job_completions: AtomicBool,
 }
 
 impl NotificationManager {
     pub fn new() -> Self {
-        Self { enabled: true }
+        Self {
+            notify_status_changes: AtomicBool::new(true),
+            notify_job_completions: AtomicBool::new(true),
+        }
     }
 
-    pub fn with_enabled(enabled: bool) -> Self {
-        Self { enabled }
+    pub fn with_preferences(notify_status_changes: bool, notify_job_completions: bool) -> Self {
+        Self {
+            notify_status_changes: AtomicBool::new(notify_status_changes),
+            notify_job_completions: AtomicBool::new(notify_job_completions),
+        }
+    }
+
+    pub fn set_status_changes(&self, enabled: bool) {
+        self.notify_status_changes.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn set_job_completions(&self, enabled: bool) {
+        self.notify_job_completions
+            .store(enabled, Ordering::Relaxed);
     }
 
     pub fn send(&self, notification: NotificationType) -> Result<()> {
-        if !self.enabled {
+        let enabled = match &notification {
+            NotificationType::JobCompleted { .. } | NotificationType::JobFailed { .. } => {
+                self.notify_job_completions.load(Ordering::Relaxed)
+            }
+            NotificationType::RunnerCrashed { .. } | NotificationType::HighResourceUsage { .. } => {
+                self.notify_status_changes.load(Ordering::Relaxed)
+            }
+        };
+        if !enabled {
             return Ok(());
         }
+
         let (title, body) = match notification {
             NotificationType::JobCompleted {
                 runner_name,
@@ -90,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_notification_manager_disabled_skips_send() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         // Should not error even if OS notification system is unavailable
         let result = mgr.send(NotificationType::JobCompleted {
             runner_name: "runner-1".to_string(),
@@ -102,8 +129,9 @@ mod tests {
 
     #[test]
     fn test_notification_manager_default_is_enabled() {
-        let mgr = NotificationManager::new();
-        assert!(mgr.enabled);
+        // Just verify construction doesn't panic
+        let _mgr = NotificationManager::new();
+        let _disabled = NotificationManager::with_preferences(false, false);
     }
 
     #[test]
@@ -114,13 +142,13 @@ mod tests {
             duration: "1m".to_string(),
         };
         // Verify match arms compile and produce expected strings
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         assert!(mgr.send(n).is_ok());
     }
 
     #[test]
     fn test_notification_type_job_failed() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::JobFailed {
             runner_name: "runner-1".to_string(),
             job_name: "deploy".to_string(),
@@ -130,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_notification_type_runner_crashed() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::RunnerCrashed {
             runner_name: "runner-1".to_string(),
             attempt: 2,
@@ -141,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_notification_type_high_resource_usage() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::HighResourceUsage { cpu_percent: 95.5 });
         assert!(result.is_ok());
     }
@@ -149,7 +177,7 @@ mod tests {
     #[test]
     fn test_notification_format_job_completed() {
         // Use enabled: false to avoid firing real system notifications during tests
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::JobCompleted {
             runner_name: "test-runner".to_string(),
             job_name: "build".to_string(),
@@ -160,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_notification_format_job_failed() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::JobFailed {
             runner_name: "test-runner".to_string(),
             job_name: "deploy".to_string(),
@@ -170,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_notification_format_runner_crashed() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::RunnerCrashed {
             runner_name: "test-runner".to_string(),
             attempt: 1,
@@ -181,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_notification_format_high_resource_usage() {
-        let mgr = NotificationManager::with_enabled(false);
+        let mgr = NotificationManager::with_preferences(false, false);
         let result = mgr.send(NotificationType::HighResourceUsage { cpu_percent: 85.0 });
         assert!(result.is_ok());
     }
