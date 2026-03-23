@@ -11,8 +11,8 @@ export function Layout() {
     let cancelled = false;
     async function check() {
       try {
-        const available = await api.daemonAvailable();
-        if (!cancelled) setDaemonConnected(available);
+        const ok = await api.healthCheck();
+        if (!cancelled) setDaemonConnected(ok);
       } catch {
         if (!cancelled) setDaemonConnected(false);
       }
