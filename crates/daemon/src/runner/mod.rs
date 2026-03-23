@@ -1,6 +1,7 @@
 pub mod binary;
 pub mod process;
 pub mod state;
+pub mod step_log_cache;
 pub mod steps;
 pub mod types;
 
@@ -56,6 +57,7 @@ pub struct RunnerManager {
     name_counters: Arc<RwLock<HashMap<String, u32>>>,
     auth_token: Arc<RwLock<Option<String>>>,
     step_watcher: WorkerLogWatcher,
+    pub step_log_cache: step_log_cache::StepLogCache,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -103,6 +105,7 @@ impl RunnerManager {
             name_counters: Arc::new(RwLock::new(HashMap::new())),
             auth_token: Arc::new(RwLock::new(None)),
             step_watcher: WorkerLogWatcher::new(),
+            step_log_cache: step_log_cache::StepLogCache::new(),
         }
     }
 
