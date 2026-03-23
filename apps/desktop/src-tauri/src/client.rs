@@ -58,6 +58,10 @@ pub struct RunnerInfo {
     pub job_context: Option<JobContext>,
     #[serde(default)]
     pub error_message: Option<String>,
+    #[serde(default)]
+    pub job_started_at: Option<String>,
+    #[serde(default)]
+    pub last_completed_job: Option<CompletedJob>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +93,29 @@ pub struct StepLogsResponse {
     pub step_number: u16,
     pub step_name: String,
     pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletedJob {
+    pub job_name: String,
+    pub succeeded: bool,
+    pub completed_at: String,
+    pub duration_secs: u64,
+    pub branch: Option<String>,
+    pub pr_number: Option<u64>,
+    pub run_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobHistoryEntry {
+    pub job_name: String,
+    pub started_at: String,
+    pub completed_at: String,
+    pub succeeded: bool,
+    pub branch: Option<String>,
+    pub pr_number: Option<u64>,
+    pub run_url: Option<String>,
+    pub steps: Vec<StepInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -449,6 +476,17 @@ impl DaemonClient {
     pub async fn get_step_logs(&self, runner_id: &str, step_number: u16) -> Result<StepLogsResponse, String> {
         let body = self.request("GET", &format!("/runners/{runner_id}/steps/{step_number}/logs"), None).await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn get_runner_history(&self, runner_id: &str) -> Result<Vec<JobHistoryEntry>, String> {
+        let body = self.request("GET", &format!("/runners/{runner_id}/history"), None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn rerun_workflow(&self, runner_id: &str, run_url: &str) -> Result<(), String> {
+        let payload = serde_json::json!({ "run_url": run_url }).to_string();
+        self.request("POST", &format!("/runners/{runner_id}/rerun"), Some(payload)).await?;
+        Ok(())
     }
 
     pub async fn get_runner_logs(&self, runner_id: &str) -> Result<Vec<LogEntry>, String> {

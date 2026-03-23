@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod history;
 pub mod process;
 pub mod state;
 pub mod step_log_cache;
@@ -71,6 +72,7 @@ pub struct RunnerManager {
     auth_token: Arc<RwLock<Option<String>>>,
     step_watcher: WorkerLogWatcher,
     pub step_log_cache: step_log_cache::StepLogCache,
+    job_history: Arc<RwLock<HashMap<String, Vec<types::JobHistoryEntry>>>>,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -119,6 +121,7 @@ impl RunnerManager {
             auth_token: Arc::new(RwLock::new(None)),
             step_watcher: WorkerLogWatcher::new(),
             step_log_cache: step_log_cache::StepLogCache::new(),
+            job_history: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -346,9 +349,44 @@ impl RunnerManager {
                     current_job: None,
                     job_context: None,
                     error_message: None,
+                    job_started_at: None,
+                    last_completed_job: None,
                 },
             );
         }
+        drop(runners);
+
+        // Load job history from disk
+        match history::load_all(&self.config.history_dir()) {
+            Ok(hist) => {
+                // Populate last_completed_job for each runner from most recent history entry
+                let mut runners = self.runners.write().await;
+                for (runner_id, entries) in &hist {
+                    if let Some(last) = entries.last() {
+                        if let Some(r) = runners.get_mut(runner_id) {
+                            let duration_secs =
+                                (last.completed_at - last.started_at).num_seconds().max(0) as u64;
+                            r.last_completed_job = Some(types::CompletedJob {
+                                job_name: last.job_name.clone(),
+                                succeeded: last.succeeded,
+                                completed_at: last.completed_at,
+                                duration_secs,
+                                branch: last.branch.clone(),
+                                pr_number: last.pr_number,
+                                run_url: last.run_url.clone(),
+                            });
+                        }
+                    }
+                }
+                drop(runners);
+                let mut job_history = self.job_history.write().await;
+                *job_history = hist;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load job history: {}", e);
+            }
+        }
+
         Ok(need_restart)
     }
 
@@ -527,6 +565,8 @@ impl RunnerManager {
                                     if let Some(r) = map.get_mut(runner_id) {
                                         r.state = RunnerState::Busy;
                                         r.current_job = Some(job_name.clone());
+                                        r.job_started_at = Some(chrono::Utc::now());
+                                        r.last_completed_job = None;
                                     }
                                 }
                                 manager.emit_state_event(runner_id, "busy");
@@ -548,10 +588,74 @@ impl RunnerManager {
                                 });
                             }
                             Some(JobEvent::Completed { succeeded }) => {
+                                // Capture steps before stopping the watcher
+                                let steps = step_watcher
+                                    .get_steps(runner_id)
+                                    .await
+                                    .map(|s| s.steps)
+                                    .unwrap_or_default();
                                 step_watcher.stop_watching(runner_id).await;
-                                {
+
+                                // Fetch job context if the poller didn't get it in time
+                                let fetched_ctx = {
+                                    let has_ctx = manager
+                                        .runners
+                                        .read()
+                                        .await
+                                        .get(runner_id)
+                                        .is_some_and(|r| r.job_context.is_some());
+                                    if has_ctx {
+                                        None
+                                    } else {
+                                        manager.fetch_missing_job_context(runner_id).await
+                                    }
+                                };
+                                if let Some(ctx) = &fetched_ctx {
                                     let mut map = manager.runners.write().await;
                                     if let Some(r) = map.get_mut(runner_id) {
+                                        r.job_context = Some(ctx.clone());
+                                    }
+                                }
+
+                                // Build history entry and update runner state
+                                let history_entry = {
+                                    let mut map = manager.runners.write().await;
+                                    if let Some(r) = map.get_mut(runner_id) {
+                                        let now = chrono::Utc::now();
+                                        let started_at = r.job_started_at.unwrap_or(now);
+                                        let duration_secs =
+                                            (now - started_at).num_seconds().max(0) as u64;
+
+                                        let entry = types::JobHistoryEntry {
+                                            job_name: r.current_job.clone().unwrap_or_default(),
+                                            started_at,
+                                            completed_at: now,
+                                            succeeded,
+                                            branch: r
+                                                .job_context
+                                                .as_ref()
+                                                .map(|c| c.branch.clone()),
+                                            pr_number: r
+                                                .job_context
+                                                .as_ref()
+                                                .and_then(|c| c.pr_number),
+                                            run_url: r
+                                                .job_context
+                                                .as_ref()
+                                                .map(|c| c.run_url.clone()),
+                                            steps,
+                                        };
+
+                                        r.last_completed_job = Some(types::CompletedJob {
+                                            job_name: entry.job_name.clone(),
+                                            succeeded,
+                                            completed_at: now,
+                                            duration_secs,
+                                            branch: entry.branch.clone(),
+                                            pr_number: entry.pr_number,
+                                            run_url: entry.run_url.clone(),
+                                        });
+
                                         if succeeded {
                                             r.jobs_completed += 1;
                                         } else {
@@ -560,7 +664,16 @@ impl RunnerManager {
                                         r.state = RunnerState::Online;
                                         r.current_job = None;
                                         r.job_context = None;
+                                        r.job_started_at = None;
+
+                                        Some(entry)
+                                    } else {
+                                        None
                                     }
+                                };
+
+                                if let Some(entry) = history_entry {
+                                    manager.record_job_history(runner_id, entry).await;
                                 }
                                 manager.emit_state_event(runner_id, "online");
                                 let _ = manager.save_to_disk().await;
@@ -639,6 +752,8 @@ impl RunnerManager {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -902,6 +1017,7 @@ impl RunnerManager {
         drop(runners);
         // Also remove any tracked process handle
         self.processes.write().await.remove(id);
+        self.delete_job_history(id).await;
         self.save_to_disk().await?;
         Ok(())
     }
@@ -1072,6 +1188,10 @@ impl RunnerManager {
             let recent_logs = self.recent_logs.clone();
             let runners = self.runners.clone();
             let step_watcher = self.step_watcher.clone();
+            let job_history_arc = self.job_history.clone();
+            let history_dir = self.config.history_dir();
+            let event_tx_stdout = self.event_tx.clone();
+            let auth_token_clone = self.auth_token.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -1103,6 +1223,8 @@ impl RunnerManager {
                                 if let Some(r) = map.get_mut(&rid) {
                                     r.state = RunnerState::Busy;
                                     r.current_job = Some(job_name.clone());
+                                    r.job_started_at = Some(chrono::Utc::now());
+                                    r.last_completed_job = None;
                                     Some(r.config.work_dir.clone())
                                 } else {
                                     None
@@ -1112,21 +1234,130 @@ impl RunnerManager {
                                 step_watcher
                                     .start_watching(&rid, &job_name, &work_dir)
                                     .await;
+                                // Spawn step-watcher polling task
+                                let sw = step_watcher.clone();
+                                let rid_poll = rid.clone();
+                                tokio::spawn(async move {
+                                    loop {
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
+                                        if !sw.poll(&rid_poll).await {
+                                            break;
+                                        }
+                                    }
+                                });
                             }
                         }
                         Some(JobEvent::Completed { succeeded }) => {
+                            let steps_data = step_watcher
+                                .get_steps(&rid)
+                                .await
+                                .map(|s| s.steps)
+                                .unwrap_or_default();
                             step_watcher.stop_watching(&rid).await;
-                            let mut map = runners.write().await;
-                            if let Some(r) = map.get_mut(&rid) {
-                                if succeeded {
-                                    r.jobs_completed += 1;
-                                } else {
-                                    r.jobs_failed += 1;
+
+                            // Fetch job context if the poller didn't get it in time
+                            {
+                                let has_ctx = runners
+                                    .read()
+                                    .await
+                                    .get(&rid)
+                                    .is_some_and(|r| r.job_context.is_some());
+                                if !has_ctx {
+                                    let info = {
+                                        let map = runners.read().await;
+                                        map.get(&rid).map(|r| {
+                                            (
+                                                r.config.name.clone(),
+                                                r.config.repo_owner.clone(),
+                                                r.config.repo_name.clone(),
+                                                r.current_job.clone(),
+                                            )
+                                        })
+                                    };
+                                    if let Some((name, owner, repo, Some(job_name))) = info {
+                                        let token = auth_token_clone.read().await.clone();
+                                        if let Some(token) = token {
+                                            if let Ok(gh) = GitHubClient::new(Some(token)) {
+                                                if let Ok(Some(ctx)) = gh
+                                                    .get_recent_run_for_job(
+                                                        &owner, &repo, &name, &job_name,
+                                                    )
+                                                    .await
+                                                {
+                                                    let mut map = runners.write().await;
+                                                    if let Some(r) = map.get_mut(&rid) {
+                                                        r.job_context = Some(ctx);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
-                                r.state = RunnerState::Online;
-                                r.current_job = None;
-                                r.job_context = None;
                             }
+
+                            let history_entry = {
+                                let mut map = runners.write().await;
+                                if let Some(r) = map.get_mut(&rid) {
+                                    let now = chrono::Utc::now();
+                                    let started_at = r.job_started_at.unwrap_or(now);
+                                    let duration_secs =
+                                        (now - started_at).num_seconds().max(0) as u64;
+
+                                    let entry = types::JobHistoryEntry {
+                                        job_name: r.current_job.clone().unwrap_or_default(),
+                                        started_at,
+                                        completed_at: now,
+                                        succeeded,
+                                        branch: r.job_context.as_ref().map(|c| c.branch.clone()),
+                                        pr_number: r.job_context.as_ref().and_then(|c| c.pr_number),
+                                        run_url: r.job_context.as_ref().map(|c| c.run_url.clone()),
+                                        steps: steps_data,
+                                    };
+
+                                    r.last_completed_job = Some(types::CompletedJob {
+                                        job_name: entry.job_name.clone(),
+                                        succeeded,
+                                        completed_at: now,
+                                        duration_secs,
+                                        branch: entry.branch.clone(),
+                                        pr_number: entry.pr_number,
+                                        run_url: entry.run_url.clone(),
+                                    });
+
+                                    if succeeded {
+                                        r.jobs_completed += 1;
+                                    } else {
+                                        r.jobs_failed += 1;
+                                    }
+                                    r.state = RunnerState::Online;
+                                    r.current_job = None;
+                                    r.job_context = None;
+                                    r.job_started_at = None;
+
+                                    Some(entry)
+                                } else {
+                                    None
+                                }
+                            };
+
+                            // Record history via cloned Arcs
+                            if let Some(entry) = history_entry {
+                                let mut hist = job_history_arc.write().await;
+                                let entries = hist.entry(rid.clone()).or_default();
+                                history::append(entries, entry);
+                                if let Err(e) = history::save(&history_dir, &rid, entries) {
+                                    tracing::warn!("Failed to save job history for {}: {}", rid, e);
+                                }
+                            }
+
+                            // Emit state event
+                            let _ = event_tx_stdout.send(RunnerEvent {
+                                runner_id: rid.clone(),
+                                event_type: "state_changed".to_string(),
+                                data: serde_json::json!({"state": "online"}),
+                                timestamp: chrono::Utc::now(),
+                            });
                         }
                         None => {}
                     }
@@ -1340,6 +1571,65 @@ impl RunnerManager {
             data: serde_json::json!({"state": state}),
             timestamp: chrono::Utc::now(),
         });
+    }
+
+    /// Record a completed job in history.
+    pub async fn record_job_history(&self, runner_id: &str, entry: types::JobHistoryEntry) {
+        let mut hist = self.job_history.write().await;
+        let entries = hist.entry(runner_id.to_string()).or_default();
+        history::append(entries, entry);
+        if let Err(e) = history::save(&self.config.history_dir(), runner_id, entries) {
+            tracing::warn!("Failed to save job history for {}: {}", runner_id, e);
+        }
+    }
+
+    /// Get job history for a runner (newest first).
+    pub async fn get_job_history(&self, runner_id: &str) -> Vec<types::JobHistoryEntry> {
+        let hist = self.job_history.read().await;
+        let mut entries = hist.get(runner_id).cloned().unwrap_or_default();
+        entries.reverse();
+        entries
+    }
+
+    /// Delete job history for a runner.
+    pub async fn delete_job_history(&self, runner_id: &str) {
+        self.job_history.write().await.remove(runner_id);
+        if let Err(e) = history::delete(&self.config.history_dir(), runner_id) {
+            tracing::warn!("Failed to delete job history for {}: {}", runner_id, e);
+        }
+    }
+
+    /// Try to fetch job context from GitHub for a runner that's missing it.
+    /// Called at job completion for fast jobs that finish before the poller runs.
+    pub async fn fetch_missing_job_context(&self, runner_id: &str) -> Option<types::JobContext> {
+        let (runner_name, owner, repo, job_name) = {
+            let map = self.runners.read().await;
+            let r = map.get(runner_id)?;
+            (
+                r.config.name.clone(),
+                r.config.repo_owner.clone(),
+                r.config.repo_name.clone(),
+                r.current_job.clone()?,
+            )
+        };
+
+        let token = self.auth_token.read().await.clone()?;
+        let gh = GitHubClient::new(Some(token)).ok()?;
+
+        match gh
+            .get_recent_run_for_job(&owner, &repo, &runner_name, &job_name)
+            .await
+        {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::debug!(
+                    runner = %runner_id,
+                    error = %e,
+                    "Failed to fetch missing job context at completion"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -1738,6 +2028,8 @@ mod tests {
             current_job: Some("TypeScript (type check + build)".to_string()),
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2011,6 +2303,8 @@ mod tests {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -2043,6 +2337,8 @@ mod tests {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
@@ -2255,6 +2551,8 @@ mod tests {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2300,6 +2598,8 @@ mod tests {
                 current_job: None,
                 job_context: None,
                 error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
             },
         );
         manager

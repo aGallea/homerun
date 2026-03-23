@@ -71,7 +71,7 @@ export function Daemon() {
         <h1 className="page-title">Daemon</h1>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && !error.includes("connect") && <div className="error-banner">{error}</div>}
 
       {/* Status cards */}
       <div className="stats-grid" style={{ marginBottom: 16 }}>

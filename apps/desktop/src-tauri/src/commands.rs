@@ -2,17 +2,28 @@ use tauri::State;
 
 use crate::client::{
     AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DaemonLogEntry,
-    DeviceFlowResponse, GroupActionResponse, LogEntry, MetricsResponse, Preferences, RepoInfo,
-    RunnerInfo, ScaleGroupResponse, StepLogsResponse, StepsResponse,
+    DeviceFlowResponse, GroupActionResponse, JobHistoryEntry, LogEntry, MetricsResponse,
+    Preferences, RepoInfo, RunnerInfo, ScaleGroupResponse, StepLogsResponse, StepsResponse,
 };
 use crate::AppState;
 
 #[tauri::command]
 pub async fn health_check(state: State<'_, AppState>) -> Result<bool, String> {
-    let client = state.client.lock().await;
-    match client.health().await {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
+    // Use a fresh client to avoid mutex contention with other commands
+    // that may be hanging when the daemon is down.
+    let socket_path = {
+        let client = state.client.lock().await;
+        client.socket_path().to_path_buf()
+    };
+    let check_client = crate::client::DaemonClient::new(socket_path);
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        check_client.health(),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(true),
+        _ => Ok(false),
     }
 }
 
@@ -231,6 +242,25 @@ pub async fn get_step_logs(
 ) -> Result<StepLogsResponse, String> {
     let client = state.client.lock().await;
     client.get_step_logs(&runner_id, step_number).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_runner_history(
+    state: State<'_, AppState>,
+    runner_id: String,
+) -> Result<Vec<JobHistoryEntry>, String> {
+    let client = state.client.lock().await;
+    client.get_runner_history(&runner_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn rerun_workflow(
+    state: State<'_, AppState>,
+    runner_id: String,
+    run_url: String,
+) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.rerun_workflow(&runner_id, &run_url).await
 }
 
 #[tauri::command]

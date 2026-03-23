@@ -1,4 +1,5 @@
 use crate::runner::state::RunnerState;
+use crate::runner::steps::StepInfo;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -19,6 +20,29 @@ pub struct RunnerConfig {
     pub work_dir: std::path::PathBuf,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub group_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobHistoryEntry {
+    pub job_name: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub completed_at: chrono::DateTime<chrono::Utc>,
+    pub succeeded: bool,
+    pub branch: Option<String>,
+    pub pr_number: Option<u64>,
+    pub run_url: Option<String>,
+    pub steps: Vec<StepInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletedJob {
+    pub job_name: String,
+    pub succeeded: bool,
+    pub completed_at: chrono::DateTime<chrono::Utc>,
+    pub duration_secs: u64,
+    pub branch: Option<String>,
+    pub pr_number: Option<u64>,
+    pub run_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +71,10 @@ pub struct RunnerInfo {
     pub job_context: Option<JobContext>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub job_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_completed_job: Option<CompletedJob>,
 }
 
 #[derive(Debug, Deserialize)]

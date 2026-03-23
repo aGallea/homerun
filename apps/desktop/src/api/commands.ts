@@ -6,6 +6,7 @@ import type {
   DaemonLogEntry,
   DeviceFlowResponse,
   GroupActionResponse,
+  JobHistoryEntry,
   LogEntry,
   MetricsResponse,
   Preferences,
@@ -54,6 +55,12 @@ export const api = {
     invoke<StepsResponse>("get_runner_steps", { runner_id: runnerId }),
   getStepLogs: (runnerId: string, stepNumber: number) =>
     invoke<StepLogsResponse>("get_step_logs", { runner_id: runnerId, step_number: stepNumber }),
+
+  // History
+  getRunnerHistory: (runnerId: string) =>
+    invoke<JobHistoryEntry[]>("get_runner_history", { runner_id: runnerId }),
+  rerunWorkflow: (runnerId: string, runUrl: string) =>
+    invoke<void>("rerun_workflow", { runner_id: runnerId, run_url: runUrl }),
 
   // Health
   healthCheck: () => invoke<boolean>("health_check"),
