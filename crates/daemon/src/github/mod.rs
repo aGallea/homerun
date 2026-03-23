@@ -6,6 +6,7 @@ use types::{RepoInfo, RunnerRegistration};
 
 pub struct GitHubClient {
     octocrab: octocrab::Octocrab,
+    token: String,
 }
 
 impl GitHubClient {
@@ -14,9 +15,9 @@ impl GitHubClient {
             bail!("Not authenticated — please login first");
         };
         let octocrab = octocrab::Octocrab::builder()
-            .personal_token(token)
+            .personal_token(token.clone())
             .build()?;
-        Ok(Self { octocrab })
+        Ok(Self { octocrab, token })
     }
 
     pub async fn list_repos(&self) -> Result<Vec<RepoInfo>> {
@@ -165,6 +166,7 @@ impl GitHubClient {
 
         #[derive(Deserialize)]
         struct RunJob {
+            id: u64,
             name: String,
             runner_name: Option<String>,
         }
@@ -188,7 +190,7 @@ impl GitHubClient {
             };
 
             // Match by runner_name if available, otherwise fall back to job name
-            let matched = jobs.jobs.iter().any(|j| {
+            let matched_job = jobs.jobs.iter().find(|j| {
                 if let Some(rn) = j.runner_name.as_deref() {
                     rn == runner_name
                 } else {
@@ -196,7 +198,7 @@ impl GitHubClient {
                 }
             });
 
-            if matched {
+            if let Some(job) = matched_job {
                 let (pr_number, pr_url) = if let Some(pr) = run.pull_requests.first() {
                     let html_url = pr
                         .url
@@ -212,12 +214,81 @@ impl GitHubClient {
                     pr_number,
                     pr_url,
                     run_url: run.html_url,
+                    job_id: Some(job.id),
                 }));
             }
         }
 
         Ok(None)
     }
+
+    /// Fetch the raw log content for a specific job from GitHub Actions.
+    ///
+    /// The GitHub API endpoint returns a 302 redirect to blob storage serving
+    /// plain text. Since octocrab expects JSON responses, we use reqwest directly.
+    pub async fn get_job_logs(&self, owner: &str, repo: &str, job_id: u64) -> Result<String> {
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "homerun")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            bail!(
+                "Failed to fetch job logs: HTTP {}",
+                response.status().as_u16()
+            );
+        }
+
+        let body = response.text().await?;
+        Ok(body)
+    }
+}
+
+/// Parse raw GitHub Actions job log text into sections by step name.
+///
+/// The log format uses `##[group]Step Name` / `##[endgroup]` markers to delimit
+/// steps, with each line prefixed by a 29-character timestamp
+/// (`2026-03-23T07:54:51.0000000Z `).
+///
+/// Returns a `Vec<(step_name, log_content)>`.
+pub fn parse_job_log_sections(raw_log: &str) -> Vec<(String, String)> {
+    let mut sections: Vec<(String, String)> = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_lines: Vec<String> = Vec::new();
+
+    for line in raw_log.lines() {
+        // Strip the timestamp prefix (29 chars: 28 for timestamp + 'Z', then a space)
+        let content = if line.len() > 29 { &line[29..] } else { line };
+        let content = content.trim_start();
+
+        if let Some(name) = content.strip_prefix("##[group]") {
+            // Close any open section before starting a new one
+            if let Some(name) = current_name.take() {
+                sections.push((name, current_lines.join("\n")));
+                current_lines.clear();
+            }
+            current_name = Some(name.to_string());
+        } else if content == "##[endgroup]" {
+            if let Some(name) = current_name.take() {
+                sections.push((name, current_lines.join("\n")));
+                current_lines.clear();
+            }
+        } else if current_name.is_some() {
+            current_lines.push(content.to_string());
+        }
+    }
+
+    // Handle unterminated section (step still running)
+    if let Some(name) = current_name.take() {
+        sections.push((name, current_lines.join("\n")));
+    }
+
+    sections
 }
 
 #[cfg(test)]
@@ -407,6 +478,40 @@ mod tests {
         let client = GitHubClient::new(Some(String::new())).unwrap();
         let result = client.list_repos().await;
         assert!(result.is_err(), "expected error with empty token");
+    }
+
+    #[test]
+    fn test_parse_job_log_into_steps() {
+        let raw_log = "2026-03-23T07:54:51.0000000Z ##[group]Run actions/checkout@v6\n\
+            2026-03-23T07:54:52.0000000Z Syncing repository: owner/repo\n\
+            2026-03-23T07:54:53.0000000Z ##[endgroup]\n\
+            2026-03-23T07:54:53.0000000Z ##[group]Check formatting\n\
+            2026-03-23T07:54:54.0000000Z + cargo fmt --check\n\
+            2026-03-23T07:54:55.0000000Z ##[endgroup]\n";
+
+        let sections = parse_job_log_sections(raw_log);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].0, "Run actions/checkout@v6");
+        assert!(sections[0].1.contains("Syncing repository"));
+        assert_eq!(sections[1].0, "Check formatting");
+        assert!(sections[1].1.contains("cargo fmt"));
+    }
+
+    #[test]
+    fn test_parse_job_log_unterminated_section() {
+        let raw_log = "2026-03-23T07:54:51.0000000Z ##[group]Running step\n\
+            2026-03-23T07:54:52.0000000Z Some output here\n";
+
+        let sections = parse_job_log_sections(raw_log);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].0, "Running step");
+        assert!(sections[0].1.contains("Some output here"));
+    }
+
+    #[test]
+    fn test_parse_job_log_empty_input() {
+        let sections = parse_job_log_sections("");
+        assert!(sections.is_empty());
     }
 
     #[tokio::test]

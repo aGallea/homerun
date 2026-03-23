@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, DisplayItem};
-use crate::client::RunnerInfo;
+use crate::client::{RunnerInfo, StepInfo};
 
 pub fn draw_runners(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
@@ -156,9 +156,44 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
     let content = match app.selected_display_item() {
         Some(DisplayItem::RunnerRow { runner_index, .. }) => {
             if let Some(runner) = app.runners.get(*runner_index) {
-                format_runner_detail(runner, app)
+                let base = format_runner_detail(runner, app);
+                let mut lines: Vec<Line> =
+                    base.lines().map(|l| Line::from(l.to_string())).collect();
+
+                // Append step progress if available for this runner
+                if runner.state == "busy" {
+                    if let Some(ref steps_resp) = app.selected_runner_steps {
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(Span::styled(
+                            format!(" Job Steps: ({})", steps_resp.job_name),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        )));
+                        for step in &steps_resp.steps {
+                            let (icon, color) = match step.status.as_str() {
+                                "succeeded" => ("\u{2713}", Color::Green),
+                                "failed" => ("\u{2715}", Color::Red),
+                                "running" => ("\u{27F3}", Color::Yellow),
+                                "skipped" => ("\u{2298}", Color::DarkGray),
+                                _ => ("\u{25CB}", Color::DarkGray), // pending
+                            };
+                            let duration_str = format_step_duration(step);
+                            lines.push(Line::from(vec![
+                                Span::raw("  "),
+                                Span::styled(format!("{icon} "), Style::default().fg(color)),
+                                Span::styled(step.name.clone(), Style::default().fg(color)),
+                                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
+                            ]));
+                        }
+                    }
+                }
+
+                lines
             } else {
-                " No runner selected.\n\n Press 'a' to add a new runner.".to_string()
+                vec![
+                    Line::from(" No runner selected."),
+                    Line::from(""),
+                    Line::from(" Press 'a' to add a new runner."),
+                ]
             }
         }
         Some(DisplayItem::GroupRow {
@@ -166,8 +201,15 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
             name_prefix,
             runner_count,
             status_summary,
-        }) => format_group_detail(group_id, name_prefix, *runner_count, status_summary),
-        None => " No runner selected.\n\n Press 'a' to add a new runner.".to_string(),
+        }) => {
+            let s = format_group_detail(group_id, name_prefix, *runner_count, status_summary);
+            s.lines().map(|l| Line::from(l.to_string())).collect()
+        }
+        None => vec![
+            Line::from(" No runner selected."),
+            Line::from(""),
+            Line::from(" Press 'a' to add a new runner."),
+        ],
     };
 
     let paragraph =
@@ -283,6 +325,30 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{:.0} KB", bytes as f64 / KB as f64)
     }
+}
+
+fn format_step_duration(step: &StepInfo) -> String {
+    // Try to compute duration from started_at / completed_at timestamps
+    if let Some(ref started) = step.started_at {
+        if let Some(ref completed) = step.completed_at {
+            // Both are ISO 8601 timestamps; parse and diff
+            if let (Ok(s), Ok(e)) = (
+                chrono::DateTime::parse_from_rfc3339(started),
+                chrono::DateTime::parse_from_rfc3339(completed),
+            ) {
+                let secs = (e - s).num_seconds();
+                return format!("  {secs}s");
+            }
+        } else if step.status == "running" {
+            // Running step: show elapsed with trailing ellipsis
+            if let Ok(s) = chrono::DateTime::parse_from_rfc3339(started) {
+                let now = chrono::Utc::now();
+                let secs = (now - s.with_timezone(&chrono::Utc)).num_seconds();
+                return format!("  {secs}s\u{2026}");
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(test)]

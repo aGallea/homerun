@@ -46,6 +46,8 @@ pub struct JobContext {
     pub pr_number: Option<u64>,
     pub pr_url: Option<String>,
     pub run_url: String,
+    #[serde(default)]
+    pub job_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +156,22 @@ pub struct CreateRunnerRequest {
     pub name: Option<String>,
     pub labels: Option<Vec<String>>,
     pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepInfo {
+    pub number: u16,
+    pub name: String,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepsResponse {
+    pub job_name: String,
+    pub steps: Vec<StepInfo>,
+    pub steps_discovered: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,6 +472,13 @@ impl DaemonClient {
             .await?;
         let entries: Vec<DaemonLogEntry> = serde_json::from_str(&body)?;
         Ok(entries)
+    }
+
+    pub async fn get_runner_steps(&self, runner_id: &str) -> Result<StepsResponse> {
+        let body = self
+            .request("GET", &format!("/runners/{runner_id}/steps"), None)
+            .await?;
+        serde_json::from_str(&body).context("Failed to parse steps response")
     }
 
     /// Connect to the daemon's WebSocket endpoint for real-time events.

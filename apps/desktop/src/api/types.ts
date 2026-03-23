@@ -35,6 +35,7 @@ export interface JobContext {
   pr_number: number | null;
   pr_url: string | null;
   run_url: string;
+  job_id?: number | null;
 }
 
 export interface LogEntry {
@@ -42,6 +43,28 @@ export interface LogEntry {
   timestamp: string;
   line: string;
   stream: string;
+}
+
+export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+export interface StepInfo {
+  number: number;
+  name: string;
+  status: StepStatus;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface StepsResponse {
+  job_name: string;
+  steps: StepInfo[];
+  steps_discovered: number;
+}
+
+export interface StepLogsResponse {
+  step_number: number;
+  step_name: string;
+  lines: string[];
 }
 
 export interface GitHubUser {

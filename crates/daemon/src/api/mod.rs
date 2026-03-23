@@ -9,4 +9,5 @@ pub mod repos;
 pub mod runners;
 pub mod scanner;
 pub mod service;
+pub mod steps;
 pub mod updates;
