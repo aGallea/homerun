@@ -565,6 +565,8 @@ impl RunnerManager {
                                     if let Some(r) = map.get_mut(runner_id) {
                                         r.state = RunnerState::Busy;
                                         r.current_job = Some(job_name.clone());
+                                        r.job_started_at = Some(chrono::Utc::now());
+                                        r.last_completed_job = None;
                                     }
                                 }
                                 manager.emit_state_event(runner_id, "busy");
@@ -586,10 +588,53 @@ impl RunnerManager {
                                 });
                             }
                             Some(JobEvent::Completed { succeeded }) => {
+                                // Capture steps before stopping the watcher
+                                let steps = step_watcher
+                                    .get_steps(runner_id)
+                                    .await
+                                    .map(|s| s.steps)
+                                    .unwrap_or_default();
                                 step_watcher.stop_watching(runner_id).await;
-                                {
+
+                                // Build history entry and update runner state
+                                let history_entry = {
                                     let mut map = manager.runners.write().await;
                                     if let Some(r) = map.get_mut(runner_id) {
+                                        let now = chrono::Utc::now();
+                                        let started_at = r.job_started_at.unwrap_or(now);
+                                        let duration_secs =
+                                            (now - started_at).num_seconds().max(0) as u64;
+
+                                        let entry = types::JobHistoryEntry {
+                                            job_name: r.current_job.clone().unwrap_or_default(),
+                                            started_at,
+                                            completed_at: now,
+                                            succeeded,
+                                            branch: r
+                                                .job_context
+                                                .as_ref()
+                                                .map(|c| c.branch.clone()),
+                                            pr_number: r
+                                                .job_context
+                                                .as_ref()
+                                                .and_then(|c| c.pr_number),
+                                            run_url: r
+                                                .job_context
+                                                .as_ref()
+                                                .map(|c| c.run_url.clone()),
+                                            steps,
+                                        };
+
+                                        r.last_completed_job = Some(types::CompletedJob {
+                                            job_name: entry.job_name.clone(),
+                                            succeeded,
+                                            completed_at: now,
+                                            duration_secs,
+                                            branch: entry.branch.clone(),
+                                            pr_number: entry.pr_number,
+                                            run_url: entry.run_url.clone(),
+                                        });
+
                                         if succeeded {
                                             r.jobs_completed += 1;
                                         } else {
@@ -598,7 +643,16 @@ impl RunnerManager {
                                         r.state = RunnerState::Online;
                                         r.current_job = None;
                                         r.job_context = None;
+                                        r.job_started_at = None;
+
+                                        Some(entry)
+                                    } else {
+                                        None
                                     }
+                                };
+
+                                if let Some(entry) = history_entry {
+                                    manager.record_job_history(runner_id, entry).await;
                                 }
                                 manager.emit_state_event(runner_id, "online");
                                 let _ = manager.save_to_disk().await;
@@ -1112,6 +1166,9 @@ impl RunnerManager {
             let recent_logs = self.recent_logs.clone();
             let runners = self.runners.clone();
             let step_watcher = self.step_watcher.clone();
+            let job_history_arc = self.job_history.clone();
+            let history_dir = self.config.history_dir();
+            let event_tx_stdout = self.event_tx.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -1143,6 +1200,8 @@ impl RunnerManager {
                                 if let Some(r) = map.get_mut(&rid) {
                                     r.state = RunnerState::Busy;
                                     r.current_job = Some(job_name.clone());
+                                    r.job_started_at = Some(chrono::Utc::now());
+                                    r.last_completed_job = None;
                                     Some(r.config.work_dir.clone())
                                 } else {
                                     None
@@ -1155,18 +1214,75 @@ impl RunnerManager {
                             }
                         }
                         Some(JobEvent::Completed { succeeded }) => {
+                            let steps_data = step_watcher
+                                .get_steps(&rid)
+                                .await
+                                .map(|s| s.steps)
+                                .unwrap_or_default();
                             step_watcher.stop_watching(&rid).await;
-                            let mut map = runners.write().await;
-                            if let Some(r) = map.get_mut(&rid) {
-                                if succeeded {
-                                    r.jobs_completed += 1;
+
+                            let history_entry = {
+                                let mut map = runners.write().await;
+                                if let Some(r) = map.get_mut(&rid) {
+                                    let now = chrono::Utc::now();
+                                    let started_at = r.job_started_at.unwrap_or(now);
+                                    let duration_secs =
+                                        (now - started_at).num_seconds().max(0) as u64;
+
+                                    let entry = types::JobHistoryEntry {
+                                        job_name: r.current_job.clone().unwrap_or_default(),
+                                        started_at,
+                                        completed_at: now,
+                                        succeeded,
+                                        branch: r.job_context.as_ref().map(|c| c.branch.clone()),
+                                        pr_number: r.job_context.as_ref().and_then(|c| c.pr_number),
+                                        run_url: r.job_context.as_ref().map(|c| c.run_url.clone()),
+                                        steps: steps_data,
+                                    };
+
+                                    r.last_completed_job = Some(types::CompletedJob {
+                                        job_name: entry.job_name.clone(),
+                                        succeeded,
+                                        completed_at: now,
+                                        duration_secs,
+                                        branch: entry.branch.clone(),
+                                        pr_number: entry.pr_number,
+                                        run_url: entry.run_url.clone(),
+                                    });
+
+                                    if succeeded {
+                                        r.jobs_completed += 1;
+                                    } else {
+                                        r.jobs_failed += 1;
+                                    }
+                                    r.state = RunnerState::Online;
+                                    r.current_job = None;
+                                    r.job_context = None;
+                                    r.job_started_at = None;
+
+                                    Some(entry)
                                 } else {
-                                    r.jobs_failed += 1;
+                                    None
                                 }
-                                r.state = RunnerState::Online;
-                                r.current_job = None;
-                                r.job_context = None;
+                            };
+
+                            // Record history via cloned Arcs
+                            if let Some(entry) = history_entry {
+                                let mut hist = job_history_arc.write().await;
+                                let entries = hist.entry(rid.clone()).or_default();
+                                history::append(entries, entry);
+                                if let Err(e) = history::save(&history_dir, &rid, entries) {
+                                    tracing::warn!("Failed to save job history for {}: {}", rid, e);
+                                }
                             }
+
+                            // Emit state event
+                            let _ = event_tx_stdout.send(RunnerEvent {
+                                runner_id: rid.clone(),
+                                event_type: "state_changed".to_string(),
+                                data: serde_json::json!({"state": "online"}),
+                                timestamp: chrono::Utc::now(),
+                            });
                         }
                         None => {}
                     }
