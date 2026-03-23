@@ -655,15 +655,21 @@ export function RunnerDetail() {
                       >
                         {entry.job_name}
                       </span>
-                      {entry.branch && (
+                      {(entry.branch || entry.pr_number != null) && (
                         <span
                           style={{
                             fontSize: 11,
                             color: "var(--text-secondary)",
                             flexShrink: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
                           }}
                         >
-                          {entry.branch}
+                          {entry.branch && <span>{entry.branch}</span>}
+                          {entry.pr_number != null && (
+                            <span style={{ color: "var(--accent-blue)" }}>#{entry.pr_number}</span>
+                          )}
                         </span>
                       )}
                       <span
