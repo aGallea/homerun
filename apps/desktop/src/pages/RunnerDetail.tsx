@@ -340,10 +340,10 @@ export function RunnerDetail() {
         </div>
 
         {/* Main content: Current Job (30%) + Logs (70%) */}
-        <div style={{ display: "flex", gap: 12, height: 160 }}>
+        <div style={{ display: "flex", gap: 12, height: 220 }}>
           {/* Left: Current Job */}
           <div style={{ flex: "0 0 30%", minWidth: 0, display: "flex" }}>
-            <div className="runner-card runner-card-job" style={{ flex: 1 }}>
+            <div className="runner-card runner-card-job" style={{ flex: 1, overflow: "hidden" }}>
               <div className="runner-card-glow runner-card-glow-blue" />
               <div className="flex items-center justify-between">
                 <h3 className="runner-card-label">Current Job</h3>
