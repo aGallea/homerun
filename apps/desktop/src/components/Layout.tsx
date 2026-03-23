@@ -39,12 +39,8 @@ export function Layout() {
       </div>
       <main className="main-content">
         {!daemonConnected && (
-          <div className="error-banner" style={{ marginBottom: 12 }}>
-            Daemon is not running. Start it with{" "}
-            <code style={{ background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: 4 }}>
-              cargo run -p homerund
-            </code>{" "}
-            or check the Daemon page.
+          <div className="error-banner" style={{ marginBottom: 12, padding: "12px 16px" }}>
+            Unable to connect to the HomeRun daemon. Make sure it is running.
           </div>
         )}
         <Outlet />
