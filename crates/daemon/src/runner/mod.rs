@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod history;
 pub mod process;
 pub mod state;
 pub mod step_log_cache;
