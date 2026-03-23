@@ -2,8 +2,8 @@ use tauri::State;
 
 use crate::client::{
     AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DaemonLogEntry,
-    DeviceFlowResponse, GroupActionResponse, LogEntry, MetricsResponse, Preferences, RepoInfo,
-    RunnerInfo, ScaleGroupResponse, StepLogsResponse, StepsResponse,
+    DeviceFlowResponse, GroupActionResponse, JobHistoryEntry, LogEntry, MetricsResponse,
+    Preferences, RepoInfo, RunnerInfo, ScaleGroupResponse, StepLogsResponse, StepsResponse,
 };
 use crate::AppState;
 
@@ -231,6 +231,15 @@ pub async fn get_step_logs(
 ) -> Result<StepLogsResponse, String> {
     let client = state.client.lock().await;
     client.get_step_logs(&runner_id, step_number).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_runner_history(
+    state: State<'_, AppState>,
+    runner_id: String,
+) -> Result<Vec<JobHistoryEntry>, String> {
+    let client = state.client.lock().await;
+    client.get_runner_history(&runner_id).await
 }
 
 #[tauri::command]

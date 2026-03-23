@@ -48,6 +48,7 @@ pub fn run() {
             commands::get_daemon_logs_recent,
             commands::get_runner_steps,
             commands::get_step_logs,
+            commands::get_runner_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
