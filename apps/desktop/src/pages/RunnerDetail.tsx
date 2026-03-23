@@ -340,7 +340,7 @@ export function RunnerDetail() {
         </div>
 
         {/* Main content: Current Job (30%) + Logs (70%) */}
-        <div style={{ display: "flex", gap: 12, height: 220 }}>
+        <div style={{ display: "flex", gap: 12, minHeight: 200 }}>
           {/* Left: Current Job */}
           <div style={{ flex: "0 0 30%", minWidth: 0, display: "flex" }}>
             <div className="runner-card runner-card-job" style={{ flex: 1, overflow: "hidden" }}>
@@ -502,7 +502,7 @@ export function RunnerDetail() {
               minWidth: 0,
               display: "flex",
               flexDirection: "column",
-              height: "100%",
+              maxHeight: 300,
             }}
           >
             <div className="logs-header">
