@@ -19,6 +19,37 @@ export type RunnerState =
   | "error"
   | "deleting";
 
+export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+export interface StepInfo {
+  number: number;
+  name: string;
+  status: StepStatus;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface CompletedJob {
+  job_name: string;
+  succeeded: boolean;
+  completed_at: string;
+  duration_secs: number;
+  branch?: string | null;
+  pr_number?: number | null;
+  run_url?: string | null;
+}
+
+export interface JobHistoryEntry {
+  job_name: string;
+  started_at: string;
+  completed_at: string;
+  succeeded: boolean;
+  branch?: string | null;
+  pr_number?: number | null;
+  run_url?: string | null;
+  steps: StepInfo[];
+}
+
 export interface RunnerInfo {
   config: RunnerConfig;
   state: RunnerState;
@@ -29,6 +60,8 @@ export interface RunnerInfo {
   current_job?: string | null;
   job_context?: JobContext | null;
   error_message?: string | null;
+  job_started_at?: string | null;
+  last_completed_job?: CompletedJob | null;
 }
 
 export interface JobContext {
@@ -44,16 +77,6 @@ export interface LogEntry {
   timestamp: string;
   line: string;
   stream: string;
-}
-
-export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
-
-export interface StepInfo {
-  number: number;
-  name: string;
-  status: StepStatus;
-  started_at: string | null;
-  completed_at: string | null;
 }
 
 export interface StepsResponse {
