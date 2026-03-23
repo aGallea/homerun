@@ -479,9 +479,6 @@ export function RunnerDetail() {
                   <tbody>
                     {filteredLogs.map((entry, i) => (
                       <tr key={i}>
-                        <td className="logs-timestamp">
-                          {new Date(entry.timestamp).toLocaleTimeString()}
-                        </td>
                         <td
                           style={{
                             color:

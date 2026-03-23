@@ -67,13 +67,24 @@ export function RunnerGroupRow({
       >
         <div className="runner-row-grid">
           <div className="runner-col-name">
-            <span className="runner-expand-icon">{expanded ? "▼" : "▶"}</span>
-            <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: 14 }}>
-              {namePrefix}
-            </span>
-            <span className="text-muted">({runners.length})</span>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <span className="runner-expand-icon">{expanded ? "▼" : "▶"}</span>
+              <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: 14 }}>
+                {namePrefix}
+              </span>
+              <span className="text-muted">({runners.length})</span>
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 2,
+                paddingLeft: 14,
+              }}
+            >
+              {repo}
+            </div>
           </div>
-          <div className="runner-col-repo">{repo}</div>
           <div className="runner-col-status">
             <span
               className="status-badge"
@@ -88,7 +99,6 @@ export function RunnerGroupRow({
               {activeCount}/{runners.length} Online
             </span>
           </div>
-          <div className="runner-col-cpu"></div>
           <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
             {!readOnly && (
               <>

@@ -855,15 +855,36 @@ impl RunnerManager {
         let gh = crate::github::GitHubClient::new(Some(token)).ok()?;
 
         // 4. Fetch via cache
-        let raw_log = self
+        let raw_log = match self
             .step_log_cache
             .get_or_fetch(job_id, &gh, &owner, &repo)
             .await
-            .ok()?;
+        {
+            Ok(log) => log,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to fetch job logs for runner {} (job_id={}): {:#}",
+                    runner_id,
+                    job_id,
+                    e
+                );
+                return None;
+            }
+        };
         let sections = crate::github::parse_job_log_sections(&raw_log);
 
         // 5. Match by step name (not index)
-        let section = sections.iter().find(|(name, _)| name == &step_name)?;
+        let section = match sections.iter().find(|(name, _)| name == &step_name) {
+            Some(s) => s,
+            None => {
+                tracing::debug!(
+                    "Step '{}' not found in job log sections (found: {:?})",
+                    step_name,
+                    sections.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                );
+                return None;
+            }
+        };
         let lines: Vec<String> = section.1.lines().map(|l| l.to_string()).collect();
 
         Some(crate::api::steps::StepLogsResponse {

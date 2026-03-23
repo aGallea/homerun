@@ -241,7 +241,9 @@ export function JobProgress({
                     </span>
                   ) : logs.length === 0 ? (
                     <span style={{ color: "var(--text-secondary)", fontStyle: "italic" }}>
-                      No log output.
+                      {step.status === "running"
+                        ? "Logs available after step completes."
+                        : "No log output."}
                     </span>
                   ) : (
                     logs.map((line, i) => (

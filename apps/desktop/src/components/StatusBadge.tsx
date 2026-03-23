@@ -16,6 +16,7 @@ const transientStates: Set<RunnerState> = new Set([
   "registering",
   "stopping",
   "deleting",
+  "busy",
 ]);
 
 export function StatusBadge({ state, currentJob }: { state: RunnerState; currentJob?: string }) {
