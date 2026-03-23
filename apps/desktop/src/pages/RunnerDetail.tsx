@@ -8,6 +8,7 @@ import type { LogEntry } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
 import { useJobSteps } from "../hooks/useJobSteps";
+import { useJobHistory } from "../hooks/useJobHistory";
 
 function formatUptime(secs: number): string {
   if (secs < 60) return `${secs}s`;
@@ -100,6 +101,8 @@ export function RunnerDetail() {
     id,
     runner?.state === "busy",
   );
+  const { history } = useJobHistory(id);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -408,6 +411,72 @@ export function RunnerDetail() {
                     />
                   </div>
                 </div>
+              ) : runner.last_completed_job ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div className="flex items-center gap-8">
+                    <span
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 500,
+                        color: "var(--text-primary)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                      }}
+                      title={runner.last_completed_job.job_name}
+                    >
+                      {runner.last_completed_job.job_name}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        background: runner.last_completed_job.succeeded
+                          ? "rgba(63, 185, 80, 0.15)"
+                          : "rgba(218, 54, 51, 0.15)",
+                        color: runner.last_completed_job.succeeded
+                          ? "var(--accent-green)"
+                          : "var(--accent-red)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {runner.last_completed_job.succeeded ? "Succeeded" : "Failed"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                    {formatUptime(runner.last_completed_job.duration_secs)}
+                    {runner.last_completed_job.branch && (
+                      <>
+                        {" · "}
+                        <span style={{ color: "var(--text-primary)" }}>
+                          {runner.last_completed_job.branch}
+                        </span>
+                      </>
+                    )}
+                    {runner.last_completed_job.pr_number != null && (
+                      <span style={{ color: "var(--accent-blue)", marginLeft: 4 }}>
+                        PR #{runner.last_completed_job.pr_number}
+                      </span>
+                    )}
+                  </div>
+                  {runner.last_completed_job.run_url && (
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        import("@tauri-apps/plugin-shell").then(({ open }) =>
+                          open(runner.last_completed_job!.run_url!),
+                        );
+                      }}
+                      style={{ fontSize: 12, color: "var(--accent-blue)" }}
+                    >
+                      View on GitHub →
+                    </a>
+                  )}
+                </div>
               ) : (
                 <a
                   href="#"
@@ -509,6 +578,125 @@ export function RunnerDetail() {
             stepLogs={stepLogs}
             onToggleStep={toggleStep}
           />
+        )}
+
+        {/* Job History */}
+        {history.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <h3 className="runner-card-label" style={{ marginBottom: 8, fontSize: 11 }}>
+              Job History
+            </h3>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 1,
+                borderRadius: 8,
+                overflow: "hidden",
+                border: "1px solid var(--border)",
+              }}
+            >
+              {history.slice(0, showAllHistory ? history.length : 20).map((entry, i) => {
+                const duration = Math.round(
+                  (new Date(entry.completed_at).getTime() - new Date(entry.started_at).getTime()) /
+                    1000,
+                );
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "8px 12px",
+                      background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: entry.succeeded ? "var(--accent-green)" : "var(--accent-red)",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        flex: 1,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        color: "var(--text-primary)",
+                        fontWeight: 500,
+                      }}
+                      title={entry.job_name}
+                    >
+                      {entry.job_name}
+                    </span>
+                    {entry.branch && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-secondary)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {entry.branch}
+                      </span>
+                    )}
+                    <span
+                      className="font-mono"
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {formatUptime(duration)}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {new Date(entry.completed_at).toLocaleTimeString()}
+                    </span>
+                    {entry.run_url && (
+                      <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          import("@tauri-apps/plugin-shell").then(({ open }) =>
+                            open(entry.run_url!),
+                          );
+                        }}
+                        style={{
+                          fontSize: 11,
+                          color: "var(--accent-blue)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        View →
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {!showAllHistory && history.length > 20 && (
+              <button
+                className="btn"
+                style={{ marginTop: 8, fontSize: 12 }}
+                onClick={() => setShowAllHistory(true)}
+              >
+                Show all {history.length} entries
+              </button>
+            )}
+          </div>
         )}
       </div>
 
