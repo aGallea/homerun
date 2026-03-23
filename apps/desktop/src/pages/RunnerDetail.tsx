@@ -103,6 +103,7 @@ export function RunnerDetail() {
   );
   const { history } = useJobHistory(id);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -601,41 +602,80 @@ export function RunnerDetail() {
                   (new Date(entry.completed_at).getTime() - new Date(entry.started_at).getTime()) /
                     1000,
                 );
+                const isExpanded = expandedHistoryIndex === i;
+                const hasSteps = entry.steps && entry.steps.length > 0;
                 return (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "8px 12px",
-                      background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
-                      fontSize: 13,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: entry.succeeded ? "var(--accent-green)" : "var(--accent-red)",
-                        flexShrink: 0,
+                  <div key={i}>
+                    <div
+                      onClick={() => {
+                        if (hasSteps) setExpandedHistoryIndex(isExpanded ? null : i);
                       }}
-                    />
-                    <span
                       style={{
-                        flex: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        color: "var(--text-primary)",
-                        fontWeight: 500,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "8px 12px",
+                        background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
+                        fontSize: 13,
+                        cursor: hasSteps ? "pointer" : "default",
                       }}
-                      title={entry.job_name}
                     >
-                      {entry.job_name}
-                    </span>
-                    {entry.branch && (
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: entry.succeeded ? "var(--accent-green)" : "var(--accent-red)",
+                          flexShrink: 0,
+                        }}
+                      />
+                      {hasSteps && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-secondary)",
+                            width: 12,
+                            textAlign: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {isExpanded ? "\u25BE" : "\u25B8"}
+                        </span>
+                      )}
+                      <span
+                        style={{
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          color: "var(--text-primary)",
+                          fontWeight: 500,
+                        }}
+                        title={entry.job_name}
+                      >
+                        {entry.job_name}
+                      </span>
+                      {entry.branch && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-secondary)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {entry.branch}
+                        </span>
+                      )}
+                      <span
+                        className="font-mono"
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-secondary)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {formatUptime(duration)}
+                      </span>
                       <span
                         style={{
                           fontSize: 11,
@@ -643,45 +683,112 @@ export function RunnerDetail() {
                           flexShrink: 0,
                         }}
                       >
-                        {entry.branch}
+                        {new Date(entry.completed_at).toLocaleTimeString()}
                       </span>
-                    )}
-                    <span
-                      className="font-mono"
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {formatUptime(duration)}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {new Date(entry.completed_at).toLocaleTimeString()}
-                    </span>
-                    {entry.run_url && (
-                      <a
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          import("@tauri-apps/plugin-shell").then(({ open }) =>
-                            open(entry.run_url!),
-                          );
-                        }}
+                      {entry.run_url && (
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            import("@tauri-apps/plugin-shell").then(({ open }) =>
+                              open(entry.run_url!),
+                            );
+                          }}
+                          style={{
+                            fontSize: 11,
+                            color: "var(--accent-blue)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          View →
+                        </a>
+                      )}
+                    </div>
+                    {isExpanded && hasSteps && (
+                      <div
                         style={{
-                          fontSize: 11,
-                          color: "var(--accent-blue)",
-                          flexShrink: 0,
+                          background: "var(--bg-primary)",
+                          borderTop: "1px solid var(--border)",
+                          borderBottom: "1px solid var(--border)",
+                          padding: "4px 0",
                         }}
                       >
-                        View →
-                      </a>
+                        {entry.steps.map((step) => {
+                          const stepDuration =
+                            step.started_at && step.completed_at
+                              ? Math.max(
+                                  0,
+                                  Math.round(
+                                    (new Date(step.completed_at).getTime() -
+                                      new Date(step.started_at).getTime()) /
+                                      1000,
+                                  ),
+                                )
+                              : null;
+                          return (
+                            <div
+                              key={step.number}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: "4px 16px 4px 48px",
+                                fontSize: 12,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: 16,
+                                  textAlign: "center",
+                                  flexShrink: 0,
+                                  fontSize: 13,
+                                  fontWeight: 700,
+                                  color:
+                                    step.status === "succeeded"
+                                      ? "var(--accent-green)"
+                                      : step.status === "failed"
+                                        ? "var(--accent-red)"
+                                        : "var(--text-secondary)",
+                                }}
+                              >
+                                {step.status === "succeeded"
+                                  ? "\u2713"
+                                  : step.status === "failed"
+                                    ? "\u2715"
+                                    : step.status === "skipped"
+                                      ? "\u2298"
+                                      : "\u25CB"}
+                              </span>
+                              <span
+                                style={{
+                                  flex: 1,
+                                  color: "var(--text-primary)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {step.name}
+                              </span>
+                              {stepDuration !== null && (
+                                <span
+                                  className="font-mono"
+                                  style={{
+                                    fontSize: 11,
+                                    color: "var(--text-secondary)",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {stepDuration < 60
+                                    ? `${stepDuration}s`
+                                    : `${Math.floor(stepDuration / 60)}m ${stepDuration % 60}s`}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 );
