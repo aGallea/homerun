@@ -72,6 +72,7 @@ pub struct RunnerManager {
     auth_token: Arc<RwLock<Option<String>>>,
     step_watcher: WorkerLogWatcher,
     pub step_log_cache: step_log_cache::StepLogCache,
+    job_history: Arc<RwLock<HashMap<String, Vec<types::JobHistoryEntry>>>>,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -120,6 +121,7 @@ impl RunnerManager {
             auth_token: Arc::new(RwLock::new(None)),
             step_watcher: WorkerLogWatcher::new(),
             step_log_cache: step_log_cache::StepLogCache::new(),
+            job_history: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -352,6 +354,39 @@ impl RunnerManager {
                 },
             );
         }
+        drop(runners);
+
+        // Load job history from disk
+        match history::load_all(&self.config.history_dir()) {
+            Ok(hist) => {
+                // Populate last_completed_job for each runner from most recent history entry
+                let mut runners = self.runners.write().await;
+                for (runner_id, entries) in &hist {
+                    if let Some(last) = entries.last() {
+                        if let Some(r) = runners.get_mut(runner_id) {
+                            let duration_secs =
+                                (last.completed_at - last.started_at).num_seconds().max(0) as u64;
+                            r.last_completed_job = Some(types::CompletedJob {
+                                job_name: last.job_name.clone(),
+                                succeeded: last.succeeded,
+                                completed_at: last.completed_at,
+                                duration_secs,
+                                branch: last.branch.clone(),
+                                pr_number: last.pr_number,
+                                run_url: last.run_url.clone(),
+                            });
+                        }
+                    }
+                }
+                drop(runners);
+                let mut job_history = self.job_history.write().await;
+                *job_history = hist;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load job history: {}", e);
+            }
+        }
+
         Ok(need_restart)
     }
 
@@ -1345,6 +1380,32 @@ impl RunnerManager {
             data: serde_json::json!({"state": state}),
             timestamp: chrono::Utc::now(),
         });
+    }
+
+    /// Record a completed job in history.
+    pub async fn record_job_history(&self, runner_id: &str, entry: types::JobHistoryEntry) {
+        let mut hist = self.job_history.write().await;
+        let entries = hist.entry(runner_id.to_string()).or_default();
+        history::append(entries, entry);
+        if let Err(e) = history::save(&self.config.history_dir(), runner_id, entries) {
+            tracing::warn!("Failed to save job history for {}: {}", runner_id, e);
+        }
+    }
+
+    /// Get job history for a runner (newest first).
+    pub async fn get_job_history(&self, runner_id: &str) -> Vec<types::JobHistoryEntry> {
+        let hist = self.job_history.read().await;
+        let mut entries = hist.get(runner_id).cloned().unwrap_or_default();
+        entries.reverse();
+        entries
+    }
+
+    /// Delete job history for a runner.
+    pub async fn delete_job_history(&self, runner_id: &str) {
+        self.job_history.write().await.remove(runner_id);
+        if let Err(e) = history::delete(&self.config.history_dir(), runner_id) {
+            tracing::warn!("Failed to delete job history for {}: {}", runner_id, e);
+        }
     }
 }
 
