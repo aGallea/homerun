@@ -996,6 +996,7 @@ impl RunnerManager {
         drop(runners);
         // Also remove any tracked process handle
         self.processes.write().await.remove(id);
+        self.delete_job_history(id).await;
         self.save_to_disk().await?;
         Ok(())
     }
