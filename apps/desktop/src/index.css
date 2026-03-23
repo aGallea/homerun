@@ -1259,7 +1259,7 @@ p {
 /* Logs panel */
 .logs-panel {
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
   background: var(--bg-secondary);
   border: 1px solid rgba(88, 166, 255, 0.25);
   border-radius: 12px;
@@ -1275,9 +1275,10 @@ p {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+  flex-shrink: 0;
 }
 
 .logs-search-wrapper {
@@ -1286,22 +1287,22 @@ p {
 
 .logs-search-icon {
   position: absolute;
-  left: 10px;
+  left: 8px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 12px;
   pointer-events: none;
 }
 
 .logs-search-input {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 12px 4px 30px;
-  font-size: 13px;
+  border-radius: 4px;
+  padding: 3px 8px 3px 26px;
+  font-size: 12px;
   color: var(--text-primary);
-  width: 180px;
+  width: 140px;
   transition:
     border-color 0.15s,
     box-shadow 0.15s;

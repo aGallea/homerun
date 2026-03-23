@@ -354,6 +354,7 @@ impl RunnerManager {
 
     /// Spawn a background task that monitors an orphaned runner process by PID.
     /// When the process exits, transitions the runner to Offline.
+    /// Also tails the runner's _diag/Runner_*.log to detect job start/complete events.
     pub fn monitor_orphaned_process(&self, runner_id: &str, pid: u32) {
         let manager = self.clone();
         let rid = runner_id.to_string();
@@ -364,10 +365,34 @@ impl RunnerManager {
             kill_signal: kill_signal.clone(),
             exited: exit_rx,
         };
+
+        // Get the work_dir for diag log tailing
+        let work_dir = {
+            let runners = self.runners.clone();
+            let rid = rid.clone();
+            tokio::spawn(async move {
+                let map = runners.read().await;
+                map.get(&rid).map(|r| r.config.work_dir.clone())
+            })
+        };
+
         // Store handle so stop_process works on reattached runners
         let processes = self.processes.clone();
         tokio::spawn(async move {
             processes.write().await.insert(rid.clone(), handle);
+
+            // Spawn diag log watcher for job events
+            let work_dir = work_dir.await.ok().flatten();
+            if let Some(ref wd) = work_dir {
+                let diag_dir = wd.join("_diag");
+                let mgr = manager.clone();
+                let rid2 = rid.clone();
+                let sw = mgr.step_watcher.clone();
+                let wd2 = wd.clone();
+                tokio::spawn(async move {
+                    Self::tail_diag_logs(mgr, &rid2, &diag_dir, &wd2, sw).await;
+                });
+            }
 
             // Poll until the process dies or we get a kill signal
             loop {
@@ -404,6 +429,153 @@ impl RunnerManager {
             let _ = exit_tx.send(true);
             processes.write().await.remove(&rid);
         });
+    }
+
+    /// Tail the latest Runner_*.log in the _diag directory to detect job events
+    /// for reattached (orphaned) runners whose stdout we can't read.
+    async fn tail_diag_logs(
+        manager: Self,
+        runner_id: &str,
+        diag_dir: &std::path::Path,
+        work_dir: &std::path::Path,
+        step_watcher: WorkerLogWatcher,
+    ) {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        loop {
+            // Find the latest Runner_*.log
+            let latest = match std::fs::read_dir(diag_dir) {
+                Ok(entries) => entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("Runner_"))
+                    .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok())),
+                Err(_) => break,
+            };
+
+            let log_path = match latest {
+                Some(entry) => entry.path(),
+                None => {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+
+            // Seek to end and tail new lines
+            let file = match tokio::fs::File::open(&log_path).await {
+                Ok(f) => f,
+                Err(_) => break,
+            };
+            // Seek to end
+            let metadata = match file.metadata().await {
+                Ok(m) => m,
+                Err(_) => break,
+            };
+            let file_len = metadata.len();
+            let file = match tokio::fs::File::open(&log_path).await {
+                Ok(f) => f,
+                Err(_) => break,
+            };
+            let reader = BufReader::new(file);
+            let mut lines = reader.lines();
+            // Skip to end
+            let mut skipped = 0u64;
+            while skipped < file_len {
+                match lines.next_line().await {
+                    Ok(Some(line)) => skipped += line.len() as u64 + 1,
+                    _ => break,
+                }
+            }
+
+            // Now tail new lines
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        // Broadcast as a log entry for the runner process logs
+                        if let Some(idx) = line.find("WRITE LINE: ") {
+                            let stdout_line = &line[idx + "WRITE LINE: ".len()..];
+                            let entry = LogEntry {
+                                runner_id: runner_id.to_string(),
+                                timestamp: chrono::Utc::now(),
+                                line: stdout_line.to_string(),
+                                stream: "stdout".to_string(),
+                            };
+                            let _ = manager.log_tx.send(entry.clone());
+                            {
+                                let mut map = manager.recent_logs.write().await;
+                                let dq = map
+                                    .entry(runner_id.to_string())
+                                    .or_insert_with(VecDeque::new);
+                                dq.push_back(entry);
+                                if dq.len() > RECENT_LOGS_MAX {
+                                    dq.pop_front();
+                                }
+                            }
+                        }
+
+                        // Runner_*.log lines contain "WRITE LINE: <timestamp>: Running job: ..."
+                        // Extract the part after "WRITE LINE: "
+                        let payload = if let Some(idx) = line.find("WRITE LINE: ") {
+                            &line[idx + "WRITE LINE: ".len()..]
+                        } else {
+                            &line
+                        };
+
+                        match parse_job_event(payload) {
+                            Some(JobEvent::Started(job_name)) => {
+                                {
+                                    let mut map = manager.runners.write().await;
+                                    if let Some(r) = map.get_mut(runner_id) {
+                                        r.state = RunnerState::Busy;
+                                        r.current_job = Some(job_name.clone());
+                                    }
+                                }
+                                manager.emit_state_event(runner_id, "busy");
+                                let _ = manager.save_to_disk().await;
+                                step_watcher
+                                    .start_watching(runner_id, &job_name, work_dir)
+                                    .await;
+                                // Spawn step-watcher polling task
+                                let sw = step_watcher.clone();
+                                let rid_poll = runner_id.to_string();
+                                tokio::spawn(async move {
+                                    loop {
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
+                                        if !sw.poll(&rid_poll).await {
+                                            break;
+                                        }
+                                    }
+                                });
+                            }
+                            Some(JobEvent::Completed { succeeded }) => {
+                                step_watcher.stop_watching(runner_id).await;
+                                {
+                                    let mut map = manager.runners.write().await;
+                                    if let Some(r) = map.get_mut(runner_id) {
+                                        if succeeded {
+                                            r.jobs_completed += 1;
+                                        } else {
+                                            r.jobs_failed += 1;
+                                        }
+                                        r.state = RunnerState::Online;
+                                        r.current_job = None;
+                                        r.job_context = None;
+                                    }
+                                }
+                                manager.emit_state_event(runner_id, "online");
+                                let _ = manager.save_to_disk().await;
+                            }
+                            None => {}
+                        }
+                    }
+                    Ok(None) => {
+                        // EOF — wait and retry
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
     }
 
     // ── CRUD ───────────────────────────────────────────────────────

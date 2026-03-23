@@ -88,44 +88,6 @@ function StatusPill({ state, currentJob }: { state: string; currentJob?: string 
   );
 }
 
-function GlowBar({
-  label,
-  percent,
-  value,
-  color,
-  glowColor,
-}: {
-  label: string;
-  percent: number;
-  value: string;
-  color: string;
-  glowColor: string;
-}) {
-  const clamped = Math.max(0, Math.min(100, percent));
-  return (
-    <div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}
-      >
-        <span style={{ color: "var(--text-secondary)" }}>{label}</span>
-        <span className="font-mono" style={{ color }}>
-          {value}
-        </span>
-      </div>
-      <div className="glow-bar-track">
-        <div
-          className="glow-bar-fill"
-          style={{
-            width: `${clamped}%`,
-            background: color,
-            boxShadow: `0 0 8px ${glowColor}`,
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -167,7 +129,6 @@ export function RunnerDetail() {
   }, [logs, followLogs]);
 
   const runnerMetrics = metrics?.runners.find((m) => m.runner_id === id);
-  const osTotalMemory = metrics?.system.memory_total_bytes ?? 0;
 
   if (loading) {
     return (
@@ -225,9 +186,6 @@ export function RunnerDetail() {
     : logs;
 
   const cpuPercent = runnerMetrics?.cpu_percent ?? 0;
-  const memPercent = osTotalMemory
-    ? Math.min(((runnerMetrics?.memory_bytes ?? 0) / osTotalMemory) * 100, 100)
-    : 0;
 
   return (
     <div className="runner-detail-page">
@@ -308,71 +266,138 @@ export function RunnerDetail() {
           </div>
         )}
 
-        {/* Cards row */}
-        <div className="runner-cards-row">
-          {/* Current Job */}
-          <div className="runner-card runner-card-job">
-            <div className="runner-card-glow runner-card-glow-blue" />
-            <div className="flex items-center justify-between">
-              <h3 className="runner-card-label">Current Job</h3>
-              {current_job && (
-                <a
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    const url =
-                      job_context?.run_url ??
-                      `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
-                    import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
-                  }}
-                  style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
-                >
-                  View →
-                </a>
-              )}
-            </div>
-            {current_job ? (
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: 8, position: "relative" }}
-              >
+        {/* Compact stats row */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          <div className="flex items-center gap-8" style={{ fontSize: 13 }}>
+            <span
+              className="job-stat-icon job-stat-icon-green"
+              style={{ width: 20, height: 20, fontSize: 11 }}
+            >
+              ✓
+            </span>
+            <span style={{ fontWeight: 600, color: "var(--accent-green)" }}>{jobs_completed}</span>
+            <span style={{ color: "var(--text-secondary)" }}>passed</span>
+          </div>
+          <div className="flex items-center gap-8" style={{ fontSize: 13 }}>
+            <span
+              className="job-stat-icon job-stat-icon-red"
+              style={{ width: 20, height: 20, fontSize: 11 }}
+            >
+              ✕
+            </span>
+            <span
+              style={{
+                fontWeight: 600,
+                color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
+              }}
+            >
+              {jobs_failed}
+            </span>
+            <span style={{ color: "var(--text-secondary)" }}>failed</span>
+          </div>
+          {runnerMetrics && (
+            <>
+              <span style={{ color: "var(--border)" }}>|</span>
+              <div className="flex items-center gap-4" style={{ fontSize: 13 }}>
+                <span style={{ color: "var(--text-secondary)" }}>CPU</span>
                 <span
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 500,
-                    color: "var(--text-primary)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={current_job}
+                  className="font-mono"
+                  style={{ fontWeight: 600, color: cpuColor(cpuPercent) }}
                 >
-                  {current_job}
+                  {cpuPercent.toFixed(1)}%
                 </span>
-                {job_context && (
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                    Branch:{" "}
-                    <span style={{ color: "var(--text-primary)" }}>{job_context.branch}</span>
-                    {job_context.pr_number != null && (
-                      <a
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (job_context.pr_url) {
-                            import("@tauri-apps/plugin-shell").then(({ open }) =>
-                              open(job_context.pr_url!),
-                            );
-                          }
-                        }}
-                        style={{ color: "var(--accent-blue)", marginLeft: 8 }}
-                      >
-                        PR #{job_context.pr_number}
-                      </a>
-                    )}
-                  </div>
+              </div>
+              <div className="flex items-center gap-4" style={{ fontSize: 13 }}>
+                <span style={{ color: "var(--text-secondary)" }}>MEM</span>
+                <span
+                  className="font-mono"
+                  style={{ fontWeight: 600, color: "var(--accent-blue)" }}
+                >
+                  {formatBytes(runnerMetrics.memory_bytes)}
+                </span>
+              </div>
+            </>
+          )}
+          {config.labels.length > 0 && (
+            <>
+              <span style={{ color: "var(--border)" }}>|</span>
+              <div className="flex items-center" style={{ gap: 4 }}>
+                {config.labels.map((lbl) => (
+                  <span
+                    key={lbl}
+                    className="label-tag"
+                    style={{ fontSize: 11, padding: "1px 6px" }}
+                  >
+                    {lbl}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Main content: Current Job (30%) + Logs (70%) */}
+        <div style={{ display: "flex", gap: 12, height: 160 }}>
+          {/* Left: Current Job */}
+          <div style={{ flex: "0 0 30%", minWidth: 0, display: "flex" }}>
+            <div className="runner-card runner-card-job" style={{ flex: 1 }}>
+              <div className="runner-card-glow runner-card-glow-blue" />
+              <div className="flex items-center justify-between">
+                <h3 className="runner-card-label">Current Job</h3>
+                {current_job && (
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const url =
+                        job_context?.run_url ??
+                        `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
+                      import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
+                    }}
+                    style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
+                  >
+                    View →
+                  </a>
                 )}
-                {/* Progress bar placeholder — shown when busy */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
-                  <div className="glow-bar-track" style={{ flex: 1 }}>
+              </div>
+              {current_job ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <span
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 500,
+                      color: "var(--text-primary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={current_job}
+                  >
+                    {current_job}
+                  </span>
+                  {job_context && (
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                      Branch:{" "}
+                      <span style={{ color: "var(--text-primary)" }}>{job_context.branch}</span>
+                      {job_context.pr_number != null && (
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (job_context.pr_url) {
+                              import("@tauri-apps/plugin-shell").then(({ open }) =>
+                                open(job_context.pr_url!),
+                              );
+                            }
+                          }}
+                          style={{ color: "var(--accent-blue)", marginLeft: 8 }}
+                        >
+                          PR #{job_context.pr_number}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  <div className="glow-bar-track">
                     <div
                       className="glow-bar-fill"
                       style={{
@@ -383,103 +408,101 @@ export function RunnerDetail() {
                     />
                   </div>
                 </div>
-              </div>
-            ) : (
-              <a
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  import("@tauri-apps/plugin-shell").then(({ open }) => {
-                    open(`https://github.com/${config.repo_owner}/${config.repo_name}/actions`);
-                  });
-                }}
-                style={{ color: "var(--accent-blue)", fontSize: 13 }}
-              >
-                View Actions on GitHub →
-              </a>
-            )}
-          </div>
-
-          {/* Jobs Summary */}
-          <div className="runner-card runner-card-jobs">
-            <h3 className="runner-card-label">Jobs Summary</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div className="flex items-center gap-12">
-                <span className="job-stat-icon job-stat-icon-green">✓</span>
-                <span style={{ fontSize: 14 }}>
-                  <span style={{ fontWeight: 600, color: "var(--accent-green)" }}>
-                    {jobs_completed}
-                  </span>{" "}
-                  <span style={{ color: "var(--text-secondary)" }}>passed</span>
-                </span>
-              </div>
-              <div style={{ height: 1, background: "var(--border)" }} />
-              <div className="flex items-center gap-12">
-                <span className="job-stat-icon job-stat-icon-red">✕</span>
-                <span style={{ fontSize: 14 }}>
-                  <span
-                    style={{
-                      fontWeight: 600,
-                      color: jobs_failed > 0 ? "var(--accent-red)" : "var(--text-secondary)",
-                    }}
-                  >
-                    {jobs_failed}
-                  </span>{" "}
-                  <span style={{ color: "var(--text-secondary)" }}>failed</span>
-                </span>
-              </div>
+              ) : (
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    import("@tauri-apps/plugin-shell").then(({ open }) => {
+                      open(`https://github.com/${config.repo_owner}/${config.repo_name}/actions`);
+                    });
+                  }}
+                  style={{ color: "var(--accent-blue)", fontSize: 13 }}
+                >
+                  View Actions on GitHub →
+                </a>
+              )}
             </div>
           </div>
 
-          {/* Resources */}
-          <div className="runner-card runner-card-resources">
-            <h3 className="runner-card-label">Resources</h3>
-            {runnerMetrics ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <GlowBar
-                  label="CPU"
-                  percent={cpuPercent}
-                  value={`${cpuPercent.toFixed(1)}%`}
-                  color={cpuColor(cpuPercent)}
-                  glowColor={
-                    cpuPercent > 80
-                      ? "rgba(249, 115, 22, 0.8)"
-                      : cpuPercent > 60
-                        ? "rgba(210, 153, 34, 0.8)"
-                        : "rgba(34, 197, 94, 0.8)"
-                  }
-                />
-                <GlowBar
-                  label="MEM"
-                  percent={memPercent}
-                  value={formatBytes(runnerMetrics.memory_bytes)}
-                  color="var(--accent-blue)"
-                  glowColor="rgba(59, 130, 246, 0.8)"
-                />
+          {/* Right: Logs panel */}
+          <div
+            className="logs-panel"
+            style={{
+              flex: "1 1 70%",
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              height: "100%",
+            }}
+          >
+            <div className="logs-header">
+              <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
+                Runner Process Logs
+              </span>
+              <div className="flex items-center gap-16">
+                <div className="logs-search-wrapper">
+                  <span className="logs-search-icon">⌕</span>
+                  <input
+                    className="logs-search-input"
+                    placeholder="Search"
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                  />
+                </div>
+                <label className="follow-toggle">
+                  <input
+                    type="checkbox"
+                    checked={followLogs}
+                    onChange={(e) => setFollowLogs(e.target.checked)}
+                  />
+                  <span className="follow-toggle-track">
+                    <span className="follow-toggle-thumb" />
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Follow</span>
+                </label>
               </div>
-            ) : (
-              <span className="text-muted">No metrics available</span>
-            )}
+            </div>
+            <div
+              ref={logContainerRef}
+              className="logs-content font-mono"
+              style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+            >
+              {filteredLogs.length === 0 ? (
+                <div className="logs-empty">
+                  {runner.state === "online" || runner.state === "busy"
+                    ? "Waiting for log output..."
+                    : "Runner is not active."}
+                </div>
+              ) : (
+                <table className="logs-table">
+                  <tbody>
+                    {filteredLogs.map((entry, i) => (
+                      <tr key={i}>
+                        <td className="logs-timestamp">
+                          {new Date(entry.timestamp).toLocaleTimeString()}
+                        </td>
+                        <td
+                          style={{
+                            color:
+                              entry.stream === "stderr"
+                                ? "var(--accent-red)"
+                                : "var(--text-primary)",
+                          }}
+                        >
+                          {entry.line}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
+        {/* end side-by-side */}
 
-        {/* Labels */}
-        {config.labels.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <h3 className="runner-card-label" style={{ marginBottom: 8 }}>
-              Labels
-            </h3>
-            <div className="flex" style={{ flexWrap: "wrap", gap: 6 }}>
-              {config.labels.map((lbl) => (
-                <span key={lbl} className="label-tag">
-                  {lbl}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Job Progress */}
+        {/* Job Progress — full width, only when busy */}
         {state === "busy" && steps.length > 0 && (
           <JobProgress
             steps={steps}
@@ -490,66 +513,6 @@ export function RunnerDetail() {
             onToggleStep={toggleStep}
           />
         )}
-
-        {/* Logs panel */}
-        <div className="logs-panel">
-          <div className="logs-header">
-            <h3 className="runner-card-label" style={{ margin: 0 }}>
-              Runner Process Logs
-            </h3>
-            <div className="flex items-center gap-16">
-              <div className="logs-search-wrapper">
-                <span className="logs-search-icon">⌕</span>
-                <input
-                  className="logs-search-input"
-                  placeholder="Search"
-                  value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
-                />
-              </div>
-              <label className="follow-toggle">
-                <input
-                  type="checkbox"
-                  checked={followLogs}
-                  onChange={(e) => setFollowLogs(e.target.checked)}
-                />
-                <span className="follow-toggle-track">
-                  <span className="follow-toggle-thumb" />
-                </span>
-                <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>Follow</span>
-              </label>
-            </div>
-          </div>
-          <div ref={logContainerRef} className="logs-content font-mono">
-            {filteredLogs.length === 0 ? (
-              <div className="logs-empty">
-                {runner.state === "online" || runner.state === "busy"
-                  ? "Waiting for log output..."
-                  : "Runner is not active."}
-              </div>
-            ) : (
-              <table className="logs-table">
-                <tbody>
-                  {filteredLogs.map((entry, i) => (
-                    <tr key={i}>
-                      <td className="logs-timestamp">
-                        {new Date(entry.timestamp).toLocaleTimeString()}
-                      </td>
-                      <td
-                        style={{
-                          color:
-                            entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)",
-                        }}
-                      >
-                        {entry.line}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
       </div>
 
       {confirmDelete && (
