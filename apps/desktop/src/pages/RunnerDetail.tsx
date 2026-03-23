@@ -710,6 +710,23 @@ export function RunnerDetail() {
                           View →
                         </a>
                       )}
+                      {entry.run_url && id && (
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            api.rerunWorkflow(id!, entry.run_url!).catch(() => {});
+                          }}
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-secondary)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          Re-run
+                        </a>
+                      )}
                     </div>
                     {isExpanded && hasSteps && (
                       <div

@@ -483,6 +483,12 @@ impl DaemonClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
+    pub async fn rerun_workflow(&self, runner_id: &str, run_url: &str) -> Result<(), String> {
+        let payload = serde_json::json!({ "run_url": run_url }).to_string();
+        self.request("POST", &format!("/runners/{runner_id}/rerun"), Some(payload)).await?;
+        Ok(())
+    }
+
     pub async fn get_runner_logs(&self, runner_id: &str) -> Result<Vec<LogEntry>, String> {
         let body = self
             .request("GET", &format!("/runners/{runner_id}/logs/recent"), None)

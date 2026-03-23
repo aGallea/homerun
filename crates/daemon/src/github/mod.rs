@@ -222,6 +222,115 @@ impl GitHubClient {
         Ok(None)
     }
 
+    /// Find a recent workflow run matching a job name (any status).
+    /// Used at job completion to fill in missing context for fast jobs
+    /// that complete before the periodic poller can fetch their context.
+    pub async fn get_recent_run_for_job(
+        &self,
+        owner: &str,
+        repo: &str,
+        runner_name: &str,
+        job_name: &str,
+    ) -> Result<Option<crate::runner::types::JobContext>> {
+        #[derive(Deserialize)]
+        struct WorkflowRun {
+            id: u64,
+            head_branch: String,
+            html_url: String,
+            pull_requests: Vec<PullRequestRef>,
+        }
+
+        #[derive(Deserialize)]
+        struct PullRequestRef {
+            number: u64,
+            url: String,
+        }
+
+        #[derive(Deserialize)]
+        struct RunsResponse {
+            workflow_runs: Vec<WorkflowRun>,
+        }
+
+        #[derive(Deserialize)]
+        struct RunJob {
+            id: u64,
+            name: String,
+            runner_name: Option<String>,
+        }
+
+        #[derive(Deserialize)]
+        struct JobsResponse {
+            jobs: Vec<RunJob>,
+        }
+
+        // Query recent runs (no status filter) to catch just-completed runs
+        let route = format!("/repos/{owner}/{repo}/actions/runs?per_page=5");
+        let runs: RunsResponse = match self.octocrab.get(&route, None::<&()>).await {
+            Ok(r) => r,
+            Err(_) => return Ok(None),
+        };
+
+        for run in runs.workflow_runs {
+            let jobs_route = format!("/repos/{owner}/{repo}/actions/runs/{}/jobs", run.id);
+            let jobs: JobsResponse = match self.octocrab.get(&jobs_route, None::<&()>).await {
+                Ok(j) => j,
+                Err(_) => continue,
+            };
+
+            let matched_job = jobs.jobs.iter().find(|j| {
+                if let Some(rn) = j.runner_name.as_deref() {
+                    rn == runner_name
+                } else {
+                    j.name == job_name
+                }
+            });
+
+            if let Some(job) = matched_job {
+                let (pr_number, pr_url) = if let Some(pr) = run.pull_requests.first() {
+                    let html_url = pr
+                        .url
+                        .replace("api.github.com/repos", "github.com")
+                        .replace("/pulls/", "/pull/");
+                    (Some(pr.number), Some(html_url))
+                } else {
+                    (None, None)
+                };
+
+                return Ok(Some(crate::runner::types::JobContext {
+                    branch: run.head_branch,
+                    pr_number,
+                    pr_url,
+                    run_url: run.html_url,
+                    job_id: Some(job.id),
+                }));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Re-run a workflow run by its run ID.
+    pub async fn rerun_workflow(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/rerun");
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "homerun")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            bail!(
+                "Failed to re-run workflow: HTTP {}",
+                response.status().as_u16()
+            );
+        }
+        Ok(())
+    }
+
     /// Fetch the raw log content for a specific job from GitHub Actions.
     ///
     /// The GitHub API endpoint returns a 302 redirect to blob storage serving

@@ -242,6 +242,16 @@ pub async fn get_runner_history(
     client.get_runner_history(&runner_id).await
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn rerun_workflow(
+    state: State<'_, AppState>,
+    runner_id: String,
+    run_url: String,
+) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.rerun_workflow(&runner_id, &run_url).await
+}
+
 #[tauri::command]
 pub async fn get_daemon_logs_recent(
     state: State<'_, AppState>,

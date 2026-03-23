@@ -49,6 +49,7 @@ pub fn run() {
             commands::get_runner_steps,
             commands::get_step_logs,
             commands::get_runner_history,
+            commands::rerun_workflow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

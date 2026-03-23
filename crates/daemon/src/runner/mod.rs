@@ -596,6 +596,27 @@ impl RunnerManager {
                                     .unwrap_or_default();
                                 step_watcher.stop_watching(runner_id).await;
 
+                                // Fetch job context if the poller didn't get it in time
+                                let fetched_ctx = {
+                                    let has_ctx = manager
+                                        .runners
+                                        .read()
+                                        .await
+                                        .get(runner_id)
+                                        .is_some_and(|r| r.job_context.is_some());
+                                    if has_ctx {
+                                        None
+                                    } else {
+                                        manager.fetch_missing_job_context(runner_id).await
+                                    }
+                                };
+                                if let Some(ctx) = &fetched_ctx {
+                                    let mut map = manager.runners.write().await;
+                                    if let Some(r) = map.get_mut(runner_id) {
+                                        r.job_context = Some(ctx.clone());
+                                    }
+                                }
+
                                 // Build history entry and update runner state
                                 let history_entry = {
                                     let mut map = manager.runners.write().await;
@@ -1170,6 +1191,7 @@ impl RunnerManager {
             let job_history_arc = self.job_history.clone();
             let history_dir = self.config.history_dir();
             let event_tx_stdout = self.event_tx.clone();
+            let auth_token_clone = self.auth_token.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -1221,6 +1243,46 @@ impl RunnerManager {
                                 .map(|s| s.steps)
                                 .unwrap_or_default();
                             step_watcher.stop_watching(&rid).await;
+
+                            // Fetch job context if the poller didn't get it in time
+                            {
+                                let has_ctx = runners
+                                    .read()
+                                    .await
+                                    .get(&rid)
+                                    .is_some_and(|r| r.job_context.is_some());
+                                if !has_ctx {
+                                    let info = {
+                                        let map = runners.read().await;
+                                        map.get(&rid).map(|r| {
+                                            (
+                                                r.config.name.clone(),
+                                                r.config.repo_owner.clone(),
+                                                r.config.repo_name.clone(),
+                                                r.current_job.clone(),
+                                            )
+                                        })
+                                    };
+                                    if let Some((name, owner, repo, Some(job_name))) = info {
+                                        let token = auth_token_clone.read().await.clone();
+                                        if let Some(token) = token {
+                                            if let Ok(gh) = GitHubClient::new(Some(token)) {
+                                                if let Ok(Some(ctx)) = gh
+                                                    .get_recent_run_for_job(
+                                                        &owner, &repo, &name, &job_name,
+                                                    )
+                                                    .await
+                                                {
+                                                    let mut map = runners.write().await;
+                                                    if let Some(r) = map.get_mut(&rid) {
+                                                        r.job_context = Some(ctx);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             let history_entry = {
                                 let mut map = runners.write().await;
@@ -1522,6 +1584,39 @@ impl RunnerManager {
         self.job_history.write().await.remove(runner_id);
         if let Err(e) = history::delete(&self.config.history_dir(), runner_id) {
             tracing::warn!("Failed to delete job history for {}: {}", runner_id, e);
+        }
+    }
+
+    /// Try to fetch job context from GitHub for a runner that's missing it.
+    /// Called at job completion for fast jobs that finish before the poller runs.
+    pub async fn fetch_missing_job_context(&self, runner_id: &str) -> Option<types::JobContext> {
+        let (runner_name, owner, repo, job_name) = {
+            let map = self.runners.read().await;
+            let r = map.get(runner_id)?;
+            (
+                r.config.name.clone(),
+                r.config.repo_owner.clone(),
+                r.config.repo_name.clone(),
+                r.current_job.clone()?,
+            )
+        };
+
+        let token = self.auth_token.read().await.clone()?;
+        let gh = GitHubClient::new(Some(token)).ok()?;
+
+        match gh
+            .get_recent_run_for_job(&owner, &repo, &runner_name, &job_name)
+            .await
+        {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                tracing::debug!(
+                    runner = %runner_id,
+                    error = %e,
+                    "Failed to fetch missing job context at completion"
+                );
+                None
+            }
         }
     }
 }

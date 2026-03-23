@@ -3,7 +3,9 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 
+use crate::github::GitHubClient;
 use crate::runner::types::JobHistoryEntry;
 use crate::server::AppState;
 
@@ -20,6 +22,57 @@ pub async fn get_runner_history(
 
     let history = state.runner_manager.get_job_history(&id).await;
     Ok(Json(history))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RerunRequest {
+    pub run_url: String,
+}
+
+/// Extract the numeric run ID from a GitHub Actions run URL.
+/// e.g. "https://github.com/owner/repo/actions/runs/12345" -> 12345
+fn parse_run_id(run_url: &str) -> Option<u64> {
+    run_url.rsplit('/').next()?.parse().ok()
+}
+
+pub async fn rerun_workflow(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RerunRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let runner = state
+        .runner_manager
+        .get(&id)
+        .await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Runner '{id}' not found")))?;
+
+    let run_id = parse_run_id(&req.run_url)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid run_url".to_string()))?;
+
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available".to_string(),
+        )
+    })?;
+
+    let gh = GitHubClient::new(Some(token)).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create GitHub client: {e}"),
+        )
+    })?;
+
+    gh.rerun_workflow(&runner.config.repo_owner, &runner.config.repo_name, run_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to re-run workflow: {e}"),
+            )
+        })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
