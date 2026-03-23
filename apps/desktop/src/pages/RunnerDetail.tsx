@@ -637,7 +637,6 @@ export function RunnerDetail() {
           <div
             className="logs-panel"
             style={{
-              marginTop: 12,
               display: "flex",
               flexDirection: "column",
               position: "relative",

@@ -94,7 +94,7 @@ export function JobProgress({
     <div
       className="runner-card"
       style={{
-        marginBottom: 16,
+        marginBottom: 0,
         padding: 0,
         position: "relative",
         ...(height ? { height, display: "flex", flexDirection: "column" as const } : {}),
