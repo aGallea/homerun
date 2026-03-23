@@ -44,7 +44,11 @@ pub async fn create_batch(
             if let Err(e) = manager.register_and_start(&runner_id, &token).await {
                 tracing::error!("Failed to register runner {}: {}", runner_id, e);
                 let _ = manager
-                    .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                    .update_state_with_error(
+                        &runner_id,
+                        crate::runner::state::RunnerState::Error,
+                        Some(format!("{e:#}")),
+                    )
                     .await;
             }
         });
@@ -105,7 +109,13 @@ pub async fn start_group(
                     .await
                 {
                     tracing::error!("Failed to start runner {}: {}", runner_id, e);
-                    let _ = manager.update_state(&runner_id, RunnerState::Error).await;
+                    let _ = manager
+                        .update_state_with_error(
+                            &runner_id,
+                            RunnerState::Error,
+                            Some(format!("{e:#}")),
+                        )
+                        .await;
                 }
             });
             results.push(GroupActionResult {
@@ -224,7 +234,9 @@ pub async fn restart_group(
                 }
                 if let Err(e) = mgr.register_and_start_from_registering(&rid, &tok).await {
                     tracing::error!("Failed to restart runner {}: {}", rid, e);
-                    let _ = mgr.update_state(&rid, RunnerState::Error).await;
+                    let _ = mgr
+                        .update_state_with_error(&rid, RunnerState::Error, Some(format!("{e:#}")))
+                        .await;
                 }
             });
         }
@@ -267,7 +279,11 @@ pub async fn scale_group(
             if let Err(e) = manager.register_and_start(&runner_id, &token).await {
                 tracing::error!("Failed to register runner {}: {}", runner_id, e);
                 let _ = manager
-                    .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                    .update_state_with_error(
+                        &runner_id,
+                        crate::runner::state::RunnerState::Error,
+                        Some(format!("{e:#}")),
+                    )
                     .await;
             }
         });
@@ -303,31 +319,39 @@ pub async fn delete_group(
             continue;
         }
 
-        let delete_result = if let Some(ref t) = token {
-            if runner.state == RunnerState::Online
-                || runner.state == RunnerState::Offline
-                || runner.state == RunnerState::Error
-            {
-                state.runner_manager.full_delete(&id, t).await
+        // Spawn the actual deletion work in the background so the API
+        // responds quickly and doesn't block the daemon event loop.
+        let manager = state.runner_manager.clone();
+        let runner_id = id.clone();
+        let runner_state = runner.state.clone();
+        let token_clone = token.clone();
+        tokio::spawn(async move {
+            let delete_result = if let Some(ref t) = token_clone {
+                if runner_state == RunnerState::Online
+                    || runner_state == RunnerState::Offline
+                    || runner_state == RunnerState::Error
+                {
+                    manager.full_delete(&runner_id, t).await
+                } else {
+                    manager.delete(&runner_id).await
+                }
             } else {
-                state.runner_manager.delete(&id).await
-            }
-        } else {
-            state.runner_manager.delete(&id).await
-        };
+                manager.delete(&runner_id).await
+            };
 
-        match delete_result {
-            Ok(_) => results.push(GroupActionResult {
-                runner_id: id,
-                success: true,
-                error: None,
-            }),
-            Err(e) => results.push(GroupActionResult {
-                runner_id: id,
-                success: false,
-                error: Some(format!("Failed to delete runner: {e}")),
-            }),
-        }
+            if let Err(e) = delete_result {
+                tracing::error!("Failed to delete runner {}: {}", runner_id, e);
+                let _ = manager
+                    .update_state_with_error(&runner_id, RunnerState::Error, Some(format!("{e:#}")))
+                    .await;
+            }
+        });
+
+        results.push(GroupActionResult {
+            runner_id: id,
+            success: true,
+            error: None,
+        });
     }
 
     Ok(Json(GroupActionResponse { group_id, results }))
@@ -671,6 +695,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+
+        // Wait for background deletion tasks to complete
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Verify runners are gone
         let app = create_router(state);

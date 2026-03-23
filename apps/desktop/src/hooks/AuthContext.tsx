@@ -41,6 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refresh();
+    // Poll auth status to stay in sync with daemon (e.g. after daemon restart)
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
   }, [refresh]);
 
   const loginWithToken = useCallback(async (token: string) => {

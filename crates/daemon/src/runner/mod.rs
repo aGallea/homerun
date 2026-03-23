@@ -8,15 +8,28 @@ pub mod types;
 use crate::config::Config;
 use crate::github::GitHubClient;
 use crate::runner::binary::ensure_runner_binary;
-use crate::runner::process::{configure_runner, remove_runner, start_runner};
+use crate::runner::process::{
+    configure_runner, find_runner_pid, kill_orphaned_processes, remove_runner, start_runner,
+};
 use crate::runner::state::RunnerState;
 use crate::runner::steps::{StepsResponse, WorkerLogWatcher};
 use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch, Notify, RwLock};
+
+/// Wrapper for persisting runners to disk with their last running state.
+/// Uses `#[serde(flatten)]` for backward compatibility with old runners.json
+/// that only contained RunnerConfig fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedRunner {
+    #[serde(flatten)]
+    config: RunnerConfig,
+    #[serde(default)]
+    was_running: bool,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunnerEvent {
@@ -268,8 +281,14 @@ impl RunnerManager {
     /// Save all runner configs to disk as JSON.
     pub async fn save_to_disk(&self) -> Result<()> {
         let runners = self.runners.read().await;
-        let configs: Vec<&RunnerConfig> = runners.values().map(|r| &r.config).collect();
-        let json = serde_json::to_string_pretty(&configs)?;
+        let persisted: Vec<PersistedRunner> = runners
+            .values()
+            .map(|r| PersistedRunner {
+                config: r.config.clone(),
+                was_running: r.state == RunnerState::Online || r.state == RunnerState::Busy,
+            })
+            .collect();
+        let json = serde_json::to_string_pretty(&persisted)?;
         let path = self.config.runners_json_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -278,33 +297,105 @@ impl RunnerManager {
         Ok(())
     }
 
-    /// Load runner configs from disk, creating entries in Offline state.
-    pub async fn load_from_disk(&self) -> Result<()> {
+    /// Load runner configs from disk. For runners that were previously running,
+    /// checks if their process is still alive and reattaches to it.
+    /// Returns a list of runner IDs that were running but whose process is now dead
+    /// (these need to be restarted if the restore preference is enabled).
+    pub async fn load_from_disk(&self) -> Result<Vec<String>> {
         let path = self.config.runners_json_path();
         if !path.exists() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let json = std::fs::read_to_string(&path)?;
-        let configs: Vec<RunnerConfig> = serde_json::from_str(&json)?;
+        let persisted: Vec<PersistedRunner> = serde_json::from_str(&json)?;
+        let mut need_restart = Vec::new();
         let mut runners = self.runners.write().await;
-        for config in configs {
-            let id = config.id.clone();
+        for entry in persisted {
+            let id = entry.config.id.clone();
+            let (state, pid) = if entry.was_running {
+                // Check if the process is still alive
+                match find_runner_pid(&entry.config.work_dir).await {
+                    Some(pid) => (RunnerState::Online, Some(pid as u32)),
+                    None => {
+                        // Process died — needs restart
+                        need_restart.push(id.clone());
+                        (RunnerState::Offline, None)
+                    }
+                }
+            } else {
+                (RunnerState::Offline, None)
+            };
             runners.insert(
                 id,
                 RunnerInfo {
-                    config,
-                    state: RunnerState::Offline,
-                    pid: None,
+                    config: entry.config,
+                    state,
+                    pid,
                     uptime_secs: None,
                     started_at: None,
                     jobs_completed: 0,
                     jobs_failed: 0,
                     current_job: None,
                     job_context: None,
+                    error_message: None,
                 },
             );
         }
-        Ok(())
+        Ok(need_restart)
+    }
+
+    /// Spawn a background task that monitors an orphaned runner process by PID.
+    /// When the process exits, transitions the runner to Offline.
+    pub fn monitor_orphaned_process(&self, runner_id: &str, pid: u32) {
+        let manager = self.clone();
+        let rid = runner_id.to_string();
+        let kill_signal = Arc::new(Notify::new());
+        let (exit_tx, exit_rx) = watch::channel(false);
+
+        let handle = ProcessHandle {
+            kill_signal: kill_signal.clone(),
+            exited: exit_rx,
+        };
+        // Store handle so stop_process works on reattached runners
+        let processes = self.processes.clone();
+        tokio::spawn(async move {
+            processes.write().await.insert(rid.clone(), handle);
+
+            // Poll until the process dies or we get a kill signal
+            loop {
+                tokio::select! {
+                    _ = kill_signal.notified() => {
+                        // Kill requested — signal the process group
+                        let pgid = pid as i32;
+                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                        break;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                        // Check if process is still alive
+                        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+                        if !alive {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Process exited — transition to Offline
+            {
+                let mut runners = manager.runners.write().await;
+                if let Some(r) = runners.get_mut(&rid) {
+                    r.state = RunnerState::Offline;
+                    r.pid = None;
+                    r.started_at = None;
+                }
+            }
+            manager.emit_state_event(&rid, "offline");
+            let _ = manager.save_to_disk().await;
+            let _ = exit_tx.send(true);
+            processes.write().await.remove(&rid);
+        });
     }
 
     // ── CRUD ───────────────────────────────────────────────────────
@@ -367,6 +458,7 @@ impl RunnerManager {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -628,6 +720,15 @@ impl RunnerManager {
     }
 
     pub async fn update_state(&self, id: &str, state: RunnerState) -> Result<()> {
+        self.update_state_with_error(id, state, None).await
+    }
+
+    pub async fn update_state_with_error(
+        &self,
+        id: &str,
+        state: RunnerState,
+        error_message: Option<String>,
+    ) -> Result<()> {
         let mut runners = self.runners.write().await;
         let runner = runners
             .get_mut(id)
@@ -639,7 +740,15 @@ impl RunnerManager {
                 state
             );
         }
+        let prev_running = runner.state == RunnerState::Online || runner.state == RunnerState::Busy;
+        let now_running = state == RunnerState::Online || state == RunnerState::Busy;
         runner.state = state;
+        runner.error_message = error_message;
+        // Persist when running state changes so was_running stays current
+        if prev_running != now_running {
+            drop(runners);
+            let _ = self.save_to_disk().await;
+        }
         Ok(())
     }
 
@@ -675,8 +784,8 @@ impl RunnerManager {
     }
 
     /// Common register-and-start flow (assumes already in Registering state):
-    /// If the runner is already configured (.runner file exists), skip download + config
-    /// and go straight to starting run.sh.
+    /// Downloads runner binary if needed, then always runs config.sh --replace
+    /// to clear any stale GitHub sessions before starting run.sh.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         self.set_auth_token(Some(auth_token.to_string())).await;
 
@@ -697,36 +806,43 @@ impl RunnerManager {
             // 2. Copy binary files to runner work_dir
             copy_dir_recursive(&cached_runner_dir, &config.work_dir)
                 .context("Failed to copy runner binary to work dir")?;
-
-            // 3. Get registration token
-            let gh = GitHubClient::new(Some(auth_token.to_string()))?;
-            let reg = gh
-                .get_runner_registration_token(&config.repo_owner, &config.repo_name)
-                .await
-                .context("Failed to get registration token")?;
-
-            // 4. Run config.sh
-            let repo_url = format!(
-                "https://github.com/{}/{}",
-                config.repo_owner, config.repo_name
-            );
-            configure_runner(
-                &config.work_dir,
-                &repo_url,
-                &reg.token,
-                &config.name,
-                &config.labels,
-            )
-            .await
-            .context("Failed to configure runner")?;
         } else {
-            tracing::info!(
-                "Runner {} already configured, skipping download + config",
-                id
-            );
+            tracing::info!("Runner {} already configured, skipping binary download", id);
         }
 
-        // 5. Spawn run.sh
+        // Kill any orphaned runner processes from a previous daemon session
+        // BEFORE reconfiguring, so the old process releases the GitHub session.
+        kill_orphaned_processes(&config.work_dir).await;
+
+        // Remove stale .runner file so config.sh accepts --replace
+        let runner_file = config.work_dir.join(".runner");
+        if runner_file.exists() {
+            let _ = std::fs::remove_file(&runner_file);
+        }
+
+        // Always run config.sh --replace to clear any stale GitHub sessions
+        // (e.g. after daemon restart where the old session was not deregistered)
+        let gh = GitHubClient::new(Some(auth_token.to_string()))?;
+        let reg = gh
+            .get_runner_registration_token(&config.repo_owner, &config.repo_name)
+            .await
+            .context("Failed to get registration token")?;
+
+        let repo_url = format!(
+            "https://github.com/{}/{}",
+            config.repo_owner, config.repo_name
+        );
+        configure_runner(
+            &config.work_dir,
+            &repo_url,
+            &reg.token,
+            &config.name,
+            &config.labels,
+        )
+        .await
+        .context("Failed to configure runner")?;
+
+        // Spawn run.sh
         let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
@@ -1419,6 +1535,7 @@ mod tests {
             jobs_failed: 1,
             current_job: Some("TypeScript (type check + build)".to_string()),
             job_context: None,
+            error_message: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -1691,6 +1808,7 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -1722,6 +1840,7 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
@@ -1933,6 +2052,7 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -1977,6 +2097,7 @@ mod tests {
                 jobs_failed: 0,
                 current_job: None,
                 job_context: None,
+                error_message: None,
             },
         );
         manager

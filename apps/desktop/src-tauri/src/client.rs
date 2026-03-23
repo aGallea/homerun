@@ -56,6 +56,8 @@ pub struct RunnerInfo {
     pub jobs_failed: u32,
     pub current_job: Option<String>,
     pub job_context: Option<JobContext>,
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

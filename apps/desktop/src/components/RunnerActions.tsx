@@ -28,6 +28,13 @@ export function RunnerActions({
 
   const isRunning = runner.state === "online" || runner.state === "busy";
   const isStopped = runner.state === "offline" || runner.state === "error";
+  const isTransient =
+    runner.state === "creating" ||
+    runner.state === "registering" ||
+    runner.state === "stopping" ||
+    runner.state === "deleting";
+  const canRestart = isRunning || isStopped;
+  const canDelete = !isTransient && runner.state !== "busy";
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -69,7 +76,7 @@ export function RunnerActions({
           className="icon-btn"
           onClick={() => onRestart(runner.config.id)}
           title="Restart"
-          disabled={loading}
+          disabled={loading || !canRestart}
         >
           ↻
         </button>
@@ -77,7 +84,7 @@ export function RunnerActions({
           className="icon-btn icon-btn-danger"
           onClick={() => setConfirm("delete")}
           title="Delete"
-          disabled={loading}
+          disabled={loading || !canDelete}
         >
           ✕
         </button>
@@ -114,6 +121,7 @@ export function RunnerActions({
             )}
             <button
               className="actions-dropdown-item"
+              disabled={!canRestart}
               onClick={() => {
                 onRestart(runner.config.id);
                 setMenuOpen(false);
@@ -123,6 +131,7 @@ export function RunnerActions({
             </button>
             <button
               className="actions-dropdown-item actions-dropdown-item-danger"
+              disabled={!canDelete}
               onClick={() => {
                 setConfirm("delete");
                 setMenuOpen(false);

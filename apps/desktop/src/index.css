@@ -796,7 +796,7 @@ p {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 24px;
-  width: 560px;
+  width: 420px;
   max-width: 95vw;
   max-height: 80vh;
   display: flex;
@@ -857,6 +857,8 @@ p {
 .wizard-body {
   flex: 1;
   overflow-y: auto;
+  margin: 0 -2px;
+  padding: 0 2px;
 }
 
 .wizard-footer {
@@ -1129,8 +1131,14 @@ p {
   background: rgba(45, 27, 34, 1);
 }
 
-.runner-action-btn-danger:hover {
+.runner-action-btn-danger:hover:not(:disabled) {
   background: rgba(61, 34, 40, 1);
+}
+
+.runner-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Cards row */
@@ -1489,7 +1497,7 @@ p {
   }
 
   .wizard {
-    width: 90vw;
+    width: 420px;
   }
 }
 

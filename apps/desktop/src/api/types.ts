@@ -28,6 +28,7 @@ export interface RunnerInfo {
   jobs_failed: number;
   current_job?: string | null;
   job_context?: JobContext | null;
+  error_message?: string | null;
 }
 
 export interface JobContext {

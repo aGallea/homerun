@@ -22,7 +22,6 @@ tower = "0.5"
 toml = "0.8"
 octocrab = "0.44"
 sysinfo = "0.33"
-security-framework = "3"
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }

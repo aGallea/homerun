@@ -1044,7 +1044,6 @@ dependencies = [
  "notify-rust",
  "octocrab",
  "reqwest",
- "security-framework",
  "serde",
  "serde_json",
  "sysinfo",

@@ -129,7 +129,7 @@ function GlowBar({
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { auth } = useAuth();
+  const { auth, handleUnauthorized } = useAuth();
   const isAuthenticated = auth.authenticated;
   const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } = useRunners();
   const { metrics } = useMetrics();
@@ -194,13 +194,19 @@ export function RunnerDetail() {
     runner;
   const isRunning = state === "online" || state === "busy";
   const isStopped = state === "offline" || state === "error";
+  const isTransient =
+    state === "creating" || state === "registering" || state === "stopping" || state === "deleting";
+  const canRestart = isRunning || isStopped;
+  const canDelete = !isTransient && state !== "busy";
 
   async function doAction(fn: () => Promise<void>) {
     setActionError(null);
     try {
       await fn();
     } catch (e) {
-      setActionError(String(e));
+      const msg = String(e);
+      setActionError(msg);
+      if (msg.includes("401")) handleUnauthorized();
     }
   }
 
@@ -247,13 +253,28 @@ export function RunnerDetail() {
         </div>
       </header>
 
-      {actionError && <div className="error-banner">{actionError}</div>}
-
       {/* Content area */}
       <div className="runner-detail-content">
+        {actionError && <div className="error-banner">{actionError}</div>}
+        {state === "error" && runner.error_message && !actionError && (
+          <div className="error-banner">{runner.error_message}</div>
+        )}
         {/* Action buttons */}
         {isAuthenticated && (
           <div className="flex items-center gap-8" style={{ marginBottom: 16 }}>
+            {isTransient && (
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 16,
+                  height: 16,
+                  border: "2px solid var(--border)",
+                  borderTopColor: "var(--text-primary)",
+                  borderRadius: "50%",
+                  animation: "spin 0.6s linear infinite",
+                }}
+              />
+            )}
             {isStopped && (
               <button
                 className="btn btn-primary"
@@ -273,12 +294,14 @@ export function RunnerDetail() {
             <button
               className="runner-action-btn"
               onClick={() => doAction(() => restartRunner(config.id))}
+              disabled={!canRestart}
             >
               ↺ Restart
             </button>
             <button
               className="runner-action-btn runner-action-btn-danger"
               onClick={() => setConfirmDelete(true)}
+              disabled={!canDelete}
             >
               Delete
             </button>

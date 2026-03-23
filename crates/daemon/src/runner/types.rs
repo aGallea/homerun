@@ -45,6 +45,8 @@ pub struct RunnerInfo {
     pub current_job: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_context: Option<JobContext>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
