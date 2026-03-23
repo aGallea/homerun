@@ -312,16 +312,24 @@ impl RunnerManager {
         let mut runners = self.runners.write().await;
         for entry in persisted {
             let id = entry.config.id.clone();
-            let (state, pid) = if entry.was_running {
-                // Check if the process is still alive
+            let is_service = entry.config.mode == RunnerMode::Service;
+            let (state, pid) = if is_service {
+                // Service runners survive daemon restart — always check if process is alive
                 match find_runner_pid(&entry.config.work_dir).await {
                     Some(pid) => (RunnerState::Online, Some(pid as u32)),
                     None => {
-                        // Process died — needs restart
-                        need_restart.push(id.clone());
+                        // Service runner's process died — should be restarted
+                        if entry.was_running {
+                            need_restart.push(id.clone());
+                        }
                         (RunnerState::Offline, None)
                     }
                 }
+            } else if entry.was_running {
+                // App runners stop with daemon — kill any orphaned process
+                kill_orphaned_processes(&entry.config.work_dir).await;
+                need_restart.push(id.clone());
+                (RunnerState::Offline, None)
             } else {
                 (RunnerState::Offline, None)
             };
@@ -863,6 +871,7 @@ impl RunnerManager {
             }
         }
         self.emit_state_event(id, "online");
+        let _ = self.save_to_disk().await;
 
         // 5c. Spawn log reader tasks
         if let Some(stdout) = stdout {

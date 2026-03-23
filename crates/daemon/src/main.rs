@@ -6,7 +6,14 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config = homerund::config::Config::default();
+    let mut config = homerund::config::Config::default();
+    let config_path = config.config_path();
+    if config_path.exists() {
+        match homerund::config::Config::load(&config_path) {
+            Ok(saved) => config = saved,
+            Err(e) => tracing::warn!("Failed to load config.toml, using defaults: {}", e),
+        }
+    }
     config.ensure_dirs()?;
 
     let daemon_log_state = DaemonLogState::new(&config.log_dir());
