@@ -13,6 +13,8 @@ import type {
   RunnerInfo,
   CreateRunnerRequest,
   ScaleGroupResponse,
+  StepsResponse,
+  StepLogsResponse,
 } from "./types";
 
 export const api = {
@@ -46,6 +48,12 @@ export const api = {
     invoke<LogEntry[]>("get_runner_logs", { runner_id: runnerId }),
   getDaemonLogsRecent: (level?: string, limit?: number, search?: string) =>
     invoke<DaemonLogEntry[]>("get_daemon_logs_recent", { level, limit, search }),
+
+  // Steps
+  getRunnerSteps: (runnerId: string) =>
+    invoke<StepsResponse>("get_runner_steps", { runner_id: runnerId }),
+  getStepLogs: (runnerId: string, stepNumber: number) =>
+    invoke<StepLogsResponse>("get_step_logs", { runner_id: runnerId, step_number: stepNumber }),
 
   // Health
   healthCheck: () => invoke<boolean>("health_check"),

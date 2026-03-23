@@ -45,6 +45,28 @@ export interface LogEntry {
   stream: string;
 }
 
+export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+export interface StepInfo {
+  number: number;
+  name: string;
+  status: StepStatus;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface StepsResponse {
+  job_name: string;
+  steps: StepInfo[];
+  steps_discovered: number;
+}
+
+export interface StepLogsResponse {
+  step_number: number;
+  step_name: string;
+  lines: string[];
+}
+
 export interface GitHubUser {
   login: string;
   avatar_url: string;
