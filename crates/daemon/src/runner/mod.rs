@@ -1,6 +1,7 @@
 pub mod binary;
 pub mod process;
 pub mod state;
+pub mod steps;
 pub mod types;
 
 use crate::config::Config;
