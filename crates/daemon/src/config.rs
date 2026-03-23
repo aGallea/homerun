@@ -73,6 +73,10 @@ impl Config {
         self.base_dir.join("runners.json")
     }
 
+    pub fn history_dir(&self) -> PathBuf {
+        self.base_dir.join("history")
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         Ok(toml::from_str(&content)?)
@@ -91,6 +95,7 @@ impl Config {
         std::fs::create_dir_all(self.runners_dir())?;
         std::fs::create_dir_all(self.cache_dir())?;
         std::fs::create_dir_all(self.log_dir())?;
+        std::fs::create_dir_all(self.history_dir())?;
         Ok(())
     }
 }
