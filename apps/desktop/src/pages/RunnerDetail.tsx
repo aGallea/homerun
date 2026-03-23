@@ -102,7 +102,6 @@ export function RunnerDetail() {
     runner?.state === "busy",
   );
   const { history } = useJobHistory(id);
-  const [showAllHistory, setShowAllHistory] = useState(false);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -593,11 +592,12 @@ export function RunnerDetail() {
                 flexDirection: "column",
                 gap: 1,
                 borderRadius: 8,
-                overflow: "hidden",
+                overflow: "auto",
                 border: "1px solid var(--border)",
+                maxHeight: 300,
               }}
             >
-              {history.slice(0, showAllHistory ? history.length : 20).map((entry, i) => {
+              {history.map((entry, i) => {
                 const duration = Math.round(
                   (new Date(entry.completed_at).getTime() - new Date(entry.started_at).getTime()) /
                     1000,
@@ -817,15 +817,6 @@ export function RunnerDetail() {
                 );
               })}
             </div>
-            {!showAllHistory && history.length > 20 && (
-              <button
-                className="btn"
-                style={{ marginTop: 8, fontSize: 12 }}
-                onClick={() => setShowAllHistory(true)}
-              >
-                Show all {history.length} entries
-              </button>
-            )}
           </div>
         )}
       </div>
