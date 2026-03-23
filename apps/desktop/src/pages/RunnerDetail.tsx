@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
@@ -23,6 +23,65 @@ function formatBytes(bytes: number): string {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   }
   return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+function makeResizeHandler(
+  setter: React.Dispatch<React.SetStateAction<number>>,
+  min: number,
+  max: number,
+) {
+  return (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    let currentHeight: number | null = null;
+    // Read initial height on first move
+    const onMouseMove = (ev: MouseEvent) => {
+      if (currentHeight === null) {
+        // Get height from setter's current value via a trick
+        setter((h) => {
+          currentHeight = h;
+          return h;
+        });
+      }
+      if (currentHeight !== null) {
+        const delta = ev.clientY - startY;
+        const newH = Math.max(min, Math.min(max, currentHeight + delta));
+        setter(newH);
+      }
+    };
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  };
+}
+
+function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      style={{
+        position: "absolute",
+        bottom: 0,
+        right: 0,
+        width: 20,
+        height: 20,
+        cursor: "nwse-resize",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: 0.4,
+        fontSize: 10,
+        color: "var(--text-secondary)",
+        userSelect: "none",
+      }}
+      title="Drag to resize"
+    >
+      ⟍
+    </div>
+  );
 }
 
 function cpuColor(percent: number): string {
@@ -103,33 +162,9 @@ export function RunnerDetail() {
   );
   const { history } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
+  const [logsHeight, setLogsHeight] = useState(250);
+  const [stepsHeight, setStepsHeight] = useState(300);
   const [historyHeight, setHistoryHeight] = useState(300);
-  const historyResizing = useRef(false);
-  const historyStartY = useRef(0);
-  const historyStartH = useRef(0);
-
-  const onResizeMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      historyResizing.current = true;
-      historyStartY.current = e.clientY;
-      historyStartH.current = historyHeight;
-
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!historyResizing.current) return;
-        const delta = ev.clientY - historyStartY.current;
-        setHistoryHeight(Math.max(150, Math.min(800, historyStartH.current + delta)));
-      };
-      const onMouseUp = () => {
-        historyResizing.current = false;
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-      };
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [historyHeight],
-  );
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -368,7 +403,7 @@ export function RunnerDetail() {
         </div>
 
         {/* Main content: Current Job (30%) + Logs (70%) */}
-        <div style={{ display: "flex", gap: 12, minHeight: 150 }}>
+        <div style={{ display: "flex", gap: 12, height: logsHeight }}>
           {/* Left: Current Job */}
           <div style={{ flex: "0 0 30%", minWidth: 0, display: "flex" }}>
             <div className="runner-card runner-card-job" style={{ flex: 1, overflow: "hidden" }}>
@@ -530,7 +565,7 @@ export function RunnerDetail() {
               minWidth: 0,
               display: "flex",
               flexDirection: "column",
-              maxHeight: 300,
+              position: "relative",
             }}
           >
             <div className="logs-header">
@@ -592,6 +627,7 @@ export function RunnerDetail() {
                 </table>
               )}
             </div>
+            <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
           </div>
         </div>
         {/* end side-by-side */}
@@ -605,6 +641,10 @@ export function RunnerDetail() {
             expandedStep={expandedStep}
             stepLogs={stepLogs}
             onToggleStep={toggleStep}
+            height={stepsHeight}
+            resizeHandle={
+              <ResizeHandle onMouseDown={makeResizeHandler(setStepsHeight, 150, 600)} />
+            }
           />
         )}
 
@@ -868,28 +908,7 @@ export function RunnerDetail() {
                 );
               })}
             </div>
-            {/* Resize handle */}
-            <div
-              onMouseDown={onResizeMouseDown}
-              style={{
-                position: "absolute",
-                bottom: 0,
-                right: 0,
-                width: 20,
-                height: 20,
-                cursor: "nwse-resize",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: 0.4,
-                fontSize: 10,
-                color: "var(--text-secondary)",
-                userSelect: "none",
-              }}
-              title="Drag to resize"
-            >
-              ⟍
-            </div>
+            <ResizeHandle onMouseDown={makeResizeHandler(setHistoryHeight, 150, 800)} />
           </div>
         )}
       </div>

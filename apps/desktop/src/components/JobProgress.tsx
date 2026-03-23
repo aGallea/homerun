@@ -8,6 +8,8 @@ export interface JobProgressProps {
   expandedStep: number | null;
   stepLogs: Record<number, string[]>;
   onToggleStep: (stepNumber: number) => void;
+  height?: number;
+  resizeHandle?: React.ReactNode;
 }
 
 function formatDuration(startedAt: string | null, completedAt: string | null): string {
@@ -60,6 +62,8 @@ export function JobProgress({
   expandedStep,
   stepLogs,
   onToggleStep,
+  height,
+  resizeHandle,
 }: JobProgressProps) {
   const [, setTick] = useState(0);
   const logRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -87,7 +91,15 @@ export function JobProgress({
   ).length;
 
   return (
-    <div className="runner-card" style={{ marginBottom: 16, padding: 0 }}>
+    <div
+      className="runner-card"
+      style={{
+        marginBottom: 16,
+        padding: 0,
+        position: "relative",
+        ...(height ? { height, display: "flex", flexDirection: "column" as const } : {}),
+      }}
+    >
       {/* Header */}
       <div
         style={{
@@ -122,9 +134,8 @@ export function JobProgress({
         style={{
           display: "flex",
           flexDirection: "column",
-          minHeight: 100,
-          maxHeight: 350,
           overflowY: "auto",
+          ...(height ? { flex: 1, minHeight: 0 } : { minHeight: 100, maxHeight: 350 }),
         }}
       >
         {steps.map((step) => {
@@ -266,6 +277,7 @@ export function JobProgress({
           );
         })}
       </div>
+      {resizeHandle}
     </div>
   );
 }
