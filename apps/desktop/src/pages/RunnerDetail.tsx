@@ -392,7 +392,7 @@ export function RunnerDetail() {
             </div>
           </div>
           {/* Right: Current Job card */}
-          <div style={{ flex: "0 0 280px" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="runner-card runner-card-job" style={{ overflow: "hidden" }}>
               <div className="runner-card-glow runner-card-glow-blue" />
               <div className="flex items-center justify-between">
