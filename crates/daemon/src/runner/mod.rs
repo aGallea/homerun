@@ -346,6 +346,8 @@ impl RunnerManager {
                     current_job: None,
                     job_context: None,
                     error_message: None,
+                    job_started_at: None,
+                    last_completed_job: None,
                 },
             );
         }
@@ -639,6 +641,8 @@ impl RunnerManager {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -1738,6 +1742,8 @@ mod tests {
             current_job: Some("TypeScript (type check + build)".to_string()),
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2011,6 +2017,8 @@ mod tests {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -2043,6 +2051,8 @@ mod tests {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
@@ -2255,6 +2265,8 @@ mod tests {
             current_job: None,
             job_context: None,
             error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2300,6 +2312,8 @@ mod tests {
                 current_job: None,
                 job_context: None,
                 error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
             },
         );
         manager
