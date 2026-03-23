@@ -67,6 +67,29 @@ pub struct LogEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepInfo {
+    pub number: u16,
+    pub name: String,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepsResponse {
+    pub job_name: String,
+    pub steps: Vec<StepInfo>,
+    pub steps_discovered: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepLogsResponse {
+    pub step_number: u16,
+    pub step_name: String,
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubUser {
     pub login: String,
     pub avatar_url: String,
@@ -414,6 +437,16 @@ impl DaemonClient {
     pub async fn uninstall_service(&self) -> Result<(), String> {
         self.request("POST", "/service/uninstall", None).await?;
         Ok(())
+    }
+
+    pub async fn get_runner_steps(&self, runner_id: &str) -> Result<StepsResponse, String> {
+        let body = self.request("GET", &format!("/runners/{runner_id}/steps"), None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn get_step_logs(&self, runner_id: &str, step_number: u16) -> Result<StepLogsResponse, String> {
+        let body = self.request("GET", &format!("/runners/{runner_id}/steps/{step_number}/logs"), None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
     pub async fn get_runner_logs(&self, runner_id: &str) -> Result<Vec<LogEntry>, String> {

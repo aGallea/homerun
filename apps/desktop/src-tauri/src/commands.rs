@@ -3,7 +3,7 @@ use tauri::State;
 use crate::client::{
     AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DaemonLogEntry,
     DeviceFlowResponse, GroupActionResponse, LogEntry, MetricsResponse, Preferences, RepoInfo,
-    RunnerInfo, ScaleGroupResponse,
+    RunnerInfo, ScaleGroupResponse, StepLogsResponse, StepsResponse,
 };
 use crate::AppState;
 
@@ -212,6 +212,25 @@ pub async fn update_preferences(
 ) -> Result<Preferences, String> {
     let client = state.client.lock().await;
     client.update_preferences(&prefs).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_runner_steps(
+    state: State<'_, AppState>,
+    runner_id: String,
+) -> Result<StepsResponse, String> {
+    let client = state.client.lock().await;
+    client.get_runner_steps(&runner_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_step_logs(
+    state: State<'_, AppState>,
+    runner_id: String,
+    step_number: u16,
+) -> Result<StepLogsResponse, String> {
+    let client = state.client.lock().await;
+    client.get_step_logs(&runner_id, step_number).await
 }
 
 #[tauri::command]
