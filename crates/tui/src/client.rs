@@ -46,6 +46,8 @@ pub struct JobContext {
     pub pr_number: Option<u64>,
     pub pr_url: Option<String>,
     pub run_url: String,
+    #[serde(default)]
+    pub job_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

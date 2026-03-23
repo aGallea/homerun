@@ -35,6 +35,7 @@ export interface JobContext {
   pr_number: number | null;
   pr_url: string | null;
   run_url: string;
+  job_id?: number | null;
 }
 
 export interface LogEntry {

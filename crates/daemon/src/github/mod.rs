@@ -165,6 +165,7 @@ impl GitHubClient {
 
         #[derive(Deserialize)]
         struct RunJob {
+            id: u64,
             name: String,
             runner_name: Option<String>,
         }
@@ -188,7 +189,7 @@ impl GitHubClient {
             };
 
             // Match by runner_name if available, otherwise fall back to job name
-            let matched = jobs.jobs.iter().any(|j| {
+            let matched_job = jobs.jobs.iter().find(|j| {
                 if let Some(rn) = j.runner_name.as_deref() {
                     rn == runner_name
                 } else {
@@ -196,7 +197,7 @@ impl GitHubClient {
                 }
             });
 
-            if matched {
+            if let Some(job) = matched_job {
                 let (pr_number, pr_url) = if let Some(pr) = run.pull_requests.first() {
                     let html_url = pr
                         .url
@@ -212,6 +213,7 @@ impl GitHubClient {
                     pr_number,
                     pr_url,
                     run_url: run.html_url,
+                    job_id: Some(job.id),
                 }));
             }
         }
