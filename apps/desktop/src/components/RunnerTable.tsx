@@ -25,8 +25,28 @@ interface RunnerTableProps {
   readOnly?: boolean;
 }
 
+function SvcBadge() {
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 700,
+        padding: "2px 5px",
+        borderRadius: 3,
+        background: "rgba(59, 130, 246, 0.15)",
+        color: "var(--accent-blue)",
+        letterSpacing: "0.04em",
+        textTransform: "uppercase" as const,
+        marginRight: 4,
+      }}
+    >
+      SVC
+    </span>
+  );
+}
+
 function CpuValue({ value }: { value: number | undefined }) {
-  if (value == null) return <span className="text-muted font-mono">--</span>;
+  if (value == null) return null;
   const color =
     value > 80
       ? "var(--accent-red)"
@@ -34,7 +54,22 @@ function CpuValue({ value }: { value: number | undefined }) {
         ? "var(--accent-yellow)"
         : "var(--text-secondary)";
   return (
-    <span className="font-mono" style={{ color, fontSize: 13 }}>
+    <span
+      className="font-mono"
+      style={{
+        color,
+        fontSize: 11,
+        border: `0.1px solid ${color}`,
+        borderRadius: 4,
+        width: 45,
+        height: 30,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+      }}
+    >
       {value.toFixed(1)}%
     </span>
   );
@@ -83,18 +118,28 @@ export function RunnerTable({
   }, [expandedGroups, forceExpandedGroups]);
 
   const { groups, soloRunners } = useMemo(() => {
-    const groupMap = new Map<string, RunnerInfo[]>();
+    const byName = (a: RunnerInfo, b: RunnerInfo) =>
+      a.config.name.localeCompare(b.config.name, undefined, { numeric: true });
+
+    // Group by name prefix + repo (merges runners from separate batch creates)
+    const mergedMap = new Map<string, RunnerInfo[]>();
     const solo: RunnerInfo[] = [];
     for (const runner of runners) {
       if (runner.config.group_id) {
-        const existing = groupMap.get(runner.config.group_id) ?? [];
+        const prefix = runner.config.name.replace(/-\d+$/, "");
+        const repo = `${runner.config.repo_owner}/${runner.config.repo_name}`;
+        const key = `${prefix}::${repo}`;
+        const existing = mergedMap.get(key) ?? [];
         existing.push(runner);
-        groupMap.set(runner.config.group_id, existing);
+        mergedMap.set(key, existing);
       } else {
         solo.push(runner);
       }
     }
-    return { groups: groupMap, soloRunners: solo };
+    // Sort runners within each group and solo runners by name (numeric-aware)
+    for (const group of mergedMap.values()) group.sort(byName);
+    solo.sort(byName);
+    return { groups: mergedMap, soloRunners: solo };
   }, [runners]);
 
   if (runners.length === 0) {
@@ -110,39 +155,36 @@ export function RunnerTable({
 
   return (
     <div className="runner-list">
-      {/* Column header */}
-      <div className="runner-list-header">
-        <div className="runner-row-grid">
-          <div className="runner-col-name">NAME</div>
-          <div className="runner-col-repo">REPOSITORY</div>
-          <div className="runner-col-status">STATUS</div>
-          <div className="runner-col-cpu">CPU</div>
-          <div className="runner-col-actions"></div>
-        </div>
-      </div>
-
       {/* Groups */}
-      {Array.from(groups.entries()).map(([groupId, groupRunners]) => {
-        const isExpanded = effectiveExpanded.has(groupId);
+      {Array.from(groups.entries()).map(([groupKey, groupRunners]) => {
+        const isExpanded = effectiveExpanded.has(groupKey);
+        const groupIds = [
+          ...new Set(groupRunners.map((r) => r.config.group_id).filter(Boolean)),
+        ] as string[];
+        const firstGroupId = groupIds[0] ?? groupKey;
+        const isLoading =
+          pendingActions?.has(groupKey) || groupIds.some((gid) => pendingActions?.has(gid));
         return (
-          <Fragment key={`group-${groupId}`}>
+          <Fragment key={`group-${groupKey}`}>
             <RunnerGroupRow
-              groupId={groupId}
+              groupId={firstGroupId}
+              groupIds={groupIds}
               runners={groupRunners}
               expanded={isExpanded}
-              onToggle={() => toggleGroup(groupId)}
+              onToggle={() => toggleGroup(groupKey)}
               onStartGroup={onStartGroup}
               onStopGroup={onStopGroup}
               onRestartGroup={onRestartGroup}
               onDeleteGroup={onDeleteGroup}
               onScaleGroup={onScaleGroup}
-              loading={pendingActions?.has(groupId)}
+              loading={isLoading}
               readOnly={readOnly}
             />
             {isExpanded &&
               groupRunners.map((runner) => {
                 const rowLoading =
-                  pendingActions?.has(runner.config.id) || pendingActions?.has(groupId);
+                  pendingActions?.has(runner.config.id) ||
+                  groupIds.some((gid) => pendingActions?.has(gid));
                 return (
                   <RunnerRow
                     key={runner.config.id}
@@ -220,21 +262,48 @@ function RunnerRow({
     >
       <div className="runner-row-grid">
         <div className="runner-col-name">
-          {indented && <span style={{ width: 20, display: "inline-block" }} />}
-          <span className="font-mono" style={{ fontSize: 14, fontWeight: 500 }}>
-            {runner.config.name}
-          </span>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            {indented && (
+              <span
+                style={{
+                  width: 28,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {runner.config.mode === "service" && <SvcBadge />}
+              </span>
+            )}
+            {!indented && runner.config.mode === "service" && <SvcBadge />}
+            <span className="font-mono" style={{ fontSize: 14, fontWeight: 500 }}>
+              {runner.config.name}
+            </span>
+          </div>
+          {!inGroup && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 1,
+                paddingLeft: runner.config.mode === "service" ? 32 : 0,
+              }}
+            >
+              {runner.config.repo_owner}/{runner.config.repo_name}
+            </div>
+          )}
         </div>
-        <div className="runner-col-repo">
-          {!inGroup && `${runner.config.repo_owner}/${runner.config.repo_name}`}
-        </div>
-        <div className="runner-col-status">
-          <StatusBadge state={runner.state} />
-        </div>
-        <div className="runner-col-cpu">
-          <CpuValue value={cpuValue} />
+        <div
+          className="runner-col-status"
+          title={
+            runner.error_message ?? (runner.current_job ? `Busy: ${runner.current_job}` : undefined)
+          }
+        >
+          <StatusBadge state={runner.state} currentJob={runner.current_job ?? undefined} />
         </div>
         <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
+          <CpuValue value={cpuValue} />
           <RunnerActions
             runner={runner}
             onStart={onStart}

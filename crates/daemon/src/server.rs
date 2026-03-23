@@ -166,9 +166,78 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
         state.runner_manager.set_auth_token(Some(token)).await;
     }
 
-    // Load persisted runner configs from disk
-    if let Err(e) = state.runner_manager.load_from_disk().await {
-        tracing::warn!("Failed to load runners from disk: {}", e);
+    // Load persisted runner configs from disk.
+    // Returns IDs of runners that were previously running but whose process is dead.
+    // Runners whose process is still alive are reattached automatically.
+    let need_restart = match state.runner_manager.load_from_disk().await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!("Failed to load runners from disk: {}", e);
+            Vec::new()
+        }
+    };
+
+    // Monitor reattached runners (still-alive orphaned processes)
+    {
+        let runners = state.runner_manager.list().await;
+        for runner in &runners {
+            if runner.state == crate::runner::state::RunnerState::Online {
+                if let Some(pid) = runner.pid {
+                    tracing::info!(
+                        "Reattached to running process for {} (PID {})",
+                        runner.config.name,
+                        pid
+                    );
+                    state
+                        .runner_manager
+                        .monitor_orphaned_process(&runner.config.id, pid);
+                }
+            }
+        }
+    }
+
+    // Restore previously-running runners (dead processes) if preference is enabled
+    let restore = state
+        .config
+        .read()
+        .await
+        .preferences
+        .start_runners_on_launch;
+    if restore && !need_restart.is_empty() {
+        if let Some(token) = state.auth.token().await {
+            tracing::info!(
+                "Restoring {} previously-running runner(s)",
+                need_restart.len()
+            );
+            for runner_id in need_restart {
+                let manager = state.runner_manager.clone();
+                let tok = token.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = manager
+                        .update_state(&runner_id, crate::runner::state::RunnerState::Registering)
+                        .await
+                    {
+                        tracing::error!("Failed to transition runner {}: {}", runner_id, e);
+                        return;
+                    }
+                    if let Err(e) = manager
+                        .register_and_start_from_registering(&runner_id, &tok)
+                        .await
+                    {
+                        tracing::error!("Failed to restore runner {}: {}", runner_id, e);
+                        let _ = manager
+                            .update_state_with_error(
+                                &runner_id,
+                                crate::runner::state::RunnerState::Error,
+                                Some(format!("{e:#}")),
+                            )
+                            .await;
+                    }
+                });
+            }
+        } else {
+            tracing::warn!("Cannot restore runners: no auth token available. Sign in and restart.");
+        }
     }
 
     // Start background poller for job context (branch/PR info)

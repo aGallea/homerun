@@ -72,7 +72,11 @@ export function useJobSteps(runnerId: string | undefined, isBusy: boolean): UseJ
 
         setStepLogs((prev) => ({ ...prev, [expandedStep]: lines }));
       } catch {
-        // ignore errors during log fetch
+        // GitHub API only returns logs for completed steps.
+        // Set empty array so UI shows "No log output" instead of "Fetching logs..." forever.
+        if (!logCacheRef.current[expandedStep]) {
+          setStepLogs((prev) => ({ ...prev, [expandedStep]: [] }));
+        }
       }
     };
 

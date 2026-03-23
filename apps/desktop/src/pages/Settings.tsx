@@ -448,8 +448,8 @@ export function Settings() {
           />
           <Divider />
           <ToggleSetting
-            label="Start runners on launch"
-            description="Resume all runners that were running when the app was last closed."
+            label="Restore runners on launch"
+            description="Automatically start runners that were running when the daemon was last stopped."
             checked={preferences.start_runners_on_launch}
             onChange={(checked) => updatePreference("start_runners_on_launch", checked)}
           />

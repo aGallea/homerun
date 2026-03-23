@@ -37,7 +37,11 @@ pub async fn create_runner(
         if let Err(e) = manager.register_and_start(&runner_id, &token).await {
             tracing::error!("Failed to register and start runner {}: {}", runner_id, e);
             let _ = manager
-                .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                .update_state_with_error(
+                    &runner_id,
+                    crate::runner::state::RunnerState::Error,
+                    Some(format!("{e:#}")),
+                )
                 .await;
         }
     });
@@ -168,7 +172,11 @@ pub async fn start_runner(
         {
             tracing::error!("Failed to start runner {}: {}", runner_id, e);
             let _ = manager
-                .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                .update_state_with_error(
+                    &runner_id,
+                    crate::runner::state::RunnerState::Error,
+                    Some(format!("{e:#}")),
+                )
                 .await;
         }
     });
@@ -251,7 +259,11 @@ pub async fn restart_runner(
         {
             tracing::error!("Failed to restart runner {}: {}", runner_id, e);
             let _ = manager
-                .update_state(&runner_id, crate::runner::state::RunnerState::Error)
+                .update_state_with_error(
+                    &runner_id,
+                    crate::runner::state::RunnerState::Error,
+                    Some(format!("{e:#}")),
+                )
                 .await;
         }
     });

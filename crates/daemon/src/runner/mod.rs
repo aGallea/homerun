@@ -8,15 +8,28 @@ pub mod types;
 use crate::config::Config;
 use crate::github::GitHubClient;
 use crate::runner::binary::ensure_runner_binary;
-use crate::runner::process::{configure_runner, remove_runner, start_runner};
+use crate::runner::process::{
+    configure_runner, find_runner_pid, kill_orphaned_processes, remove_runner, start_runner,
+};
 use crate::runner::state::RunnerState;
 use crate::runner::steps::{StepsResponse, WorkerLogWatcher};
 use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch, Notify, RwLock};
+
+/// Wrapper for persisting runners to disk with their last running state.
+/// Uses `#[serde(flatten)]` for backward compatibility with old runners.json
+/// that only contained RunnerConfig fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedRunner {
+    #[serde(flatten)]
+    config: RunnerConfig,
+    #[serde(default)]
+    was_running: bool,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunnerEvent {
@@ -268,8 +281,14 @@ impl RunnerManager {
     /// Save all runner configs to disk as JSON.
     pub async fn save_to_disk(&self) -> Result<()> {
         let runners = self.runners.read().await;
-        let configs: Vec<&RunnerConfig> = runners.values().map(|r| &r.config).collect();
-        let json = serde_json::to_string_pretty(&configs)?;
+        let persisted: Vec<PersistedRunner> = runners
+            .values()
+            .map(|r| PersistedRunner {
+                config: r.config.clone(),
+                was_running: r.state == RunnerState::Online || r.state == RunnerState::Busy,
+            })
+            .collect();
+        let json = serde_json::to_string_pretty(&persisted)?;
         let path = self.config.runners_json_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -278,33 +297,285 @@ impl RunnerManager {
         Ok(())
     }
 
-    /// Load runner configs from disk, creating entries in Offline state.
-    pub async fn load_from_disk(&self) -> Result<()> {
+    /// Load runner configs from disk. For runners that were previously running,
+    /// checks if their process is still alive and reattaches to it.
+    /// Returns a list of runner IDs that were running but whose process is now dead
+    /// (these need to be restarted if the restore preference is enabled).
+    pub async fn load_from_disk(&self) -> Result<Vec<String>> {
         let path = self.config.runners_json_path();
         if !path.exists() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let json = std::fs::read_to_string(&path)?;
-        let configs: Vec<RunnerConfig> = serde_json::from_str(&json)?;
+        let persisted: Vec<PersistedRunner> = serde_json::from_str(&json)?;
+        let mut need_restart = Vec::new();
         let mut runners = self.runners.write().await;
-        for config in configs {
-            let id = config.id.clone();
+        for entry in persisted {
+            let id = entry.config.id.clone();
+            let is_service = entry.config.mode == RunnerMode::Service;
+            let (state, pid) = if is_service {
+                // Service runners survive daemon restart — always check if process is alive
+                match find_runner_pid(&entry.config.work_dir).await {
+                    Some(pid) => (RunnerState::Online, Some(pid as u32)),
+                    None => {
+                        // Service runner's process died — should be restarted
+                        if entry.was_running {
+                            need_restart.push(id.clone());
+                        }
+                        (RunnerState::Offline, None)
+                    }
+                }
+            } else if entry.was_running {
+                // App runners stop with daemon — kill any orphaned process
+                kill_orphaned_processes(&entry.config.work_dir).await;
+                need_restart.push(id.clone());
+                (RunnerState::Offline, None)
+            } else {
+                (RunnerState::Offline, None)
+            };
             runners.insert(
                 id,
                 RunnerInfo {
-                    config,
-                    state: RunnerState::Offline,
-                    pid: None,
+                    config: entry.config,
+                    state,
+                    pid,
                     uptime_secs: None,
                     started_at: None,
                     jobs_completed: 0,
                     jobs_failed: 0,
                     current_job: None,
                     job_context: None,
+                    error_message: None,
                 },
             );
         }
-        Ok(())
+        Ok(need_restart)
+    }
+
+    /// Spawn a background task that monitors an orphaned runner process by PID.
+    /// When the process exits, transitions the runner to Offline.
+    /// Also tails the runner's _diag/Runner_*.log to detect job start/complete events.
+    pub fn monitor_orphaned_process(&self, runner_id: &str, pid: u32) {
+        let manager = self.clone();
+        let rid = runner_id.to_string();
+        let kill_signal = Arc::new(Notify::new());
+        let (exit_tx, exit_rx) = watch::channel(false);
+
+        let handle = ProcessHandle {
+            kill_signal: kill_signal.clone(),
+            exited: exit_rx,
+        };
+
+        // Get the work_dir for diag log tailing
+        let work_dir = {
+            let runners = self.runners.clone();
+            let rid = rid.clone();
+            tokio::spawn(async move {
+                let map = runners.read().await;
+                map.get(&rid).map(|r| r.config.work_dir.clone())
+            })
+        };
+
+        // Store handle so stop_process works on reattached runners
+        let processes = self.processes.clone();
+        tokio::spawn(async move {
+            processes.write().await.insert(rid.clone(), handle);
+
+            // Spawn diag log watcher for job events
+            let work_dir = work_dir.await.ok().flatten();
+            if let Some(ref wd) = work_dir {
+                let diag_dir = wd.join("_diag");
+                let mgr = manager.clone();
+                let rid2 = rid.clone();
+                let sw = mgr.step_watcher.clone();
+                let wd2 = wd.clone();
+                tokio::spawn(async move {
+                    Self::tail_diag_logs(mgr, &rid2, &diag_dir, &wd2, sw).await;
+                });
+            }
+
+            // Poll until the process dies or we get a kill signal
+            loop {
+                tokio::select! {
+                    _ = kill_signal.notified() => {
+                        // Kill requested — signal the process group
+                        let pgid = pid as i32;
+                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                        break;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                        // Check if process is still alive
+                        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+                        if !alive {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Process exited — transition to Offline
+            {
+                let mut runners = manager.runners.write().await;
+                if let Some(r) = runners.get_mut(&rid) {
+                    r.state = RunnerState::Offline;
+                    r.pid = None;
+                    r.started_at = None;
+                }
+            }
+            manager.emit_state_event(&rid, "offline");
+            let _ = manager.save_to_disk().await;
+            let _ = exit_tx.send(true);
+            processes.write().await.remove(&rid);
+        });
+    }
+
+    /// Tail the latest Runner_*.log in the _diag directory to detect job events
+    /// for reattached (orphaned) runners whose stdout we can't read.
+    async fn tail_diag_logs(
+        manager: Self,
+        runner_id: &str,
+        diag_dir: &std::path::Path,
+        work_dir: &std::path::Path,
+        step_watcher: WorkerLogWatcher,
+    ) {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        loop {
+            // Find the latest Runner_*.log
+            let latest = match std::fs::read_dir(diag_dir) {
+                Ok(entries) => entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("Runner_"))
+                    .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok())),
+                Err(_) => break,
+            };
+
+            let log_path = match latest {
+                Some(entry) => entry.path(),
+                None => {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+
+            // Seek to end and tail new lines
+            let file = match tokio::fs::File::open(&log_path).await {
+                Ok(f) => f,
+                Err(_) => break,
+            };
+            // Seek to end
+            let metadata = match file.metadata().await {
+                Ok(m) => m,
+                Err(_) => break,
+            };
+            let file_len = metadata.len();
+            let file = match tokio::fs::File::open(&log_path).await {
+                Ok(f) => f,
+                Err(_) => break,
+            };
+            let reader = BufReader::new(file);
+            let mut lines = reader.lines();
+            // Skip to end
+            let mut skipped = 0u64;
+            while skipped < file_len {
+                match lines.next_line().await {
+                    Ok(Some(line)) => skipped += line.len() as u64 + 1,
+                    _ => break,
+                }
+            }
+
+            // Now tail new lines
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        // Broadcast as a log entry for the runner process logs
+                        if let Some(idx) = line.find("WRITE LINE: ") {
+                            let stdout_line = &line[idx + "WRITE LINE: ".len()..];
+                            let entry = LogEntry {
+                                runner_id: runner_id.to_string(),
+                                timestamp: chrono::Utc::now(),
+                                line: stdout_line.to_string(),
+                                stream: "stdout".to_string(),
+                            };
+                            let _ = manager.log_tx.send(entry.clone());
+                            {
+                                let mut map = manager.recent_logs.write().await;
+                                let dq = map
+                                    .entry(runner_id.to_string())
+                                    .or_insert_with(VecDeque::new);
+                                dq.push_back(entry);
+                                if dq.len() > RECENT_LOGS_MAX {
+                                    dq.pop_front();
+                                }
+                            }
+                        }
+
+                        // Runner_*.log lines contain "WRITE LINE: <timestamp>: Running job: ..."
+                        // Extract the part after "WRITE LINE: "
+                        let payload = if let Some(idx) = line.find("WRITE LINE: ") {
+                            &line[idx + "WRITE LINE: ".len()..]
+                        } else {
+                            &line
+                        };
+
+                        match parse_job_event(payload) {
+                            Some(JobEvent::Started(job_name)) => {
+                                {
+                                    let mut map = manager.runners.write().await;
+                                    if let Some(r) = map.get_mut(runner_id) {
+                                        r.state = RunnerState::Busy;
+                                        r.current_job = Some(job_name.clone());
+                                    }
+                                }
+                                manager.emit_state_event(runner_id, "busy");
+                                let _ = manager.save_to_disk().await;
+                                step_watcher
+                                    .start_watching(runner_id, &job_name, work_dir)
+                                    .await;
+                                // Spawn step-watcher polling task
+                                let sw = step_watcher.clone();
+                                let rid_poll = runner_id.to_string();
+                                tokio::spawn(async move {
+                                    loop {
+                                        tokio::time::sleep(std::time::Duration::from_millis(500))
+                                            .await;
+                                        if !sw.poll(&rid_poll).await {
+                                            break;
+                                        }
+                                    }
+                                });
+                            }
+                            Some(JobEvent::Completed { succeeded }) => {
+                                step_watcher.stop_watching(runner_id).await;
+                                {
+                                    let mut map = manager.runners.write().await;
+                                    if let Some(r) = map.get_mut(runner_id) {
+                                        if succeeded {
+                                            r.jobs_completed += 1;
+                                        } else {
+                                            r.jobs_failed += 1;
+                                        }
+                                        r.state = RunnerState::Online;
+                                        r.current_job = None;
+                                        r.job_context = None;
+                                    }
+                                }
+                                manager.emit_state_event(runner_id, "online");
+                                let _ = manager.save_to_disk().await;
+                            }
+                            None => {}
+                        }
+                    }
+                    Ok(None) => {
+                        // EOF — wait and retry
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
     }
 
     // ── CRUD ───────────────────────────────────────────────────────
@@ -367,6 +638,7 @@ impl RunnerManager {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -583,15 +855,36 @@ impl RunnerManager {
         let gh = crate::github::GitHubClient::new(Some(token)).ok()?;
 
         // 4. Fetch via cache
-        let raw_log = self
+        let raw_log = match self
             .step_log_cache
             .get_or_fetch(job_id, &gh, &owner, &repo)
             .await
-            .ok()?;
+        {
+            Ok(log) => log,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to fetch job logs for runner {} (job_id={}): {:#}",
+                    runner_id,
+                    job_id,
+                    e
+                );
+                return None;
+            }
+        };
         let sections = crate::github::parse_job_log_sections(&raw_log);
 
         // 5. Match by step name (not index)
-        let section = sections.iter().find(|(name, _)| name == &step_name)?;
+        let section = match sections.iter().find(|(name, _)| name == &step_name) {
+            Some(s) => s,
+            None => {
+                tracing::debug!(
+                    "Step '{}' not found in job log sections (found: {:?})",
+                    step_name,
+                    sections.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                );
+                return None;
+            }
+        };
         let lines: Vec<String> = section.1.lines().map(|l| l.to_string()).collect();
 
         Some(crate::api::steps::StepLogsResponse {
@@ -628,6 +921,15 @@ impl RunnerManager {
     }
 
     pub async fn update_state(&self, id: &str, state: RunnerState) -> Result<()> {
+        self.update_state_with_error(id, state, None).await
+    }
+
+    pub async fn update_state_with_error(
+        &self,
+        id: &str,
+        state: RunnerState,
+        error_message: Option<String>,
+    ) -> Result<()> {
         let mut runners = self.runners.write().await;
         let runner = runners
             .get_mut(id)
@@ -639,7 +941,15 @@ impl RunnerManager {
                 state
             );
         }
+        let prev_running = runner.state == RunnerState::Online || runner.state == RunnerState::Busy;
+        let now_running = state == RunnerState::Online || state == RunnerState::Busy;
         runner.state = state;
+        runner.error_message = error_message;
+        // Persist when running state changes so was_running stays current
+        if prev_running != now_running {
+            drop(runners);
+            let _ = self.save_to_disk().await;
+        }
         Ok(())
     }
 
@@ -675,8 +985,8 @@ impl RunnerManager {
     }
 
     /// Common register-and-start flow (assumes already in Registering state):
-    /// If the runner is already configured (.runner file exists), skip download + config
-    /// and go straight to starting run.sh.
+    /// Downloads runner binary if needed, then always runs config.sh --replace
+    /// to clear any stale GitHub sessions before starting run.sh.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         self.set_auth_token(Some(auth_token.to_string())).await;
 
@@ -697,36 +1007,43 @@ impl RunnerManager {
             // 2. Copy binary files to runner work_dir
             copy_dir_recursive(&cached_runner_dir, &config.work_dir)
                 .context("Failed to copy runner binary to work dir")?;
-
-            // 3. Get registration token
-            let gh = GitHubClient::new(Some(auth_token.to_string()))?;
-            let reg = gh
-                .get_runner_registration_token(&config.repo_owner, &config.repo_name)
-                .await
-                .context("Failed to get registration token")?;
-
-            // 4. Run config.sh
-            let repo_url = format!(
-                "https://github.com/{}/{}",
-                config.repo_owner, config.repo_name
-            );
-            configure_runner(
-                &config.work_dir,
-                &repo_url,
-                &reg.token,
-                &config.name,
-                &config.labels,
-            )
-            .await
-            .context("Failed to configure runner")?;
         } else {
-            tracing::info!(
-                "Runner {} already configured, skipping download + config",
-                id
-            );
+            tracing::info!("Runner {} already configured, skipping binary download", id);
         }
 
-        // 5. Spawn run.sh
+        // Kill any orphaned runner processes from a previous daemon session
+        // BEFORE reconfiguring, so the old process releases the GitHub session.
+        kill_orphaned_processes(&config.work_dir).await;
+
+        // Remove stale .runner file so config.sh accepts --replace
+        let runner_file = config.work_dir.join(".runner");
+        if runner_file.exists() {
+            let _ = std::fs::remove_file(&runner_file);
+        }
+
+        // Always run config.sh --replace to clear any stale GitHub sessions
+        // (e.g. after daemon restart where the old session was not deregistered)
+        let gh = GitHubClient::new(Some(auth_token.to_string()))?;
+        let reg = gh
+            .get_runner_registration_token(&config.repo_owner, &config.repo_name)
+            .await
+            .context("Failed to get registration token")?;
+
+        let repo_url = format!(
+            "https://github.com/{}/{}",
+            config.repo_owner, config.repo_name
+        );
+        configure_runner(
+            &config.work_dir,
+            &repo_url,
+            &reg.token,
+            &config.name,
+            &config.labels,
+        )
+        .await
+        .context("Failed to configure runner")?;
+
+        // Spawn run.sh
         let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
@@ -747,6 +1064,7 @@ impl RunnerManager {
             }
         }
         self.emit_state_event(id, "online");
+        let _ = self.save_to_disk().await;
 
         // 5c. Spawn log reader tasks
         if let Some(stdout) = stdout {
@@ -1419,6 +1737,7 @@ mod tests {
             jobs_failed: 1,
             current_job: Some("TypeScript (type check + build)".to_string()),
             job_context: None,
+            error_message: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -1691,6 +2010,7 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -1722,6 +2042,7 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
@@ -1933,6 +2254,7 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            error_message: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -1977,6 +2299,7 @@ mod tests {
                 jobs_failed: 0,
                 current_job: None,
                 job_context: None,
+                error_message: None,
             },
         );
         manager

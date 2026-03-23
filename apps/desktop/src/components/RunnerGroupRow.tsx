@@ -4,6 +4,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 interface RunnerGroupRowProps {
   groupId: string;
+  groupIds?: string[];
   runners: RunnerInfo[];
   expanded: boolean;
   onToggle: () => void;
@@ -18,6 +19,7 @@ interface RunnerGroupRowProps {
 
 export function RunnerGroupRow({
   groupId,
+  groupIds,
   runners,
   expanded,
   onToggle,
@@ -35,6 +37,8 @@ export function RunnerGroupRow({
 
   const namePrefix = runners[0]?.config.name.replace(/-\d+$/, "") ?? "group";
   const repo = runners[0] ? `${runners[0].config.repo_owner}/${runners[0].config.repo_name}` : "";
+  const allGroupIds = groupIds ?? [groupId];
+  const forEachGroup = (fn: (gid: string) => void) => allGroupIds.forEach(fn);
 
   const activeCount = runners.filter((r) => r.state === "online" || r.state === "busy").length;
   const hasRunning = activeCount > 0;
@@ -63,13 +67,24 @@ export function RunnerGroupRow({
       >
         <div className="runner-row-grid">
           <div className="runner-col-name">
-            <span className="runner-expand-icon">{expanded ? "▼" : "▶"}</span>
-            <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: 14 }}>
-              {namePrefix}
-            </span>
-            <span className="text-muted">({runners.length})</span>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <span className="runner-expand-icon">{expanded ? "▼" : "▶"}</span>
+              <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: 14 }}>
+                {namePrefix}
+              </span>
+              <span className="text-muted">({runners.length})</span>
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 2,
+                paddingLeft: 14,
+              }}
+            >
+              {repo}
+            </div>
           </div>
-          <div className="runner-col-repo">{repo}</div>
           <div className="runner-col-status">
             <span
               className="status-badge"
@@ -84,7 +99,6 @@ export function RunnerGroupRow({
               {activeCount}/{runners.length} Online
             </span>
           </div>
-          <div className="runner-col-cpu"></div>
           <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
             {!readOnly && (
               <>
@@ -94,7 +108,7 @@ export function RunnerGroupRow({
                   {hasStopped && (
                     <button
                       className="icon-btn"
-                      onClick={() => onStartGroup(groupId)}
+                      onClick={() => forEachGroup(onStartGroup)}
                       title="Start all"
                       disabled={loading}
                     >
@@ -104,7 +118,7 @@ export function RunnerGroupRow({
                   {hasRunning && (
                     <button
                       className="icon-btn"
-                      onClick={() => onStopGroup(groupId)}
+                      onClick={() => forEachGroup(onStopGroup)}
                       title="Stop all"
                       disabled={loading}
                     >
@@ -113,7 +127,7 @@ export function RunnerGroupRow({
                   )}
                   <button
                     className="icon-btn"
-                    onClick={() => onRestartGroup(groupId)}
+                    onClick={() => forEachGroup(onRestartGroup)}
                     title="Restart all"
                     disabled={loading}
                   >
@@ -121,7 +135,7 @@ export function RunnerGroupRow({
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() => onScaleGroup(groupId, runners.length + 1)}
+                    onClick={() => onScaleGroup(allGroupIds[0], runners.length + 1)}
                     title="Scale up"
                     disabled={loading || runners.length >= 10}
                   >
@@ -129,7 +143,7 @@ export function RunnerGroupRow({
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() => onScaleGroup(groupId, runners.length - 1)}
+                    onClick={() => onScaleGroup(allGroupIds[0], runners.length - 1)}
                     title="Scale down"
                     disabled={loading || runners.length <= 1}
                   >
@@ -160,7 +174,7 @@ export function RunnerGroupRow({
                         <button
                           className="actions-dropdown-item"
                           onClick={() => {
-                            onStartGroup(groupId);
+                            forEachGroup(onStartGroup);
                             setMenuOpen(false);
                           }}
                         >
@@ -171,7 +185,7 @@ export function RunnerGroupRow({
                         <button
                           className="actions-dropdown-item"
                           onClick={() => {
-                            onStopGroup(groupId);
+                            forEachGroup(onStopGroup);
                             setMenuOpen(false);
                           }}
                         >
@@ -181,7 +195,7 @@ export function RunnerGroupRow({
                       <button
                         className="actions-dropdown-item"
                         onClick={() => {
-                          onRestartGroup(groupId);
+                          forEachGroup(onRestartGroup);
                           setMenuOpen(false);
                         }}
                       >
@@ -190,7 +204,7 @@ export function RunnerGroupRow({
                       <button
                         className="actions-dropdown-item"
                         onClick={() => {
-                          onScaleGroup(groupId, runners.length + 1);
+                          onScaleGroup(allGroupIds[0], runners.length + 1);
                           setMenuOpen(false);
                         }}
                         disabled={runners.length >= 10}
@@ -200,7 +214,7 @@ export function RunnerGroupRow({
                       <button
                         className="actions-dropdown-item"
                         onClick={() => {
-                          onScaleGroup(groupId, runners.length - 1);
+                          onScaleGroup(allGroupIds[0], runners.length - 1);
                           setMenuOpen(false);
                         }}
                         disabled={runners.length <= 1}
@@ -231,7 +245,7 @@ export function RunnerGroupRow({
           confirmLabel="Delete All"
           danger
           onConfirm={() => {
-            onDeleteGroup(groupId);
+            forEachGroup(onDeleteGroup);
             setConfirmDelete(false);
           }}
           onCancel={() => setConfirmDelete(false)}

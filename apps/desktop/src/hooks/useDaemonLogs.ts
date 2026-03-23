@@ -21,6 +21,7 @@ export function useDaemonLogs(pollInterval = 2000) {
       setError(null);
     } catch (e) {
       setError(String(e));
+      setLogs([]);
     } finally {
       setLoading(false);
     }

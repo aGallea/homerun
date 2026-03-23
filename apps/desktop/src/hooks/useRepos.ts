@@ -20,6 +20,7 @@ export function useRepos() {
         handleUnauthorized();
       }
       setError(msg);
+      setRepos([]);
     } finally {
       setLoading(false);
     }
@@ -27,6 +28,8 @@ export function useRepos() {
 
   useEffect(() => {
     refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
   }, [refresh]);
 
   return { repos, loading, error, refresh };

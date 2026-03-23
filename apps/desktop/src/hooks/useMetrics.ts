@@ -15,6 +15,7 @@ export function useMetrics(pollInterval = 2000) {
       setError(null);
     } catch (e) {
       setError(String(e));
+      setMetrics(null);
     } finally {
       if (initialFetch.current) {
         initialFetch.current = false;
