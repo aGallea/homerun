@@ -87,7 +87,7 @@ export function JobProgress({
   ).length;
 
   return (
-    <div className="runner-card" style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}>
+    <div className="runner-card" style={{ marginBottom: 16, padding: 0 }}>
       {/* Header */}
       <div
         style={{
@@ -118,7 +118,15 @@ export function JobProgress({
       </div>
 
       {/* Step list */}
-      <div style={{ display: "flex", flexDirection: "column" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 100,
+          maxHeight: 350,
+          overflowY: "auto",
+        }}
+      >
         {steps.map((step) => {
           const isPending = step.status === "pending";
           const isRunning = step.status === "running";
