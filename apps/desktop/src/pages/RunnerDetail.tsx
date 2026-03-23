@@ -617,6 +617,7 @@ export function RunnerDetail() {
               display: "flex",
               flexDirection: "column",
               position: "relative",
+              height: historyHeight,
             }}
           >
             <div className="logs-header">
@@ -642,7 +643,8 @@ export function RunnerDetail() {
                 flexDirection: "column",
                 gap: 1,
                 overflow: "auto",
-                height: historyHeight,
+                flex: 1,
+                minHeight: 0,
               }}
             >
               {history.map((entry, i) => {
