@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useRunners } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
@@ -103,6 +103,34 @@ export function RunnerDetail() {
   );
   const { history } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
+  const [historyHeight, setHistoryHeight] = useState(300);
+  const historyResizing = useRef(false);
+  const historyStartY = useRef(0);
+  const historyStartH = useRef(0);
+
+  const onResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      historyResizing.current = true;
+      historyStartY.current = e.clientY;
+      historyStartH.current = historyHeight;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!historyResizing.current) return;
+        const delta = ev.clientY - historyStartY.current;
+        setHistoryHeight(Math.max(150, Math.min(800, historyStartH.current + delta)));
+      };
+      const onMouseUp = () => {
+        historyResizing.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [historyHeight],
+  );
+
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -340,7 +368,7 @@ export function RunnerDetail() {
         </div>
 
         {/* Main content: Current Job (30%) + Logs (70%) */}
-        <div style={{ display: "flex", gap: 12, minHeight: 200 }}>
+        <div style={{ display: "flex", gap: 12, minHeight: 150 }}>
           {/* Left: Current Job */}
           <div style={{ flex: "0 0 30%", minWidth: 0, display: "flex" }}>
             <div className="runner-card runner-card-job" style={{ flex: 1, overflow: "hidden" }}>
@@ -582,19 +610,39 @@ export function RunnerDetail() {
 
         {/* Job History */}
         {history.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <h3 className="runner-card-label" style={{ marginBottom: 8, fontSize: 11 }}>
-              Job History
-            </h3>
+          <div
+            className="logs-panel"
+            style={{
+              marginTop: 12,
+              display: "flex",
+              flexDirection: "column",
+              position: "relative",
+            }}
+          >
+            <div className="logs-header">
+              <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
+                Job History
+              </span>
+              <span
+                style={{
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  borderRadius: 10,
+                  background: "var(--bg-tertiary)",
+                  color: "var(--text-secondary)",
+                  fontWeight: 500,
+                }}
+              >
+                {history.length} {history.length === 1 ? "job" : "jobs"}
+              </span>
+            </div>
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 1,
-                borderRadius: 8,
                 overflow: "auto",
-                border: "1px solid var(--border)",
-                maxHeight: 300,
+                height: historyHeight,
               }}
             >
               {history.map((entry, i) => {
@@ -816,6 +864,28 @@ export function RunnerDetail() {
                   </div>
                 );
               })}
+            </div>
+            {/* Resize handle */}
+            <div
+              onMouseDown={onResizeMouseDown}
+              style={{
+                position: "absolute",
+                bottom: 0,
+                right: 0,
+                width: 20,
+                height: 20,
+                cursor: "nwse-resize",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: 0.4,
+                fontSize: 10,
+                color: "var(--text-secondary)",
+                userSelect: "none",
+              }}
+              title="Drag to resize"
+            >
+              ⟍
             </div>
           </div>
         )}
