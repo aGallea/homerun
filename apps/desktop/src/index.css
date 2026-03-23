@@ -1593,3 +1593,19 @@ p {
     padding: 0 48px 48px;
   }
 }
+
+.step-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent-yellow);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: step-spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes step-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -6,6 +6,8 @@ import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
 import type { LogEntry } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { JobProgress } from "../components/JobProgress";
+import { useJobSteps } from "../hooks/useJobSteps";
 
 function formatUptime(secs: number): string {
   if (secs < 60) return `${secs}s`;
@@ -131,6 +133,11 @@ export function RunnerDetail() {
   const isAuthenticated = auth.authenticated;
   const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } = useRunners();
   const { metrics } = useMetrics();
+  const runner = runners.find((r) => r.config.id === id);
+  const { steps, stepsDiscovered, jobName, expandedStep, stepLogs, toggleStep } = useJobSteps(
+    id,
+    runner?.state === "busy",
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -159,7 +166,6 @@ export function RunnerDetail() {
     }
   }, [logs, followLogs]);
 
-  const runner = runners.find((r) => r.config.id === id);
   const runnerMetrics = metrics?.runners.find((m) => m.runner_id === id);
   const osTotalMemory = metrics?.system.memory_total_bytes ?? 0;
 
@@ -450,11 +456,23 @@ export function RunnerDetail() {
           </div>
         )}
 
+        {/* Job Progress */}
+        {state === "busy" && steps.length > 0 && (
+          <JobProgress
+            steps={steps}
+            stepsDiscovered={stepsDiscovered}
+            jobName={jobName}
+            expandedStep={expandedStep}
+            stepLogs={stepLogs}
+            onToggleStep={toggleStep}
+          />
+        )}
+
         {/* Logs panel */}
         <div className="logs-panel">
           <div className="logs-header">
             <h3 className="runner-card-label" style={{ margin: 0 }}>
-              Logs
+              Runner Process Logs
             </h3>
             <div className="flex items-center gap-16">
               <div className="logs-search-wrapper">
