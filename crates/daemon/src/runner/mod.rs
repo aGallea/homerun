@@ -9,6 +9,7 @@ use crate::github::GitHubClient;
 use crate::runner::binary::ensure_runner_binary;
 use crate::runner::process::{configure_runner, remove_runner, start_runner};
 use crate::runner::state::RunnerState;
+use crate::runner::steps::{StepsResponse, WorkerLogWatcher};
 use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -54,6 +55,7 @@ pub struct RunnerManager {
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
     name_counters: Arc<RwLock<HashMap<String, u32>>>,
     auth_token: Arc<RwLock<Option<String>>>,
+    step_watcher: WorkerLogWatcher,
 }
 
 /// Recursively copy the contents of `src` directory into `dst` directory.
@@ -100,6 +102,7 @@ impl RunnerManager {
             recent_logs: Arc::new(RwLock::new(HashMap::new())),
             name_counters: Arc::new(RwLock::new(HashMap::new())),
             auth_token: Arc::new(RwLock::new(None)),
+            step_watcher: WorkerLogWatcher::new(),
         }
     }
 
@@ -541,6 +544,11 @@ impl RunnerManager {
             .map(Self::with_computed_uptime)
     }
 
+    /// Get the current step progress for a running job on the given runner.
+    pub async fn get_steps(&self, runner_id: &str) -> Option<StepsResponse> {
+        self.step_watcher.get_steps(runner_id).await
+    }
+
     pub async fn delete(&self, id: &str) -> Result<()> {
         let mut runners = self.runners.write().await;
         if let Some(runner) = runners.remove(id) {
@@ -693,6 +701,7 @@ impl RunnerManager {
             let log_tx = self.log_tx.clone();
             let recent_logs = self.recent_logs.clone();
             let runners = self.runners.clone();
+            let step_watcher = self.step_watcher.clone();
             let rid = id.to_string();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -719,13 +728,24 @@ impl RunnerManager {
                     // Lines look like: "2026-03-21 19:49:31Z: Running job: TypeScript (type check + build)"
                     match parse_job_event(&line) {
                         Some(JobEvent::Started(job_name)) => {
-                            let mut map = runners.write().await;
-                            if let Some(r) = map.get_mut(&rid) {
-                                r.state = RunnerState::Busy;
-                                r.current_job = Some(job_name);
+                            let work_dir = {
+                                let mut map = runners.write().await;
+                                if let Some(r) = map.get_mut(&rid) {
+                                    r.state = RunnerState::Busy;
+                                    r.current_job = Some(job_name.clone());
+                                    Some(r.config.work_dir.clone())
+                                } else {
+                                    None
+                                }
+                            };
+                            if let Some(work_dir) = work_dir {
+                                step_watcher
+                                    .start_watching(&rid, &job_name, &work_dir)
+                                    .await;
                             }
                         }
                         Some(JobEvent::Completed { succeeded }) => {
+                            step_watcher.stop_watching(&rid).await;
                             let mut map = runners.write().await;
                             if let Some(r) = map.get_mut(&rid) {
                                 if succeeded {
@@ -767,6 +787,20 @@ impl RunnerManager {
                         if dq.len() > RECENT_LOGS_MAX {
                             dq.pop_front();
                         }
+                    }
+                }
+            });
+        }
+
+        // 5d. Spawn step-watcher polling task
+        {
+            let step_watcher = self.step_watcher.clone();
+            let rid = id.to_string();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    if !step_watcher.poll(&rid).await {
+                        break;
                     }
                 }
             });
@@ -1916,5 +1950,54 @@ mod tests {
         let runner = manager.get(runner_id).await.unwrap();
         assert_eq!(runner.state, RunnerState::Offline);
         assert_eq!(runner.pid, None);
+    }
+
+    #[tokio::test]
+    async fn test_get_steps_returns_data_after_watcher_started() {
+        let manager = create_test_manager();
+
+        // Create a fake runner work dir with a Worker log
+        let work_dir = tempfile::tempdir().unwrap();
+        let diag = work_dir.path().join("_diag");
+        std::fs::create_dir_all(&diag).unwrap();
+
+        let log_content = "\
+[2026-03-23 07:54:53Z INFO StepsRunner] Processing step: DisplayName='Checkout'\n\
+[2026-03-23 07:54:53Z INFO StepsRunner] Starting the step.\n\
+[2026-03-23 07:54:55Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.\n\
+[2026-03-23 07:54:55Z INFO StepsRunner] Processing step: DisplayName='Build'\n\
+[2026-03-23 07:54:55Z INFO StepsRunner] Starting the step.\n";
+        std::fs::write(diag.join("Worker_20260323-075453-utc.log"), log_content).unwrap();
+
+        let runner_id = "test-steps-runner";
+
+        // Before watching: get_steps returns None
+        assert!(manager.get_steps(runner_id).await.is_none());
+
+        // Start watching and poll
+        manager
+            .step_watcher
+            .start_watching(runner_id, "build-job", work_dir.path())
+            .await;
+        manager.step_watcher.poll(runner_id).await;
+
+        // get_steps should return data
+        let resp = manager.get_steps(runner_id).await.unwrap();
+        assert_eq!(resp.job_name, "build-job");
+        assert_eq!(resp.steps.len(), 2);
+        assert_eq!(resp.steps[0].name, "Checkout");
+        assert_eq!(
+            resp.steps[0].status,
+            crate::runner::steps::StepStatus::Succeeded
+        );
+        assert_eq!(resp.steps[1].name, "Build");
+        assert_eq!(
+            resp.steps[1].status,
+            crate::runner::steps::StepStatus::Running
+        );
+
+        // Stop watching: get_steps returns None again
+        manager.step_watcher.stop_watching(runner_id).await;
+        assert!(manager.get_steps(runner_id).await.is_none());
     }
 }
