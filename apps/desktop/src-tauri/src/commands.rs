@@ -9,10 +9,21 @@ use crate::AppState;
 
 #[tauri::command]
 pub async fn health_check(state: State<'_, AppState>) -> Result<bool, String> {
-    let client = state.client.lock().await;
-    match client.health().await {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
+    // Use a fresh client to avoid mutex contention with other commands
+    // that may be hanging when the daemon is down.
+    let socket_path = {
+        let client = state.client.lock().await;
+        client.socket_path().to_path_buf()
+    };
+    let check_client = crate::client::DaemonClient::new(socket_path);
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        check_client.health(),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(true),
+        _ => Ok(false),
     }
 }
 
