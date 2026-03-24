@@ -23,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install pre-commit
         run: pip3 install pre-commit --quiet 2>/dev/null || pip install pre-commit --quiet
 
@@ -30,9 +33,7 @@ jobs:
         run: cd apps/desktop && npm ci
 
       - name: Run pre-commit
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          pre-commit run --all-files --show-diff-on-failure
+        run: pre-commit run --all-files --show-diff-on-failure
         env:
           SKIP: cargo-test,cargo-clippy
 
@@ -44,36 +45,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Ensure Rust is available
         run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
           rustc --version
           cargo --version
 
       - name: Check formatting
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Install cargo-llvm-cov
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
+        run: which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
 
       - name: Run tests with coverage (daemon)
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
+        run: cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
 
       - name: Run tests with coverage (tui)
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
+        run: cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
 
       - name: Merge coverage
         run: cat daemon-lcov.info tui-lcov.info > lcov.info
