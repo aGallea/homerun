@@ -10,6 +10,8 @@ export interface JobProgressProps {
   onToggleStep: (stepNumber: number) => void;
   height?: number;
   resizeHandle?: React.ReactNode;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 function formatDuration(startedAt: string | null, completedAt: string | null): string {
@@ -64,6 +66,8 @@ export function JobProgress({
   onToggleStep,
   height,
   resizeHandle,
+  collapsed,
+  onToggleCollapsed,
 }: JobProgressProps) {
   const [, setTick] = useState(0);
   const logRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -92,28 +96,41 @@ export function JobProgress({
 
   return (
     <div
-      className="runner-card"
+      className="logs-panel"
       style={{
-        marginBottom: 0,
-        padding: 0,
+        display: "flex",
+        flexDirection: "column",
         position: "relative",
-        ...(height ? { maxHeight: height, display: "flex", flexDirection: "column" as const } : {}),
+        height: collapsed ? "auto" : undefined,
+        ...(!collapsed && height
+          ? { maxHeight: height, display: "flex", flexDirection: "column" as const }
+          : {}),
+        flex: "none",
       }}
     >
       {/* Header */}
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--border)",
-        }}
+        className="logs-header"
+        style={{ cursor: onToggleCollapsed ? "pointer" : "default" }}
+        onClick={onToggleCollapsed}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h3 className="runner-card-label" style={{ margin: 0 }}>
+        <div className="flex items-center gap-8">
+          {onToggleCollapsed && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                width: 12,
+                textAlign: "center",
+                flexShrink: 0,
+              }}
+            >
+              {collapsed ? "\u25B8" : "\u25BE"}
+            </span>
+          )}
+          <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
             {jobName ? `Job: ${jobName}` : "Job Progress"}
-          </h3>
+          </span>
           <span
             style={{
               fontSize: 12,
@@ -130,154 +147,156 @@ export function JobProgress({
       </div>
 
       {/* Step list */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          overflowY: "auto",
-          ...(height ? { flex: 1, minHeight: 0 } : { minHeight: 100, maxHeight: 350 }),
-        }}
-      >
-        {steps.map((step) => {
-          const isPending = step.status === "pending";
-          const isRunning = step.status === "running";
-          const isExpanded = expandedStep === step.number;
-          const logs = stepLogs[step.number];
+      {!collapsed && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            overflowY: "auto",
+            ...(height ? { flex: 1, minHeight: 0 } : { minHeight: 100, maxHeight: 350 }),
+          }}
+        >
+          {steps.map((step) => {
+            const isPending = step.status === "pending";
+            const isRunning = step.status === "running";
+            const isExpanded = expandedStep === step.number;
+            const logs = stepLogs[step.number];
 
-          return (
-            <div key={step.number}>
-              <div
-                onClick={() => {
-                  if (!isPending) onToggleStep(step.number);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 16px",
-                  cursor: isPending ? "default" : "pointer",
-                  opacity: isPending ? 0.5 : 1,
-                  borderLeft: isRunning
-                    ? "3px solid var(--accent-yellow)"
-                    : "3px solid transparent",
-                  background: isRunning ? "rgba(210, 153, 34, 0.06)" : "transparent",
-                  transition: "background 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  if (!isPending && !isRunning) {
-                    e.currentTarget.style.background = "var(--bg-secondary)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isPending && !isRunning) {
-                    e.currentTarget.style.background = "transparent";
-                  }
-                }}
-              >
-                {/* Icon */}
+            return (
+              <div key={step.number}>
                 <div
+                  onClick={() => {
+                    if (!isPending) onToggleStep(step.number);
+                  }}
                   style={{
-                    width: 20,
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
+                    gap: 10,
+                    padding: "8px 16px",
+                    cursor: isPending ? "default" : "pointer",
+                    opacity: isPending ? 0.5 : 1,
+                    borderLeft: isRunning
+                      ? "3px solid var(--accent-yellow)"
+                      : "3px solid transparent",
+                    background: isRunning ? "rgba(210, 153, 34, 0.06)" : "transparent",
+                    transition: "background 0.15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isPending && !isRunning) {
+                      e.currentTarget.style.background = "var(--bg-secondary)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isPending && !isRunning) {
+                      e.currentTarget.style.background = "transparent";
+                    }
                   }}
                 >
-                  <StepIcon status={step.status} />
-                </div>
-
-                {/* Name */}
-                <span
-                  style={{
-                    flex: 1,
-                    fontSize: 13,
-                    fontWeight: isRunning ? 600 : 400,
-                    color: isRunning
-                      ? "var(--accent-yellow)"
-                      : isPending
-                        ? "var(--text-secondary)"
-                        : "var(--text-primary)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {step.name}
-                </span>
-
-                {/* Duration */}
-                <span
-                  className="font-mono"
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {formatDuration(step.started_at, step.completed_at)}
-                </span>
-
-                {/* Expand arrow */}
-                {!isPending && (
-                  <span
+                  {/* Icon */}
+                  <div
                     style={{
-                      fontSize: 12,
-                      color: "var(--text-secondary)",
-                      width: 16,
-                      textAlign: "center",
+                      width: 20,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                       flexShrink: 0,
                     }}
                   >
-                    {isExpanded ? "\u25BE" : "\u25B8"}
-                  </span>
-                )}
-                {isPending && <span style={{ width: 16, flexShrink: 0 }} />}
-              </div>
+                    <StepIcon status={step.status} />
+                  </div>
 
-              {/* Expanded log view */}
-              {isExpanded && (
-                <div
-                  ref={(el) => {
-                    logRefs.current[step.number] = el;
-                  }}
-                  className="font-mono"
-                  style={{
-                    maxHeight: 200,
-                    overflowY: "auto",
-                    background: "var(--bg-primary)",
-                    borderTop: "1px solid var(--border)",
-                    borderBottom: "1px solid var(--border)",
-                    padding: "8px 16px 8px 49px",
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  {logs === undefined ? (
-                    <span style={{ color: "var(--text-secondary)", fontStyle: "italic" }}>
-                      Fetching logs...
+                  {/* Name */}
+                  <span
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      fontWeight: isRunning ? 600 : 400,
+                      color: isRunning
+                        ? "var(--accent-yellow)"
+                        : isPending
+                          ? "var(--text-secondary)"
+                          : "var(--text-primary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {step.name}
+                  </span>
+
+                  {/* Duration */}
+                  <span
+                    className="font-mono"
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {formatDuration(step.started_at, step.completed_at)}
+                  </span>
+
+                  {/* Expand arrow */}
+                  {!isPending && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                        width: 16,
+                        textAlign: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {isExpanded ? "\u25BE" : "\u25B8"}
                     </span>
-                  ) : logs.length === 0 ? (
-                    <span style={{ color: "var(--text-secondary)", fontStyle: "italic" }}>
-                      {step.status === "running"
-                        ? "Logs available after step completes."
-                        : "No log output."}
-                    </span>
-                  ) : (
-                    logs.map((line, i) => (
-                      <div key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                        {line}
-                      </div>
-                    ))
                   )}
+                  {isPending && <span style={{ width: 16, flexShrink: 0 }} />}
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {resizeHandle}
+
+                {/* Expanded log view */}
+                {isExpanded && (
+                  <div
+                    ref={(el) => {
+                      logRefs.current[step.number] = el;
+                    }}
+                    className="font-mono"
+                    style={{
+                      maxHeight: 200,
+                      overflowY: "auto",
+                      background: "var(--bg-primary)",
+                      borderTop: "1px solid var(--border)",
+                      borderBottom: "1px solid var(--border)",
+                      padding: "8px 16px 8px 49px",
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    {logs === undefined ? (
+                      <span style={{ color: "var(--text-secondary)", fontStyle: "italic" }}>
+                        Fetching logs...
+                      </span>
+                    ) : logs.length === 0 ? (
+                      <span style={{ color: "var(--text-secondary)", fontStyle: "italic" }}>
+                        {step.status === "running"
+                          ? "Logs available after step completes."
+                          : "No log output."}
+                      </span>
+                    ) : (
+                      logs.map((line, i) => (
+                        <div key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                          {line}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!collapsed && resizeHandle}
     </div>
   );
 }
