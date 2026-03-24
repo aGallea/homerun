@@ -137,6 +137,7 @@ pub fn create_router(state: AppState) -> Router {
             "/preferences",
             get(api::preferences::get_preferences).put(api::preferences::update_preferences),
         )
+        .route("/daemon/shutdown", post(api::shutdown::shutdown_daemon))
         .with_state(state)
 }
 
