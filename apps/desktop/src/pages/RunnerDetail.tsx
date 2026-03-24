@@ -213,7 +213,7 @@ export function RunnerDetail() {
     id,
     runner?.state === "busy",
   );
-  const { history } = useJobHistory(id);
+  const { history, refresh: refreshHistory } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const expandedHistoryRef = useRef<HTMLDivElement | null>(null);
   const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<number>>(new Set());
@@ -780,7 +780,10 @@ export function RunnerDetail() {
                     setClearingHistory(true);
                     api
                       .clearRunnerHistory(id!)
-                      .then(() => setExpandedHistoryIndex(null))
+                      .then(() => {
+                        setExpandedHistoryIndex(null);
+                        return refreshHistory();
+                      })
                       .finally(() => setClearingHistory(false));
                   }}
                   style={{
@@ -995,13 +998,16 @@ export function RunnerDetail() {
                               e.preventDefault();
                               e.stopPropagation();
                               setDeletingHistoryEntries((s) => new Set(s).add(i));
-                              api.deleteHistoryEntry(id!, i).finally(() =>
-                                setDeletingHistoryEntries((s) => {
-                                  const next = new Set(s);
-                                  next.delete(i);
-                                  return next;
-                                }),
-                              );
+                              api
+                                .deleteHistoryEntry(id!, i)
+                                .then(() => refreshHistory())
+                                .finally(() =>
+                                  setDeletingHistoryEntries((s) => {
+                                    const next = new Set(s);
+                                    next.delete(i);
+                                    return next;
+                                  }),
+                                );
                             }}
                             style={{
                               color: "var(--text-secondary)",
