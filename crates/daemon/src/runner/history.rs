@@ -100,6 +100,7 @@ mod tests {
             branch: Some("main".to_string()),
             pr_number: None,
             run_url: None,
+            error_message: None,
             steps: vec![],
         }
     }
@@ -195,6 +196,7 @@ mod tests {
             branch: None,
             pr_number: None,
             run_url: None,
+            error_message: None,
             steps: vec![],
         }];
         assert_eq!(median_duration_secs(&entries, "build"), None);
@@ -211,6 +213,7 @@ mod tests {
             branch: None,
             pr_number: None,
             run_url: None,
+            error_message: None,
             steps: vec![],
         }];
         assert_eq!(median_duration_secs(&entries, "build"), Some(300));
@@ -227,6 +230,7 @@ mod tests {
             branch: None,
             pr_number: None,
             run_url: None,
+            error_message: None,
             steps: vec![],
         };
         let entries = vec![make(100), make(200), make(300)];
@@ -244,6 +248,7 @@ mod tests {
             branch: None,
             pr_number: None,
             run_url: None,
+            error_message: None,
             steps: vec![],
         };
         let entries = vec![make(100), make(200), make(300), make(400)];
@@ -262,6 +267,7 @@ mod tests {
             branch: None,
             pr_number: None,
             run_url: None,
+            error_message: None,
             steps: vec![],
         };
         let entries = vec![make("build", 100), make("test", 500), make("build", 300)];
@@ -281,6 +287,7 @@ mod tests {
                 branch: None,
                 pr_number: None,
                 run_url: None,
+                error_message: None,
                 steps: vec![],
             },
             JobHistoryEntry {
@@ -291,6 +298,7 @@ mod tests {
                 branch: None,
                 pr_number: None,
                 run_url: None,
+                error_message: None,
                 steps: vec![],
             },
             JobHistoryEntry {
@@ -301,6 +309,7 @@ mod tests {
                 branch: None,
                 pr_number: None,
                 run_url: None,
+                error_message: None,
                 steps: vec![],
             },
         ];
@@ -320,6 +329,7 @@ mod tests {
             branch: Some("feature/test".to_string()),
             pr_number: Some(42),
             run_url: Some("https://github.com/owner/repo/actions/runs/123".to_string()),
+            error_message: None,
             steps: vec![
                 StepInfo {
                     number: 1,

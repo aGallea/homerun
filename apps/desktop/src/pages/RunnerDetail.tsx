@@ -828,6 +828,19 @@ export function RunnerDetail() {
                           title={entry.job_name}
                         >
                           {entry.job_name}
+                          {!entry.succeeded && entry.error_message && (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "var(--accent-red)",
+                                fontWeight: 400,
+                                marginLeft: 8,
+                                opacity: 0.8,
+                              }}
+                            >
+                              — {entry.error_message}
+                            </span>
+                          )}
                         </span>
                         {(entry.branch || entry.pr_number != null) && (
                           <span

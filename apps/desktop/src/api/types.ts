@@ -37,6 +37,7 @@ export interface CompletedJob {
   branch?: string | null;
   pr_number?: number | null;
   run_url?: string | null;
+  error_message?: string | null;
 }
 
 export interface JobHistoryEntry {
@@ -47,6 +48,7 @@ export interface JobHistoryEntry {
   branch?: string | null;
   pr_number?: number | null;
   run_url?: string | null;
+  error_message?: string | null;
   steps: StepInfo[];
 }
 

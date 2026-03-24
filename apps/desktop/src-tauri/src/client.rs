@@ -106,6 +106,8 @@ pub struct CompletedJob {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +119,8 @@ pub struct JobHistoryEntry {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
     pub steps: Vec<StepInfo>,
 }
 

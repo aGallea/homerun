@@ -390,6 +390,7 @@ impl RunnerManager {
                                 branch: last.branch.clone(),
                                 pr_number: last.pr_number,
                                 run_url: last.run_url.clone(),
+                                error_message: None,
                             });
                         }
                     }
@@ -603,7 +604,7 @@ impl RunnerManager {
                                     }
                                 });
                             }
-                            Some(JobEvent::Completed { succeeded }) => {
+                            Some(JobEvent::Completed { succeeded, result }) => {
                                 // Capture steps before stopping the watcher
                                 let steps = step_watcher
                                     .get_steps(runner_id)
@@ -633,6 +634,8 @@ impl RunnerManager {
                                     }
                                 }
 
+                                let error_message = if succeeded { None } else { Some(result) };
+
                                 // Build history entry and update runner state
                                 let history_entry = {
                                     let mut map = manager.runners.write().await;
@@ -659,6 +662,7 @@ impl RunnerManager {
                                                 .job_context
                                                 .as_ref()
                                                 .map(|c| c.run_url.clone()),
+                                            error_message: error_message.clone(),
                                             steps,
                                         };
 
@@ -670,6 +674,7 @@ impl RunnerManager {
                                             branch: entry.branch.clone(),
                                             pr_number: entry.pr_number,
                                             run_url: entry.run_url.clone(),
+                                            error_message: error_message.clone(),
                                         });
 
                                         if succeeded {
@@ -1285,13 +1290,15 @@ impl RunnerManager {
                                 });
                             }
                         }
-                        Some(JobEvent::Completed { succeeded }) => {
+                        Some(JobEvent::Completed { succeeded, result }) => {
                             let steps_data = step_watcher
                                 .get_steps(&rid)
                                 .await
                                 .map(|s| s.steps)
                                 .unwrap_or_default();
                             step_watcher.stop_watching(&rid).await;
+
+                            let error_message = if succeeded { None } else { Some(result) };
 
                             // Fetch job context if the poller didn't get it in time
                             {
@@ -1349,6 +1356,7 @@ impl RunnerManager {
                                         branch: r.job_context.as_ref().map(|c| c.branch.clone()),
                                         pr_number: r.job_context.as_ref().and_then(|c| c.pr_number),
                                         run_url: r.job_context.as_ref().map(|c| c.run_url.clone()),
+                                        error_message: error_message.clone(),
                                         steps: steps_data,
                                     };
 
@@ -1360,6 +1368,7 @@ impl RunnerManager {
                                         branch: entry.branch.clone(),
                                         pr_number: entry.pr_number,
                                         run_url: entry.run_url.clone(),
+                                        error_message: error_message.clone(),
                                     });
 
                                     if succeeded {
@@ -1676,7 +1685,8 @@ pub enum JobEvent {
     /// The runner started executing a job with the given name.
     Started(String),
     /// A job completed; `succeeded` is true when the result was "Succeeded".
-    Completed { succeeded: bool },
+    /// `result` contains the raw result string (e.g. "Succeeded", "Failed", "Cancelled").
+    Completed { succeeded: bool, result: String },
 }
 
 /// Parse a single stdout line from the runner process into a [`JobEvent`], if it
@@ -1690,9 +1700,12 @@ pub fn parse_job_event(line: &str) -> Option<JobEvent> {
         let job_name = line[idx + "Running job: ".len()..].to_string();
         return Some(JobEvent::Started(job_name));
     }
-    if line.contains("completed with result:") {
-        let succeeded = line.contains("Succeeded");
-        return Some(JobEvent::Completed { succeeded });
+    if let Some(idx) = line.find("completed with result: ") {
+        let result = line[idx + "completed with result: ".len()..]
+            .trim()
+            .to_string();
+        let succeeded = result == "Succeeded";
+        return Some(JobEvent::Completed { succeeded, result });
     }
     None
 }
@@ -2015,7 +2028,13 @@ mod tests {
         let line =
             "2026-03-21 20:06:51Z: Job TypeScript (type check + build) completed with result: Succeeded";
         let event = parse_job_event(line);
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: true }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: true,
+                result: "Succeeded".to_string()
+            })
+        );
     }
 
     #[test]
@@ -2023,7 +2042,13 @@ mod tests {
         let line =
             "2026-03-21 20:06:51Z: Job TypeScript (type check + build) completed with result: Failed";
         let event = parse_job_event(line);
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: false,
+                result: "Failed".to_string()
+            })
+        );
     }
 
     #[test]
@@ -2426,6 +2451,7 @@ mod tests {
                 branch: None,
                 pr_number: None,
                 run_url: None,
+                error_message: None,
                 steps: vec![],
             }],
         );
@@ -2604,18 +2630,36 @@ mod tests {
     fn test_parse_job_event_completed_succeeded_case_sensitive() {
         // "Succeeded" (capital S) triggers succeeded=true
         let event = parse_job_event("Job build completed with result: Succeeded");
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: true }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: true,
+                result: "Succeeded".to_string()
+            })
+        );
 
         // Any other result keyword yields succeeded=false
         let event2 = parse_job_event("Job build completed with result: Cancelled");
-        assert_eq!(event2, Some(JobEvent::Completed { succeeded: false }));
+        assert_eq!(
+            event2,
+            Some(JobEvent::Completed {
+                succeeded: false,
+                result: "Cancelled".to_string()
+            })
+        );
     }
 
     #[test]
     fn test_parse_job_event_completed_skipped_result() {
         let line = "Job lint completed with result: Skipped";
         let event = parse_job_event(line);
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: false,
+                result: "Skipped".to_string()
+            })
+        );
     }
 
     #[tokio::test]
