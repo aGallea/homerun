@@ -151,9 +151,20 @@ async fn health() -> Json<serde_json::Value> {
 pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
     let socket_path = config.socket_path();
 
-    // Remove stale socket file if it exists
+    // Check if another daemon is already running on this socket
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path)?;
+        match tokio::net::UnixStream::connect(&socket_path).await {
+            Ok(_) => {
+                anyhow::bail!(
+                    "Daemon already running (socket {} is active). Stop the existing daemon first.",
+                    socket_path.display()
+                );
+            }
+            Err(_) => {
+                tracing::info!("Removing stale socket file: {}", socket_path.display());
+                std::fs::remove_file(&socket_path)?;
+            }
+        }
     }
 
     // Create parent directories
