@@ -215,6 +215,7 @@ export function RunnerDetail() {
   const { history } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [logsHeight, setLogsHeight] = useState(140);
+  const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [stepsHeight, setStepsHeight] = useState(300);
   const [historyHeight, setHistoryHeight] = useState(200);
 
@@ -598,68 +599,93 @@ export function RunnerDetail() {
             display: "flex",
             flexDirection: "column",
             position: "relative",
-            height: logsHeight,
+            height: logsCollapsed ? "auto" : logsHeight,
             flex: "none",
           }}
         >
-          <div className="logs-header">
-            <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
-              Runner Process Logs
-            </span>
-            <div className="flex items-center gap-16">
-              <div className="logs-search-wrapper">
-                <span className="logs-search-icon">⌕</span>
-                <input
-                  className="logs-search-input"
-                  placeholder="Search"
-                  value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
-                />
-              </div>
-              <label className="follow-toggle">
-                <input
-                  type="checkbox"
-                  checked={followLogs}
-                  onChange={(e) => setFollowLogs(e.target.checked)}
-                />
-                <span className="follow-toggle-track">
-                  <span className="follow-toggle-thumb" />
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Follow</span>
-              </label>
-            </div>
-          </div>
           <div
-            ref={logContainerRef}
-            className="logs-content font-mono"
-            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+            className="logs-header"
+            style={{ cursor: "pointer" }}
+            onClick={() => setLogsCollapsed((c) => !c)}
           >
-            {filteredLogs.length === 0 ? (
-              <div className="logs-empty">
-                {runner.state === "online" || runner.state === "busy"
-                  ? "Waiting for log output..."
-                  : "Runner is not active."}
+            <div className="flex items-center gap-8">
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  width: 12,
+                  textAlign: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {logsCollapsed ? "\u25B8" : "\u25BE"}
+              </span>
+              <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
+                Runner Process Logs
+              </span>
+            </div>
+            {!logsCollapsed && (
+              <div className="flex items-center gap-16" onClick={(e) => e.stopPropagation()}>
+                <div className="logs-search-wrapper">
+                  <span className="logs-search-icon">⌕</span>
+                  <input
+                    className="logs-search-input"
+                    placeholder="Search"
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                  />
+                </div>
+                <label className="follow-toggle">
+                  <input
+                    type="checkbox"
+                    checked={followLogs}
+                    onChange={(e) => setFollowLogs(e.target.checked)}
+                  />
+                  <span className="follow-toggle-track">
+                    <span className="follow-toggle-thumb" />
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Follow</span>
+                </label>
               </div>
-            ) : (
-              <table className="logs-table">
-                <tbody>
-                  {filteredLogs.map((entry, i) => (
-                    <tr key={i}>
-                      <td
-                        style={{
-                          color:
-                            entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)",
-                        }}
-                      >
-                        {entry.line}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             )}
           </div>
-          <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
+          {!logsCollapsed && (
+            <>
+              <div
+                ref={logContainerRef}
+                className="logs-content font-mono"
+                style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+              >
+                {filteredLogs.length === 0 ? (
+                  <div className="logs-empty">
+                    {runner.state === "online" || runner.state === "busy"
+                      ? "Waiting for log output..."
+                      : "Runner is not active."}
+                  </div>
+                ) : (
+                  <table className="logs-table">
+                    <tbody>
+                      {filteredLogs.map((entry, i) => (
+                        <tr key={i}>
+                          <td
+                            style={{
+                              color:
+                                entry.stream === "stderr"
+                                  ? "var(--accent-red)"
+                                  : "var(--text-primary)",
+                            }}
+                          >
+                            {entry.line}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
+            </>
+          )}
         </div>
 
         {/* Job Progress — full width, only when busy */}
