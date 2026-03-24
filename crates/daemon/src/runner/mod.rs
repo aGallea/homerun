@@ -640,23 +640,25 @@ impl RunnerManager {
                                     // Try to fetch the full error message from GitHub annotations
                                     let annotation_msg = {
                                         let map = manager.runners.read().await;
-                                        let info = map.get(runner_id).and_then(|r| {
-                                            let ctx = r.job_context.as_ref()?;
-                                            let job_id = ctx.job_id?;
-                                            Some((
+                                        let info = map.get(runner_id).map(|r| {
+                                            (
                                                 r.config.repo_owner.clone(),
                                                 r.config.repo_name.clone(),
-                                                job_id,
-                                            ))
+                                                r.config.name.clone(),
+                                                r.current_job.clone().unwrap_or_default(),
+                                            )
                                         });
-                                        if let Some((owner, repo, job_id)) = info {
+                                        if let Some((owner, repo, runner_name, job_name)) = info {
                                             let token = manager.auth_token.read().await.clone();
                                             if let Some(token) = token {
                                                 if let Ok(gh) =
                                                     crate::github::GitHubClient::new(Some(token))
                                                 {
                                                     gh.get_job_failure_message(
-                                                        &owner, &repo, job_id,
+                                                        &owner,
+                                                        &repo,
+                                                        &runner_name,
+                                                        &job_name,
                                                     )
                                                     .await
                                                     .ok()
@@ -1382,24 +1384,28 @@ impl RunnerManager {
                             if !succeeded {
                                 let info = {
                                     let map = runners.read().await;
-                                    map.get(&rid).and_then(|r| {
-                                        let ctx = r.job_context.as_ref()?;
-                                        let job_id = ctx.job_id?;
-                                        Some((
+                                    map.get(&rid).map(|r| {
+                                        (
                                             r.config.repo_owner.clone(),
                                             r.config.repo_name.clone(),
-                                            job_id,
-                                        ))
+                                            r.config.name.clone(),
+                                            r.current_job.clone().unwrap_or_default(),
+                                        )
                                     })
                                 };
-                                if let Some((owner, repo, job_id)) = info {
+                                if let Some((owner, repo, runner_name, job_name)) = info {
                                     let token = auth_token_clone.read().await.clone();
                                     if let Some(token) = token {
                                         if let Ok(gh) =
                                             crate::github::GitHubClient::new(Some(token))
                                         {
                                             if let Ok(Some(msg)) = gh
-                                                .get_job_failure_message(&owner, &repo, job_id)
+                                                .get_job_failure_message(
+                                                    &owner,
+                                                    &repo,
+                                                    &runner_name,
+                                                    &job_name,
+                                                )
                                                 .await
                                             {
                                                 error_message = Some(msg);
