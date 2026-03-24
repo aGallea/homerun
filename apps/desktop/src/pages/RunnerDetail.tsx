@@ -619,9 +619,9 @@ export function RunnerDetail() {
             <div className="flex items-center gap-8">
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 14,
                   color: "var(--text-secondary)",
-                  width: 12,
+                  width: 14,
                   textAlign: "center",
                   flexShrink: 0,
                 }}

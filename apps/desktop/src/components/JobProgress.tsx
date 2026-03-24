@@ -118,9 +118,9 @@ export function JobProgress({
           {onToggleCollapsed && (
             <span
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 color: "var(--text-secondary)",
-                width: 12,
+                width: 14,
                 textAlign: "center",
                 flexShrink: 0,
               }}
