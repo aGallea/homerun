@@ -174,6 +174,7 @@ function JobProgressBar({
   const progress = Math.min(elapsedSecs / estimatedDurationSecs, 0.99);
   const percent = Math.round(progress * 100);
   const exceeding = elapsedSecs > estimatedDurationSecs;
+  const significantlyExceeding = elapsedSecs > estimatedDurationSecs + 5;
 
   return (
     <div>
@@ -189,7 +190,7 @@ function JobProgressBar({
           }}
         />
       </div>
-      {exceeding && (
+      {significantlyExceeding && (
         <span
           style={{ fontSize: 11, color: "var(--accent-yellow)", marginTop: 2, display: "block" }}
         >
