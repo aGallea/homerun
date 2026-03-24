@@ -461,15 +461,18 @@ export function RunnerDetail() {
               <div className="runner-card-glow runner-card-glow-blue" />
               <div className="flex items-center justify-between">
                 <h3 className="runner-card-label">{current_job ? "Current Job" : "Last Job"}</h3>
-                {current_job && job_context?.run_url && (
+                {current_job && (
                   <a
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      const url =
-                        job_context.job_id != null
-                          ? `${job_context.run_url}/job/${job_context.job_id}`
-                          : job_context.run_url;
+                      let url = `https://github.com/${config.repo_owner}/${config.repo_name}/actions`;
+                      if (job_context?.run_url) {
+                        url =
+                          job_context.job_id != null
+                            ? `${job_context.run_url}/job/${job_context.job_id}`
+                            : job_context.run_url;
+                      }
                       import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
                     }}
                     style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
