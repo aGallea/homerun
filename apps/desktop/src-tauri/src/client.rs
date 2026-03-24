@@ -556,6 +556,10 @@ impl DaemonClient {
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
+    pub async fn shutdown(&self) -> Result<String, String> {
+        self.request("POST", "/daemon/shutdown", None).await
+    }
+
     pub async fn get_daemon_logs_recent(
         &self,
         level: Option<&str>,

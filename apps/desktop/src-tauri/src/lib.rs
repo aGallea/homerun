@@ -20,6 +20,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::daemon_available,
+            commands::start_daemon,
+            commands::stop_daemon,
+            commands::restart_daemon,
             commands::list_runners,
             commands::create_runner,
             commands::delete_runner,
