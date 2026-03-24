@@ -9,6 +9,23 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.3.0](https://github.com/aGallea/homerun/compare/v0.2.3...v0.3.0) (2026-03-24)
+
+
+### Features
+
+* add daemon control buttons to desktop UI and error banner ([7aa14f0](https://github.com/aGallea/homerun/commit/7aa14f04a703d453fb8d89c04e2f1b1cd540811c))
+* add daemon startup guard to prevent duplicate instances ([d785006](https://github.com/aGallea/homerun/commit/d785006efe104e9fc6d6dd76ecb8f6e006d14325))
+* add daemon_lifecycle module for start/stop/restart ([bd6e689](https://github.com/aGallea/homerun/commit/bd6e689c17d49b49b770a17207d9e8042d12e2f5))
+* add homerun daemon start|stop|restart CLI commands ([540abbe](https://github.com/aGallea/homerun/commit/540abbe36fa68a28656f6073f4ff0b7c80746e85))
+* add POST /daemon/shutdown endpoint with graceful teardown ([8fec156](https://github.com/aGallea/homerun/commit/8fec156f54771cfaeb85e98b0211dcd80ffd33df))
+* add SIGTERM/SIGINT signal handling for graceful shutdown ([4a82a08](https://github.com/aGallea/homerun/commit/4a82a08485145c24bfdafa08aa0e2c37ddb30ac7))
+* add Tauri IPC commands for daemon start/stop/restart ([30f97da](https://github.com/aGallea/homerun/commit/30f97da6f403f9b8e17c5289d20dab801d45691f))
+* add TUI disconnected mode and daemon start/stop/restart keybindings ([f598fe6](https://github.com/aGallea/homerun/commit/f598fe6b0f95ddd9aa6d91a8826fa381e4c38d04))
+* auto-start daemon sidecar on Tauri app launch ([8476303](https://github.com/aGallea/homerun/commit/8476303c56af6d58b912e06042f72fcfbaa7928f))
+* daemon lifecycle controls (start/stop/restart) ([4e8e38d](https://github.com/aGallea/homerun/commit/4e8e38d473bd80192e79f33f3945e2dac9581e44))
+* include PID in /health response ([34ff210](https://github.com/aGallea/homerun/commit/34ff210fe32dd036e6ae983f93632f5befb4eb8a))
+
 ## [0.2.3](https://github.com/aGallea/homerun/compare/v0.2.2...v0.2.3) (2026-03-24)
 
 
