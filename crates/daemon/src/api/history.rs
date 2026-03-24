@@ -24,6 +24,45 @@ pub async fn get_runner_history(
     Ok(Json(history))
 }
 
+pub async fn clear_runner_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .runner_manager
+        .get(&id)
+        .await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Runner '{id}' not found")))?;
+
+    state.runner_manager.delete_job_history(&id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteHistoryEntryRequest {
+    pub started_at: String,
+}
+
+pub async fn delete_history_entry(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<DeleteHistoryEntryRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .runner_manager
+        .get(&id)
+        .await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Runner '{id}' not found")))?;
+
+    state
+        .runner_manager
+        .delete_job_history_entry(&id, &req.started_at)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RerunRequest {
     pub run_url: String,

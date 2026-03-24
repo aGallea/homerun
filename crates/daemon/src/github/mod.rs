@@ -356,6 +356,86 @@ impl GitHubClient {
         let body = response.text().await?;
         Ok(body)
     }
+
+    /// Fetch the error/failure message for a completed job via check-run annotations.
+    /// Searches recent runs to find the job by runner name, then fetches annotations.
+    pub async fn get_job_failure_message(
+        &self,
+        owner: &str,
+        repo: &str,
+        runner_name: &str,
+        job_name: &str,
+    ) -> Result<Option<String>> {
+        // Find the job_id by searching recent runs
+        #[derive(Deserialize)]
+        struct WorkflowRun {
+            id: u64,
+        }
+        #[derive(Deserialize)]
+        struct RunsResponse {
+            workflow_runs: Vec<WorkflowRun>,
+        }
+        #[derive(Deserialize)]
+        struct RunJob {
+            id: u64,
+            name: String,
+            runner_name: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct JobsResponse {
+            jobs: Vec<RunJob>,
+        }
+
+        let route = format!("/repos/{owner}/{repo}/actions/runs?per_page=5");
+        let runs: RunsResponse = self.octocrab.get(&route, None::<&()>).await?;
+
+        let mut job_id = None;
+        for run in runs.workflow_runs {
+            let jobs_route = format!("/repos/{owner}/{repo}/actions/runs/{}/jobs", run.id);
+            if let Ok(jobs) = self
+                .octocrab
+                .get::<JobsResponse, _, _>(&jobs_route, None::<&()>)
+                .await
+            {
+                if let Some(j) = jobs
+                    .jobs
+                    .iter()
+                    .find(|j| j.runner_name.as_deref() == Some(runner_name) || j.name == job_name)
+                {
+                    job_id = Some(j.id);
+                    break;
+                }
+            }
+        }
+
+        let Some(job_id) = job_id else {
+            return Ok(None);
+        };
+
+        // Fetch annotations for this job
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/check-runs/{job_id}/annotations");
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "homerun")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+
+        #[derive(Deserialize)]
+        struct Annotation {
+            message: Option<String>,
+        }
+
+        let annotations: Vec<Annotation> = response.json().await?;
+        Ok(annotations.into_iter().find_map(|a| a.message))
+    }
 }
 
 /// Parse raw GitHub Actions job log text into sections by step name.

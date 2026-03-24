@@ -279,6 +279,21 @@ impl RunnerManager {
         info
     }
 
+    fn with_job_estimate(
+        mut info: RunnerInfo,
+        history: &HashMap<String, Vec<types::JobHistoryEntry>>,
+    ) -> RunnerInfo {
+        if info.state == RunnerState::Busy {
+            if let Some(ref job_name) = info.current_job {
+                if let Some(entries) = history.get(&info.config.id) {
+                    info.estimated_job_duration_secs =
+                        history::median_duration_secs(entries, job_name);
+                }
+            }
+        }
+        info
+    }
+
     // ── Persistence ────────────────────────────────────────────────
 
     /// Save all runner configs to disk as JSON.
@@ -351,6 +366,7 @@ impl RunnerManager {
                     error_message: None,
                     job_started_at: None,
                     last_completed_job: None,
+                    estimated_job_duration_secs: None,
                 },
             );
         }
@@ -374,6 +390,7 @@ impl RunnerManager {
                                 branch: last.branch.clone(),
                                 pr_number: last.pr_number,
                                 run_url: last.run_url.clone(),
+                                error_message: None,
                             });
                         }
                     }
@@ -587,7 +604,7 @@ impl RunnerManager {
                                     }
                                 });
                             }
-                            Some(JobEvent::Completed { succeeded }) => {
+                            Some(JobEvent::Completed { succeeded, result }) => {
                                 // Capture steps before stopping the watcher
                                 let steps = step_watcher
                                     .get_steps(runner_id)
@@ -617,6 +634,57 @@ impl RunnerManager {
                                     }
                                 }
 
+                                let error_message = if succeeded {
+                                    None
+                                } else {
+                                    // Try to fetch the full error message from GitHub annotations
+                                    let annotation_msg = {
+                                        let map = manager.runners.read().await;
+                                        let info = map.get(runner_id).map(|r| {
+                                            (
+                                                r.config.repo_owner.clone(),
+                                                r.config.repo_name.clone(),
+                                                r.config.name.clone(),
+                                                r.current_job.clone().unwrap_or_default(),
+                                            )
+                                        });
+                                        if let Some((owner, repo, runner_name, job_name)) = info {
+                                            let token = manager.auth_token.read().await.clone();
+                                            if let Some(token) = token {
+                                                if let Ok(gh) =
+                                                    crate::github::GitHubClient::new(Some(token))
+                                                {
+                                                    match gh
+                                                        .get_job_failure_message(
+                                                            &owner,
+                                                            &repo,
+                                                            &runner_name,
+                                                            &job_name,
+                                                        )
+                                                        .await
+                                                    {
+                                                        Ok(msg) => {
+                                                            tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
+                                                            msg
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!("Failed to fetch job annotations for {runner_name}: {e}");
+                                                            None
+                                                        }
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    };
+                                    Some(annotation_msg.unwrap_or(result))
+                                };
+
                                 // Build history entry and update runner state
                                 let history_entry = {
                                     let mut map = manager.runners.write().await;
@@ -639,10 +707,15 @@ impl RunnerManager {
                                                 .job_context
                                                 .as_ref()
                                                 .and_then(|c| c.pr_number),
-                                            run_url: r
-                                                .job_context
-                                                .as_ref()
-                                                .map(|c| c.run_url.clone()),
+                                            run_url: r.job_context.as_ref().map(|c| {
+                                                match c.job_id {
+                                                    Some(job_id) => {
+                                                        format!("{}/job/{}", c.run_url, job_id)
+                                                    }
+                                                    None => c.run_url.clone(),
+                                                }
+                                            }),
+                                            error_message: error_message.clone(),
                                             steps,
                                         };
 
@@ -654,6 +727,7 @@ impl RunnerManager {
                                             branch: entry.branch.clone(),
                                             pr_number: entry.pr_number,
                                             run_url: entry.run_url.clone(),
+                                            error_message: error_message.clone(),
                                         });
 
                                         if succeeded {
@@ -754,6 +828,7 @@ impl RunnerManager {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -795,13 +870,19 @@ impl RunnerManager {
     }
 
     pub async fn list_by_group(&self, group_id: &str) -> Vec<RunnerInfo> {
-        self.runners
+        let infos: Vec<RunnerInfo> = self
+            .runners
             .read()
             .await
             .values()
             .filter(|r| r.config.group_id.as_deref() == Some(group_id))
             .cloned()
             .map(Self::with_computed_uptime)
+            .collect();
+        let history = self.job_history.read().await;
+        infos
+            .into_iter()
+            .map(|info| Self::with_job_estimate(info, &history))
             .collect()
     }
 
@@ -908,12 +989,18 @@ impl RunnerManager {
     }
 
     pub async fn list(&self) -> Vec<RunnerInfo> {
-        self.runners
+        let infos: Vec<RunnerInfo> = self
+            .runners
             .read()
             .await
             .values()
             .cloned()
             .map(Self::with_computed_uptime)
+            .collect();
+        let history = self.job_history.read().await;
+        infos
+            .into_iter()
+            .map(|info| Self::with_job_estimate(info, &history))
             .collect()
     }
 
@@ -926,12 +1013,20 @@ impl RunnerManager {
     }
 
     pub async fn get(&self, id: &str) -> Option<RunnerInfo> {
-        self.runners
+        let info = self
+            .runners
             .read()
             .await
             .get(id)
             .cloned()
-            .map(Self::with_computed_uptime)
+            .map(Self::with_computed_uptime);
+        match info {
+            Some(info) => {
+                let history = self.job_history.read().await;
+                Some(Self::with_job_estimate(info, &history))
+            }
+            None => None,
+        }
     }
 
     /// Get the current step progress for a running job on the given runner.
@@ -1248,13 +1343,15 @@ impl RunnerManager {
                                 });
                             }
                         }
-                        Some(JobEvent::Completed { succeeded }) => {
+                        Some(JobEvent::Completed { succeeded, result }) => {
                             let steps_data = step_watcher
                                 .get_steps(&rid)
                                 .await
                                 .map(|s| s.steps)
                                 .unwrap_or_default();
                             step_watcher.stop_watching(&rid).await;
+
+                            let mut error_message = if succeeded { None } else { Some(result) };
 
                             // Fetch job context if the poller didn't get it in time
                             {
@@ -1296,6 +1393,52 @@ impl RunnerManager {
                                 }
                             }
 
+                            // Fetch full error message from GitHub annotations
+                            if !succeeded {
+                                let info = {
+                                    let map = runners.read().await;
+                                    map.get(&rid).map(|r| {
+                                        (
+                                            r.config.repo_owner.clone(),
+                                            r.config.repo_name.clone(),
+                                            r.config.name.clone(),
+                                            r.current_job.clone().unwrap_or_default(),
+                                        )
+                                    })
+                                };
+                                if let Some((owner, repo, runner_name, job_name)) = info {
+                                    let token = auth_token_clone.read().await.clone();
+                                    if let Some(token) = token {
+                                        if let Ok(gh) =
+                                            crate::github::GitHubClient::new(Some(token))
+                                        {
+                                            match gh
+                                                .get_job_failure_message(
+                                                    &owner,
+                                                    &repo,
+                                                    &runner_name,
+                                                    &job_name,
+                                                )
+                                                .await
+                                            {
+                                                Ok(Some(msg)) => {
+                                                    tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
+                                                    error_message = Some(msg);
+                                                }
+                                                Ok(None) => {
+                                                    tracing::info!(
+                                                        "No annotations found for {runner_name}"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!("Failed to fetch job annotations for {runner_name}: {e}");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             let history_entry = {
                                 let mut map = runners.write().await;
                                 if let Some(r) = map.get_mut(&rid) {
@@ -1311,7 +1454,11 @@ impl RunnerManager {
                                         succeeded,
                                         branch: r.job_context.as_ref().map(|c| c.branch.clone()),
                                         pr_number: r.job_context.as_ref().and_then(|c| c.pr_number),
-                                        run_url: r.job_context.as_ref().map(|c| c.run_url.clone()),
+                                        run_url: r.job_context.as_ref().map(|c| match c.job_id {
+                                            Some(job_id) => format!("{}/job/{}", c.run_url, job_id),
+                                            None => c.run_url.clone(),
+                                        }),
+                                        error_message: error_message.clone(),
                                         steps: steps_data,
                                     };
 
@@ -1323,6 +1470,7 @@ impl RunnerManager {
                                         branch: entry.branch.clone(),
                                         pr_number: entry.pr_number,
                                         run_url: entry.run_url.clone(),
+                                        error_message: error_message.clone(),
                                     });
 
                                     if succeeded {
@@ -1599,6 +1747,24 @@ impl RunnerManager {
         }
     }
 
+    /// Delete a single job history entry by its `started_at` timestamp.
+    pub async fn delete_job_history_entry(&self, runner_id: &str, started_at: &str) -> Result<()> {
+        let ts: chrono::DateTime<chrono::Utc> = started_at
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid timestamp: {e}"))?;
+        let mut hist = self.job_history.write().await;
+        let entries = hist
+            .get_mut(runner_id)
+            .ok_or_else(|| anyhow::anyhow!("No history for runner"))?;
+        let before = entries.len();
+        entries.retain(|e| e.started_at != ts);
+        if entries.len() == before {
+            anyhow::bail!("No matching history entry found");
+        }
+        history::save(&self.config.history_dir(), runner_id, entries)?;
+        Ok(())
+    }
+
     /// Try to fetch job context from GitHub for a runner that's missing it.
     /// Called at job completion for fast jobs that finish before the poller runs.
     pub async fn fetch_missing_job_context(&self, runner_id: &str) -> Option<types::JobContext> {
@@ -1639,7 +1805,8 @@ pub enum JobEvent {
     /// The runner started executing a job with the given name.
     Started(String),
     /// A job completed; `succeeded` is true when the result was "Succeeded".
-    Completed { succeeded: bool },
+    /// `result` contains the raw result string (e.g. "Succeeded", "Failed", "Cancelled").
+    Completed { succeeded: bool, result: String },
 }
 
 /// Parse a single stdout line from the runner process into a [`JobEvent`], if it
@@ -1653,9 +1820,12 @@ pub fn parse_job_event(line: &str) -> Option<JobEvent> {
         let job_name = line[idx + "Running job: ".len()..].to_string();
         return Some(JobEvent::Started(job_name));
     }
-    if line.contains("completed with result:") {
-        let succeeded = line.contains("Succeeded");
-        return Some(JobEvent::Completed { succeeded });
+    if let Some(idx) = line.find("completed with result: ") {
+        let result = line[idx + "completed with result: ".len()..]
+            .trim()
+            .to_string();
+        let succeeded = result == "Succeeded";
+        return Some(JobEvent::Completed { succeeded, result });
     }
     None
 }
@@ -1978,7 +2148,13 @@ mod tests {
         let line =
             "2026-03-21 20:06:51Z: Job TypeScript (type check + build) completed with result: Succeeded";
         let event = parse_job_event(line);
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: true }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: true,
+                result: "Succeeded".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1986,7 +2162,13 @@ mod tests {
         let line =
             "2026-03-21 20:06:51Z: Job TypeScript (type check + build) completed with result: Failed";
         let event = parse_job_event(line);
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: false,
+                result: "Failed".to_string()
+            })
+        );
     }
 
     #[test]
@@ -2030,6 +2212,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2305,6 +2488,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -2339,12 +2523,156 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
             computed.uptime_secs.is_none(),
             "uptime should be None when not started"
         );
+    }
+
+    #[test]
+    fn test_with_job_estimate_busy_with_history() {
+        use crate::runner::types::{JobHistoryEntry, RunnerConfig, RunnerMode};
+        let now = chrono::Utc::now();
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: Some(now),
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let mut history = HashMap::new();
+        history.insert(
+            "runner-1".to_string(),
+            vec![JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(200),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+            }],
+        );
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, Some(200));
+    }
+
+    #[test]
+    fn test_with_job_estimate_busy_no_history() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, None);
+    }
+
+    #[test]
+    fn test_with_job_estimate_online_ignored() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Online,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, None);
+    }
+
+    #[test]
+    fn test_with_job_estimate_busy_no_current_job() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, None);
     }
 
     #[tokio::test]
@@ -2422,18 +2750,36 @@ mod tests {
     fn test_parse_job_event_completed_succeeded_case_sensitive() {
         // "Succeeded" (capital S) triggers succeeded=true
         let event = parse_job_event("Job build completed with result: Succeeded");
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: true }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: true,
+                result: "Succeeded".to_string()
+            })
+        );
 
         // Any other result keyword yields succeeded=false
         let event2 = parse_job_event("Job build completed with result: Cancelled");
-        assert_eq!(event2, Some(JobEvent::Completed { succeeded: false }));
+        assert_eq!(
+            event2,
+            Some(JobEvent::Completed {
+                succeeded: false,
+                result: "Cancelled".to_string()
+            })
+        );
     }
 
     #[test]
     fn test_parse_job_event_completed_skipped_result() {
         let line = "Job lint completed with result: Skipped";
         let event = parse_job_event(line);
-        assert_eq!(event, Some(JobEvent::Completed { succeeded: false }));
+        assert_eq!(
+            event,
+            Some(JobEvent::Completed {
+                succeeded: false,
+                result: "Skipped".to_string()
+            })
+        );
     }
 
     #[tokio::test]
@@ -2553,6 +2899,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2600,6 +2947,7 @@ mod tests {
                 error_message: None,
                 job_started_at: None,
                 last_completed_job: None,
+                estimated_job_duration_secs: None,
             },
         );
         manager

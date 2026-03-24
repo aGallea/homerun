@@ -148,6 +148,59 @@ function StatusPill({ state, currentJob }: { state: string; currentJob?: string 
   );
 }
 
+function JobProgressBar({
+  estimatedDurationSecs,
+  jobStartedAt,
+}: {
+  estimatedDurationSecs?: number;
+  jobStartedAt?: string;
+}) {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (estimatedDurationSecs == null || jobStartedAt == null) {
+    return (
+      <div className="glow-bar-track">
+        <div className="glow-bar-fill-indeterminate" />
+      </div>
+    );
+  }
+
+  const elapsedSecs = (Date.now() - new Date(jobStartedAt).getTime()) / 1000;
+  const progress = Math.min(elapsedSecs / estimatedDurationSecs, 0.99);
+  const percent = Math.round(progress * 100);
+  const exceeding = elapsedSecs > estimatedDurationSecs;
+  const significantlyExceeding = elapsedSecs > estimatedDurationSecs + 5;
+
+  return (
+    <div>
+      <div className="glow-bar-track">
+        <div
+          className="glow-bar-fill"
+          style={{
+            width: `${percent}%`,
+            background: exceeding ? "var(--accent-yellow)" : "var(--accent-blue)",
+            boxShadow: exceeding
+              ? "0 0 8px rgba(210, 153, 34, 0.8)"
+              : "0 0 8px rgba(59, 130, 246, 0.8)",
+          }}
+        />
+      </div>
+      {significantlyExceeding && (
+        <span
+          style={{ fontSize: 11, color: "var(--accent-yellow)", marginTop: 2, display: "block" }}
+        >
+          taking longer than usual
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -160,16 +213,31 @@ export function RunnerDetail() {
     id,
     runner?.state === "busy",
   );
-  const { history } = useJobHistory(id);
+  const { history, refresh: refreshHistory } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
-  const [logsHeight, setLogsHeight] = useState(150);
+  const expandedHistoryRef = useRef<HTMLDivElement | null>(null);
+  const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<string>>(new Set());
+  const [clearingHistory, setClearingHistory] = useState(false);
+
+  useEffect(() => {
+    if (expandedHistoryIndex != null && expandedHistoryRef.current) {
+      setTimeout(
+        () => expandedHistoryRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+        50,
+      );
+    }
+  }, [expandedHistoryIndex]);
+
+  const [logsHeight, setLogsHeight] = useState(140);
+  const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [stepsHeight, setStepsHeight] = useState(300);
-  const [historyHeight, setHistoryHeight] = useState(250);
+  const [stepsCollapsed, setStepsCollapsed] = useState(false);
+  const [historyHeight, setHistoryHeight] = useState(200);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [logSearch, setLogSearch] = useState("");
   const [followLogs, setFollowLogs] = useState(true);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -247,10 +315,6 @@ export function RunnerDetail() {
     }
   }
 
-  const filteredLogs = logSearch
-    ? logs.filter((entry) => entry.line.toLowerCase().includes(logSearch.toLowerCase()))
-    : logs;
-
   const cpuPercent = runnerMetrics?.cpu_percent ?? 0;
 
   return (
@@ -283,8 +347,8 @@ export function RunnerDetail() {
         {state === "error" && runner.error_message && !actionError && (
           <div className="error-banner">{runner.error_message}</div>
         )}
-        {/* Top section: actions + stats on left, current job card on right */}
-        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+        {/* Top section: current job card on left, actions + stats on right */}
+        <div style={{ display: "flex", flexDirection: "row-reverse", gap: 16, marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             {/* Action buttons */}
             {isAuthenticated && (
@@ -396,15 +460,19 @@ export function RunnerDetail() {
             <div className="runner-card runner-card-job" style={{ overflow: "hidden" }}>
               <div className="runner-card-glow runner-card-glow-blue" />
               <div className="flex items-center justify-between">
-                <h3 className="runner-card-label">Current Job</h3>
+                <h3 className="runner-card-label">{current_job ? "Current Job" : "Last Job"}</h3>
                 {current_job && (
                   <a
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      const url =
-                        job_context?.run_url ??
-                        `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
+                      let url = `https://github.com/${config.repo_owner}/${config.repo_name}/actions`;
+                      if (job_context?.run_url) {
+                        url =
+                          job_context.job_id != null
+                            ? `${job_context.run_url}/job/${job_context.job_id}`
+                            : job_context.run_url;
+                      }
                       import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
                     }}
                     style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
@@ -450,16 +518,10 @@ export function RunnerDetail() {
                       )}
                     </div>
                   )}
-                  <div className="glow-bar-track">
-                    <div
-                      className="glow-bar-fill"
-                      style={{
-                        width: "60%",
-                        background: "var(--accent-blue)",
-                        boxShadow: "0 0 8px rgba(59, 130, 246, 0.8)",
-                      }}
-                    />
-                  </div>
+                  <JobProgressBar
+                    estimatedDurationSecs={runner.estimated_job_duration_secs ?? undefined}
+                    jobStartedAt={runner.job_started_at ?? undefined}
+                  />
                 </div>
               ) : runner.last_completed_job ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -512,6 +574,18 @@ export function RunnerDetail() {
                       </span>
                     )}
                   </div>
+                  {!runner.last_completed_job.succeeded &&
+                    runner.last_completed_job.error_message && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--accent-red)",
+                          opacity: 0.8,
+                        }}
+                      >
+                        {runner.last_completed_job.error_message}
+                      </div>
+                    )}
                   {runner.last_completed_job.run_url && (
                     <a
                       href="#"
@@ -552,25 +626,34 @@ export function RunnerDetail() {
             display: "flex",
             flexDirection: "column",
             position: "relative",
-            height: logsHeight,
+            height: logsCollapsed ? "auto" : logsHeight,
             flex: "none",
           }}
         >
-          <div className="logs-header">
-            <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
-              Runner Process Logs
-            </span>
-            <div className="flex items-center gap-16">
-              <div className="logs-search-wrapper">
-                <span className="logs-search-icon">⌕</span>
-                <input
-                  className="logs-search-input"
-                  placeholder="Search"
-                  value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
-                />
-              </div>
-              <label className="follow-toggle">
+          <div
+            className="logs-header"
+            style={{ cursor: "pointer" }}
+            onClick={() => setLogsCollapsed((c) => !c)}
+          >
+            <div className="flex items-center gap-8">
+              <span
+                style={{
+                  fontSize: 16,
+                  lineHeight: 1,
+                  position: "relative" as const,
+                  top: -1,
+                  color: "var(--text-secondary)",
+                  flexShrink: 0,
+                }}
+              >
+                {logsCollapsed ? "\u25B8" : "\u25BE"}
+              </span>
+              <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
+                Runner Process Logs
+              </span>
+            </div>
+            {!logsCollapsed && (
+              <label className="follow-toggle" onClick={(e) => e.stopPropagation()}>
                 <input
                   type="checkbox"
                   checked={followLogs}
@@ -581,39 +664,45 @@ export function RunnerDetail() {
                 </span>
                 <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Follow</span>
               </label>
-            </div>
-          </div>
-          <div
-            ref={logContainerRef}
-            className="logs-content font-mono"
-            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
-          >
-            {filteredLogs.length === 0 ? (
-              <div className="logs-empty">
-                {runner.state === "online" || runner.state === "busy"
-                  ? "Waiting for log output..."
-                  : "Runner is not active."}
-              </div>
-            ) : (
-              <table className="logs-table">
-                <tbody>
-                  {filteredLogs.map((entry, i) => (
-                    <tr key={i}>
-                      <td
-                        style={{
-                          color:
-                            entry.stream === "stderr" ? "var(--accent-red)" : "var(--text-primary)",
-                        }}
-                      >
-                        {entry.line}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             )}
           </div>
-          <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
+          {!logsCollapsed && (
+            <>
+              <div
+                ref={logContainerRef}
+                className="logs-content font-mono"
+                style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+              >
+                {logs.length === 0 ? (
+                  <div className="logs-empty">
+                    {runner.state === "online" || runner.state === "busy"
+                      ? "Waiting for log output..."
+                      : "Runner is not active."}
+                  </div>
+                ) : (
+                  <table className="logs-table">
+                    <tbody>
+                      {logs.map((entry, i) => (
+                        <tr key={i}>
+                          <td
+                            style={{
+                              color:
+                                entry.stream === "stderr"
+                                  ? "var(--accent-red)"
+                                  : "var(--text-primary)",
+                            }}
+                          >
+                            {entry.line}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <ResizeHandle onMouseDown={makeResizeHandler(setLogsHeight, 150, 600)} />
+            </>
+          )}
         </div>
 
         {/* Job Progress — full width, only when busy */}
@@ -629,6 +718,8 @@ export function RunnerDetail() {
             resizeHandle={
               <ResizeHandle onMouseDown={makeResizeHandler(setStepsHeight, 150, 600)} />
             }
+            collapsed={stepsCollapsed}
+            onToggleCollapsed={() => setStepsCollapsed((c) => !c)}
           />
         )}
 
@@ -640,258 +731,406 @@ export function RunnerDetail() {
               display: "flex",
               flexDirection: "column",
               position: "relative",
-              height: historyHeight,
+              height: historyCollapsed
+                ? "auto"
+                : expandedHistoryIndex != null
+                  ? "auto"
+                  : historyHeight,
+              maxHeight: historyCollapsed
+                ? undefined
+                : expandedHistoryIndex != null
+                  ? "50vh"
+                  : undefined,
               flex: "none",
             }}
           >
-            <div className="logs-header">
-              <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
-                Job History
-              </span>
-              <span
+            <div
+              className="logs-header"
+              style={{ cursor: "pointer" }}
+              onClick={() => setHistoryCollapsed((c) => !c)}
+            >
+              <div className="flex items-center gap-8">
+                <span
+                  style={{
+                    fontSize: 16,
+                    lineHeight: 1,
+                    color: "var(--text-secondary)",
+                    flexShrink: 0,
+                  }}
+                >
+                  {historyCollapsed ? "\u25B8" : "\u25BE"}
+                </span>
+                <span className="runner-card-label" style={{ margin: 0, fontSize: 11 }}>
+                  Job History
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    padding: "2px 8px",
+                    borderRadius: 10,
+                    background: "var(--bg-tertiary)",
+                    color: "var(--text-secondary)",
+                    fontWeight: 500,
+                  }}
+                >
+                  {history.length} {history.length === 1 ? "job" : "jobs"}
+                </span>
+              </div>
+              {!historyCollapsed && (
+                <button
+                  disabled={clearingHistory}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setClearingHistory(true);
+                    api
+                      .clearRunnerHistory(id!)
+                      .then(() => {
+                        setExpandedHistoryIndex(null);
+                        return refreshHistory();
+                      })
+                      .finally(() => setClearingHistory(false));
+                  }}
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-secondary)",
+                    background: "none",
+                    border: "none",
+                    cursor: clearingHistory ? "default" : "pointer",
+                    padding: "2px 6px",
+                    marginLeft: "auto",
+                    opacity: clearingHistory ? 0.5 : 1,
+                  }}
+                  title="Clear all history"
+                >
+                  {clearingHistory ? "Clearing..." : "Clear all"}
+                </button>
+              )}
+            </div>
+            {!historyCollapsed && (
+              <div
                 style={{
-                  fontSize: 12,
-                  padding: "2px 8px",
-                  borderRadius: 10,
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-secondary)",
-                  fontWeight: 500,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                  overflow: "auto",
+                  flex: 1,
+                  minHeight: 0,
                 }}
               >
-                {history.length} {history.length === 1 ? "job" : "jobs"}
-              </span>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 1,
-                overflow: "auto",
-                flex: 1,
-                minHeight: 0,
-              }}
-            >
-              {history.map((entry, i) => {
-                const duration = Math.round(
-                  (new Date(entry.completed_at).getTime() - new Date(entry.started_at).getTime()) /
-                    1000,
-                );
-                const isExpanded = expandedHistoryIndex === i;
-                const hasSteps = entry.steps && entry.steps.length > 0;
-                return (
-                  <div key={i}>
-                    <div
-                      onClick={() => {
-                        if (hasSteps) setExpandedHistoryIndex(isExpanded ? null : i);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        padding: "8px 12px",
-                        background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
-                        fontSize: 13,
-                        cursor: hasSteps ? "pointer" : "default",
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: "50%",
-                          background: entry.succeeded ? "var(--accent-green)" : "var(--accent-red)",
-                          flexShrink: 0,
+                {history.map((entry, i) => {
+                  const duration = Math.round(
+                    (new Date(entry.completed_at).getTime() -
+                      new Date(entry.started_at).getTime()) /
+                      1000,
+                  );
+                  const isExpanded = expandedHistoryIndex === i;
+                  const hasSteps = entry.steps && entry.steps.length > 0;
+                  const isDeleting =
+                    clearingHistory || deletingHistoryEntries.has(entry.started_at);
+                  return (
+                    <div key={i} ref={isExpanded ? expandedHistoryRef : undefined}>
+                      <div
+                        onClick={() => {
+                          if (hasSteps) setExpandedHistoryIndex(isExpanded ? null : i);
                         }}
-                      />
-                      {hasSteps && (
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "6px 12px",
+                          background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
+                          fontSize: 13,
+                          cursor: hasSteps && !isDeleting ? "pointer" : "default",
+                          opacity: isDeleting ? 0.4 : 1,
+                          pointerEvents: isDeleting ? "none" : "auto",
+                          transition: "opacity 0.2s",
+                        }}
+                      >
                         <span
                           style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                            width: 12,
-                            textAlign: "center",
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            background: entry.succeeded
+                              ? "var(--accent-green)"
+                              : "var(--accent-red)",
                             flexShrink: 0,
                           }}
-                        >
-                          {isExpanded ? "\u25BE" : "\u25B8"}
-                        </span>
-                      )}
-                      <span
-                        style={{
-                          flex: 1,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          color: "var(--text-primary)",
-                          fontWeight: 500,
-                        }}
-                        title={entry.job_name}
-                      >
-                        {entry.job_name}
-                      </span>
-                      {(entry.branch || entry.pr_number != null) && (
-                        <span
+                        />
+                        {hasSteps && (
+                          <span
+                            style={{
+                              fontSize: 16,
+                              lineHeight: 1,
+                              color: "var(--text-secondary)",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isExpanded ? "\u25BE" : "\u25B8"}
+                          </span>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span
+                              style={{
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                color: "var(--text-primary)",
+                                fontWeight: 500,
+                              }}
+                              title={entry.job_name}
+                            >
+                              {entry.job_name}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              color: "var(--text-secondary)",
+                              marginTop: 2,
+                            }}
+                          >
+                            {entry.branch && <span>{entry.branch}</span>}
+                            {entry.pr_number != null && (
+                              <span style={{ color: "var(--accent-blue)" }}>
+                                #{entry.pr_number}
+                              </span>
+                            )}
+                            {(entry.branch || entry.pr_number != null) && <span>·</span>}
+                            <span>{new Date(entry.completed_at).toLocaleTimeString()}</span>
+                            {!entry.succeeded && entry.error_message && (
+                              <span style={{ color: "var(--accent-red)", opacity: 0.8 }}>
+                                · {entry.error_message}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div
                           style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                            flexShrink: 0,
                             display: "flex",
                             alignItems: "center",
-                            gap: 4,
-                          }}
-                        >
-                          {entry.branch && <span>{entry.branch}</span>}
-                          {entry.pr_number != null && (
-                            <span style={{ color: "var(--accent-blue)" }}>#{entry.pr_number}</span>
-                          )}
-                        </span>
-                      )}
-                      <span
-                        className="font-mono"
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-secondary)",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {formatUptime(duration)}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-secondary)",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {new Date(entry.completed_at).toLocaleTimeString()}
-                      </span>
-                      {entry.run_url && (
-                        <a
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            import("@tauri-apps/plugin-shell").then(({ open }) =>
-                              open(entry.run_url!),
-                            );
-                          }}
-                          style={{
-                            fontSize: 11,
-                            color: "var(--accent-blue)",
+                            gap: 8,
                             flexShrink: 0,
                           }}
                         >
-                          View →
-                        </a>
-                      )}
-                      {entry.run_url && id && (
-                        <a
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            api.rerunWorkflow(id!, entry.run_url!).catch(() => {});
-                          }}
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                            flexShrink: 0,
-                          }}
-                        >
-                          Re-run
-                        </a>
-                      )}
-                    </div>
-                    {isExpanded && hasSteps && (
-                      <div
-                        style={{
-                          background: "var(--bg-primary)",
-                          borderTop: "1px solid var(--border)",
-                          borderBottom: "1px solid var(--border)",
-                          padding: "4px 0",
-                        }}
-                      >
-                        {entry.steps.map((step) => {
-                          const stepDuration =
-                            step.started_at && step.completed_at
-                              ? Math.max(
-                                  0,
-                                  Math.round(
-                                    (new Date(step.completed_at).getTime() -
-                                      new Date(step.started_at).getTime()) /
-                                      1000,
-                                  ),
-                                )
-                              : null;
-                          return (
-                            <div
-                              key={step.number}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 10,
-                                padding: "4px 16px 4px 48px",
-                                fontSize: 12,
-                              }}
+                          <span
+                            className="font-mono"
+                            style={{
+                              fontSize: 11,
+                              color: "var(--text-secondary)",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 3,
+                            }}
+                          >
+                            <svg
+                              width="11"
+                              height="11"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
                             >
-                              <span
+                              <circle cx="12" cy="12" r="10" />
+                              <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                            {formatUptime(duration)}
+                          </span>
+                          {entry.run_url && (
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                import("@tauri-apps/plugin-shell").then(({ open }) =>
+                                  open(entry.run_url!),
+                                );
+                              }}
+                              style={{ color: "var(--accent-blue)", display: "flex" }}
+                              title="View on GitHub"
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                <polyline points="15 3 21 3 21 9" />
+                                <line x1="10" y1="14" x2="21" y2="3" />
+                              </svg>
+                            </a>
+                          )}
+                          {entry.run_url && id && (
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                api.rerunWorkflow(id!, entry.run_url!).catch(() => {});
+                              }}
+                              style={{ color: "var(--text-secondary)", display: "flex" }}
+                              title="Re-run"
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="23 4 23 10 17 10" />
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                              </svg>
+                            </a>
+                          )}
+                          <a
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const key = entry.started_at;
+                              setDeletingHistoryEntries((s) => new Set(s).add(key));
+                              api
+                                .deleteHistoryEntry(id!, key)
+                                .then(() => refreshHistory())
+                                .finally(() =>
+                                  setDeletingHistoryEntries((s) => {
+                                    const next = new Set(s);
+                                    next.delete(key);
+                                    return next;
+                                  }),
+                                );
+                            }}
+                            style={{
+                              color: "var(--text-secondary)",
+                              display: "flex",
+                              opacity: 0.5,
+                            }}
+                            title="Delete entry"
+                          >
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </a>
+                        </div>
+                      </div>
+                      {isExpanded && hasSteps && (
+                        <div
+                          style={{
+                            background: "var(--bg-primary)",
+                            borderTop: "1px solid var(--border)",
+                            borderBottom: "1px solid var(--border)",
+                            padding: "4px 0",
+                          }}
+                        >
+                          {entry.steps.map((step) => {
+                            const stepDuration =
+                              step.started_at && step.completed_at
+                                ? Math.max(
+                                    0,
+                                    Math.round(
+                                      (new Date(step.completed_at).getTime() -
+                                        new Date(step.started_at).getTime()) /
+                                        1000,
+                                    ),
+                                  )
+                                : null;
+                            return (
+                              <div
+                                key={step.number}
                                 style={{
-                                  width: 16,
-                                  textAlign: "center",
-                                  flexShrink: 0,
-                                  fontSize: 13,
-                                  fontWeight: 700,
-                                  color:
-                                    step.status === "succeeded"
-                                      ? "var(--accent-green)"
-                                      : step.status === "failed"
-                                        ? "var(--accent-red)"
-                                        : "var(--text-secondary)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 10,
+                                  padding: "4px 16px 4px 48px",
+                                  fontSize: 12,
                                 }}
                               >
-                                {step.status === "succeeded"
-                                  ? "\u2713"
-                                  : step.status === "failed"
-                                    ? "\u2715"
-                                    : step.status === "skipped"
-                                      ? "\u2298"
-                                      : "\u25CB"}
-                              </span>
-                              <span
-                                style={{
-                                  flex: 1,
-                                  color: "var(--text-primary)",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                {step.name}
-                              </span>
-                              {stepDuration !== null && (
                                 <span
-                                  className="font-mono"
                                   style={{
-                                    fontSize: 11,
-                                    color: "var(--text-secondary)",
+                                    width: 16,
+                                    textAlign: "center",
                                     flexShrink: 0,
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                    color:
+                                      step.status === "succeeded"
+                                        ? "var(--accent-green)"
+                                        : step.status === "failed"
+                                          ? "var(--accent-red)"
+                                          : "var(--text-secondary)",
                                   }}
                                 >
-                                  {stepDuration < 60
-                                    ? `${stepDuration}s`
-                                    : `${Math.floor(stepDuration / 60)}m ${stepDuration % 60}s`}
+                                  {step.status === "succeeded"
+                                    ? "\u2713"
+                                    : step.status === "failed"
+                                      ? "\u2715"
+                                      : step.status === "skipped"
+                                        ? "\u2298"
+                                        : "\u25CB"}
                                 </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <ResizeHandle onMouseDown={makeResizeHandler(setHistoryHeight, 150, 800)} />
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    color: "var(--text-primary)",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {step.name}
+                                </span>
+                                {stepDuration !== null && (
+                                  <span
+                                    className="font-mono"
+                                    style={{
+                                      fontSize: 11,
+                                      color: "var(--text-secondary)",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {stepDuration < 60
+                                      ? `${stepDuration}s`
+                                      : `${Math.floor(stepDuration / 60)}m ${stepDuration % 60}s`}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {!historyCollapsed && (
+              <ResizeHandle onMouseDown={makeResizeHandler(setHistoryHeight, 150, 800)} />
+            )}
           </div>
         )}
       </div>

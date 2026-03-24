@@ -31,6 +31,8 @@ pub struct JobHistoryEntry {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_message: Option<String>,
     pub steps: Vec<StepInfo>,
 }
 
@@ -43,6 +45,8 @@ pub struct CompletedJob {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +79,8 @@ pub struct RunnerInfo {
     pub job_started_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_completed_job: Option<CompletedJob>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub estimated_job_duration_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

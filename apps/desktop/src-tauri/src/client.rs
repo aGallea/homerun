@@ -62,6 +62,8 @@ pub struct RunnerInfo {
     pub job_started_at: Option<String>,
     #[serde(default)]
     pub last_completed_job: Option<CompletedJob>,
+    #[serde(default)]
+    pub estimated_job_duration_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +106,8 @@ pub struct CompletedJob {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +119,8 @@ pub struct JobHistoryEntry {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
     pub steps: Vec<StepInfo>,
 }
 
@@ -486,6 +492,17 @@ impl DaemonClient {
     pub async fn rerun_workflow(&self, runner_id: &str, run_url: &str) -> Result<(), String> {
         let payload = serde_json::json!({ "run_url": run_url }).to_string();
         self.request("POST", &format!("/runners/{runner_id}/rerun"), Some(payload)).await?;
+        Ok(())
+    }
+
+    pub async fn clear_runner_history(&self, runner_id: &str) -> Result<(), String> {
+        self.request("DELETE", &format!("/runners/{runner_id}/history"), None).await?;
+        Ok(())
+    }
+
+    pub async fn delete_history_entry(&self, runner_id: &str, started_at: &str) -> Result<(), String> {
+        let payload = serde_json::json!({ "started_at": started_at }).to_string();
+        self.request("DELETE", &format!("/runners/{runner_id}/history/entry"), Some(payload)).await?;
         Ok(())
     }
 
