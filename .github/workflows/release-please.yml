@@ -13,5 +13,33 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
+
+      # When release-please creates/updates a PR, regenerate Cargo.lock files
+      # so they stay in sync with the version bump in Cargo.toml
+      - uses: actions/checkout@v6
+        if: ${{ steps.release.outputs.pr }}
+        with:
+          ref: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Install Rust toolchain
+        if: ${{ steps.release.outputs.pr }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Regenerate Cargo.lock files
+        if: ${{ steps.release.outputs.pr }}
+        run: |
+          cargo generate-lockfile
+          cd apps/desktop/src-tauri && cargo generate-lockfile
+
+      - name: Commit updated Cargo.lock files
+        if: ${{ steps.release.outputs.pr }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock apps/desktop/src-tauri/Cargo.lock
+          git diff --cached --quiet || git commit -m "chore: update Cargo.lock files for version bump"
+          git push
