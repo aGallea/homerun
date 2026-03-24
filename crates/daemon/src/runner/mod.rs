@@ -707,10 +707,14 @@ impl RunnerManager {
                                                 .job_context
                                                 .as_ref()
                                                 .and_then(|c| c.pr_number),
-                                            run_url: r
-                                                .job_context
-                                                .as_ref()
-                                                .map(|c| c.run_url.clone()),
+                                            run_url: r.job_context.as_ref().map(|c| {
+                                                match c.job_id {
+                                                    Some(job_id) => {
+                                                        format!("{}/job/{}", c.run_url, job_id)
+                                                    }
+                                                    None => c.run_url.clone(),
+                                                }
+                                            }),
                                             error_message: error_message.clone(),
                                             steps,
                                         };
