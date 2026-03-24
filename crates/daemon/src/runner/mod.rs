@@ -654,15 +654,24 @@ impl RunnerManager {
                                                 if let Ok(gh) =
                                                     crate::github::GitHubClient::new(Some(token))
                                                 {
-                                                    gh.get_job_failure_message(
-                                                        &owner,
-                                                        &repo,
-                                                        &runner_name,
-                                                        &job_name,
-                                                    )
-                                                    .await
-                                                    .ok()
-                                                    .flatten()
+                                                    match gh
+                                                        .get_job_failure_message(
+                                                            &owner,
+                                                            &repo,
+                                                            &runner_name,
+                                                            &job_name,
+                                                        )
+                                                        .await
+                                                    {
+                                                        Ok(msg) => {
+                                                            tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
+                                                            msg
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!("Failed to fetch job annotations for {runner_name}: {e}");
+                                                            None
+                                                        }
+                                                    }
                                                 } else {
                                                     None
                                                 }
@@ -1399,7 +1408,7 @@ impl RunnerManager {
                                         if let Ok(gh) =
                                             crate::github::GitHubClient::new(Some(token))
                                         {
-                                            if let Ok(Some(msg)) = gh
+                                            match gh
                                                 .get_job_failure_message(
                                                     &owner,
                                                     &repo,
@@ -1408,7 +1417,18 @@ impl RunnerManager {
                                                 )
                                                 .await
                                             {
-                                                error_message = Some(msg);
+                                                Ok(Some(msg)) => {
+                                                    tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
+                                                    error_message = Some(msg);
+                                                }
+                                                Ok(None) => {
+                                                    tracing::info!(
+                                                        "No annotations found for {runner_name}"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!("Failed to fetch job annotations for {runner_name}: {e}");
+                                                }
                                             }
                                         }
                                     }
