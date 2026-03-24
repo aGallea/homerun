@@ -316,6 +316,11 @@ impl DaemonClient {
         Ok(())
     }
 
+    pub async fn shutdown(&self) -> Result<()> {
+        self.request("POST", "/daemon/shutdown", None).await?;
+        Ok(())
+    }
+
     pub async fn auth_status(&self) -> Result<AuthStatus> {
         let body = self.request("GET", "/auth/status", None).await?;
         Ok(serde_json::from_str(&body)?)
