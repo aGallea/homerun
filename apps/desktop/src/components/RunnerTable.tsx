@@ -333,6 +333,8 @@ function RunnerRow({
           }
         >
           <StatusBadge state={runner.state} currentJob={runner.current_job ?? undefined} />
+        </div>
+        <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
           {runner.state === "busy" &&
             runner.estimated_job_duration_secs != null &&
             runner.job_started_at && (
@@ -341,8 +343,6 @@ function RunnerRow({
                 jobStartedAt={runner.job_started_at}
               />
             )}
-        </div>
-        <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
           <CpuValue value={cpuValue} />
           <RunnerActions
             runner={runner}

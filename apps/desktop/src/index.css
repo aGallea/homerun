@@ -1654,12 +1654,12 @@ p {
 }
 
 .runner-progress-mini {
-  width: 100%;
+  width: 100px;
   height: 3px;
   background: var(--bg-tertiary);
   border-radius: 9999px;
   overflow: hidden;
-  margin-top: 4px;
+  flex-shrink: 0;
 }
 
 .runner-progress-mini-fill {
