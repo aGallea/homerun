@@ -263,6 +263,25 @@ pub async fn rerun_workflow(
     client.rerun_workflow(&runner_id, &run_url).await
 }
 
+#[tauri::command(rename_all = "snake_case")]
+pub async fn clear_runner_history(
+    state: State<'_, AppState>,
+    runner_id: String,
+) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.clear_runner_history(&runner_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn delete_history_entry(
+    state: State<'_, AppState>,
+    runner_id: String,
+    index: usize,
+) -> Result<(), String> {
+    let client = state.client.lock().await;
+    client.delete_history_entry(&runner_id, index).await
+}
+
 #[tauri::command]
 pub async fn get_daemon_logs_recent(
     state: State<'_, AppState>,

@@ -50,6 +50,8 @@ pub fn run() {
             commands::get_step_logs,
             commands::get_runner_history,
             commands::rerun_workflow,
+            commands::clear_runner_history,
+            commands::delete_history_entry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

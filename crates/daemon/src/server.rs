@@ -106,7 +106,11 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/runners/{id}/history",
-            get(api::history::get_runner_history),
+            get(api::history::get_runner_history).delete(api::history::clear_runner_history),
+        )
+        .route(
+            "/runners/{id}/history/{index}",
+            delete(api::history::delete_history_entry),
         )
         .route("/runners/{id}/rerun", post(api::history::rerun_workflow))
         .route("/runners/{id}/logs", get(api::logs::stream_logs))

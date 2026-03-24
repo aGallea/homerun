@@ -495,6 +495,16 @@ impl DaemonClient {
         Ok(())
     }
 
+    pub async fn clear_runner_history(&self, runner_id: &str) -> Result<(), String> {
+        self.request("DELETE", &format!("/runners/{runner_id}/history"), None).await?;
+        Ok(())
+    }
+
+    pub async fn delete_history_entry(&self, runner_id: &str, index: usize) -> Result<(), String> {
+        self.request("DELETE", &format!("/runners/{runner_id}/history/{index}"), None).await?;
+        Ok(())
+    }
+
     pub async fn get_runner_logs(&self, runner_id: &str) -> Result<Vec<LogEntry>, String> {
         let body = self
             .request("GET", &format!("/runners/{runner_id}/logs/recent"), None)

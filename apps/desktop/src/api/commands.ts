@@ -61,6 +61,10 @@ export const api = {
     invoke<JobHistoryEntry[]>("get_runner_history", { runner_id: runnerId }),
   rerunWorkflow: (runnerId: string, runUrl: string) =>
     invoke<void>("rerun_workflow", { runner_id: runnerId, run_url: runUrl }),
+  clearRunnerHistory: (runnerId: string) =>
+    invoke<void>("clear_runner_history", { runner_id: runnerId }),
+  deleteHistoryEntry: (runnerId: string, index: number) =>
+    invoke<void>("delete_history_entry", { runner_id: runnerId, index }),
 
   // Health
   healthCheck: () => invoke<boolean>("health_check"),
