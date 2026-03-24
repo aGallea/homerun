@@ -116,6 +116,7 @@ struct RunnerStepState {
     steps: Vec<StepInfo>,
     file_offset: u64,
     log_path: Option<PathBuf>,
+    work_dir: PathBuf,
 }
 
 /// Watches Worker log files to track step progress for runners.
@@ -142,14 +143,16 @@ impl WorkerLogWatcher {
 
     /// Begin watching a runner's Worker log for step progress.
     ///
-    /// Finds the latest `Worker_*.log` in `{work_dir}/_diag/` and initializes state.
+    /// Stores the work directory; the actual log file is discovered lazily
+    /// during the first `poll()` call, avoiding races when the Worker
+    /// process hasn't spawned yet.
     pub async fn start_watching(&self, runner_id: &str, job_name: &str, work_dir: &Path) {
-        let log_path = find_latest_worker_log(work_dir);
         let state = RunnerStepState {
             job_name: job_name.to_string(),
             steps: Vec::new(),
             file_offset: 0,
-            log_path,
+            log_path: None,
+            work_dir: work_dir.to_path_buf(),
         };
         self.step_state
             .write()
@@ -171,9 +174,15 @@ impl WorkerLogWatcher {
             return false;
         };
 
-        let Some(ref log_path) = state.log_path else {
-            return true;
-        };
+        // If we don't have a log path yet, try to find one
+        if state.log_path.is_none() {
+            state.log_path = find_latest_worker_log(&state.work_dir);
+            if state.log_path.is_none() {
+                return true; // Keep polling, log not created yet
+            }
+        }
+
+        let log_path = state.log_path.as_ref().unwrap();
 
         let Ok(metadata) = std::fs::metadata(log_path) else {
             return true;
@@ -181,6 +190,14 @@ impl WorkerLogWatcher {
 
         let file_len = metadata.len();
         if file_len <= state.file_offset {
+            // No new bytes — check if a newer log file appeared
+            if let Some(newer) = find_latest_worker_log(&state.work_dir) {
+                if newer != *log_path {
+                    state.log_path = Some(newer);
+                    state.file_offset = 0;
+                    state.steps.clear();
+                }
+            }
             return true;
         }
 
@@ -460,6 +477,38 @@ mod tests {
             StepEvent::Completed { result, .. } => assert_eq!(result, StepStatus::Cancelled),
             other => panic!("Expected Completed, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_poll_retries_log_discovery() {
+        let dir = tempfile::tempdir().unwrap();
+        // No _diag directory — simulates Worker not spawned yet
+
+        let watcher = WorkerLogWatcher::new();
+        watcher
+            .start_watching("runner-retry", "retry-job", dir.path())
+            .await;
+
+        // First poll: no log file yet, returns true (keep polling), no steps
+        assert!(watcher.poll("runner-retry").await);
+        let resp = watcher.get_steps("runner-retry").await.unwrap();
+        assert_eq!(resp.steps.len(), 0);
+
+        // Now create the _diag dir and Worker log (simulates Worker spawning)
+        let diag = dir.path().join("_diag");
+        std::fs::create_dir_all(&diag).unwrap();
+        let log_content = "\
+[2026-03-23 07:54:53Z INFO StepsRunner] Processing step: DisplayName='Checkout'\n\
+[2026-03-23 07:54:53Z INFO StepsRunner] Starting the step.\n\
+[2026-03-23 07:54:55Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.\n";
+        std::fs::write(diag.join("Worker_20260323-080000-utc.log"), log_content).unwrap();
+
+        // Second poll: should discover the log and parse steps
+        assert!(watcher.poll("runner-retry").await);
+        let resp = watcher.get_steps("runner-retry").await.unwrap();
+        assert_eq!(resp.steps.len(), 1);
+        assert_eq!(resp.steps[0].name, "Checkout");
+        assert_eq!(resp.steps[0].status, StepStatus::Succeeded);
     }
 
     #[tokio::test]
