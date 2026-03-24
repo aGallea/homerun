@@ -137,6 +137,7 @@ pub fn create_router(state: AppState) -> Router {
             "/preferences",
             get(api::preferences::get_preferences).put(api::preferences::update_preferences),
         )
+        .route("/daemon/shutdown", post(api::shutdown::shutdown_daemon))
         .with_state(state)
 }
 
@@ -144,15 +145,27 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
+        "pid": std::process::id(),
     }))
 }
 
 pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
     let socket_path = config.socket_path();
 
-    // Remove stale socket file if it exists
+    // Check if another daemon is already running on this socket
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path)?;
+        match tokio::net::UnixStream::connect(&socket_path).await {
+            Ok(_) => {
+                anyhow::bail!(
+                    "Daemon already running (socket {} is active). Stop the existing daemon first.",
+                    socket_path.display()
+                );
+            }
+            Err(_) => {
+                tracing::info!("Removing stale socket file: {}", socket_path.display());
+                std::fs::remove_file(&socket_path)?;
+            }
+        }
     }
 
     // Create parent directories
@@ -254,7 +267,25 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
 
     let app = create_router(state);
 
-    axum::serve(listener, app).await?;
+    let server = axum::serve(listener, app);
+
+    let shutdown_signal = async {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        let sigint = tokio::signal::ctrl_c();
+        tokio::select! {
+            _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
+            _ = sigint => tracing::info!("Received SIGINT"),
+        }
+    };
+
+    server.with_graceful_shutdown(shutdown_signal).await?;
+
+    // Clean up socket after graceful shutdown
+    if socket_path.exists() {
+        let _ = std::fs::remove_file(&socket_path);
+    }
+    tracing::info!("Daemon shut down gracefully");
 
     Ok(())
 }
@@ -336,6 +367,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_health_includes_pid() {
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            json["pid"].is_number(),
+            "pid should be a number in health response"
+        );
     }
 
     #[tokio::test]

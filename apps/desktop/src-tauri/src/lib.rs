@@ -17,9 +17,35 @@ pub fn run() {
         .manage(AppState {
             client: Mutex::new(client),
         })
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let client = crate::client::DaemonClient::default_socket();
+                if client.health().await.is_ok() {
+                    return;
+                }
+
+                use tauri_plugin_shell::ShellExt;
+                let sidecar = match handle.shell().sidecar("binaries/homerund") {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Failed to find homerund sidecar: {e}");
+                        return;
+                    }
+                };
+                match sidecar.spawn() {
+                    Ok(_) => eprintln!("Daemon sidecar spawned"),
+                    Err(e) => eprintln!("Failed to spawn daemon: {e}"),
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::daemon_available,
+            commands::start_daemon,
+            commands::stop_daemon,
+            commands::restart_daemon,
             commands::list_runners,
             commands::create_runner,
             commands::delete_runner,

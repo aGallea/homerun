@@ -23,6 +23,9 @@ pub enum Action {
     RefreshRepos,
     RefreshMetrics,
     RefreshDaemonLogs,
+    StartDaemon,
+    StopDaemon,
+    RestartDaemon,
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +301,9 @@ impl App {
         // Daemon tab key handling (before global keys to intercept 1-5 for log levels)
         if self.active_tab == Tab::Daemon {
             match code {
+                KeyCode::Char('s') => return Some(Action::StartDaemon),
+                KeyCode::Char('x') => return Some(Action::StopDaemon),
+                KeyCode::Char('r') => return Some(Action::RestartDaemon),
                 KeyCode::Char('1') => {
                     self.daemon_log_level = "TRACE".to_string();
                     return Some(Action::RefreshDaemonLogs);

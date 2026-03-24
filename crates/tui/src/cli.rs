@@ -12,17 +12,48 @@ pub enum CliCommand {
         /// Also scan GitHub repos via API
         remote: bool,
     },
+    Daemon(DaemonAction),
+}
+
+pub enum DaemonAction {
+    Start,
+    Stop,
+    Restart,
 }
 
 pub async fn run(command: Option<CliCommand>) -> Result<()> {
+    // Handle daemon commands first (don't require daemon to be running)
+    if let Some(CliCommand::Daemon(action)) = &command {
+        return match action {
+            DaemonAction::Start => {
+                println!("Starting daemon...");
+                crate::daemon_lifecycle::start_daemon().await?;
+                println!("Daemon started.");
+                Ok(())
+            }
+            DaemonAction::Stop => {
+                println!("Stopping daemon...");
+                crate::daemon_lifecycle::stop_daemon().await?;
+                println!("Daemon stopped.");
+                Ok(())
+            }
+            DaemonAction::Restart => {
+                println!("Restarting daemon...");
+                crate::daemon_lifecycle::restart_daemon().await?;
+                println!("Daemon restarted.");
+                Ok(())
+            }
+        };
+    }
+
     let client = DaemonClient::default_socket();
 
-    // Check daemon connectivity first
     if client.health().await.is_err() {
         eprintln!(
             "Cannot connect to HomeRun daemon.\n\
              Make sure homerund is running:\n\n  \
-             homerund\n"
+             homerund\n\n  \
+             Or start it with: homerun --no-tui daemon start\n"
         );
         std::process::exit(1);
     }
@@ -31,6 +62,7 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
         Some(CliCommand::List) => cmd_list(&client).await,
         Some(CliCommand::Status) => cmd_status(&client).await,
         Some(CliCommand::Scan { path, remote }) => cmd_scan(&client, path, remote).await,
+        Some(CliCommand::Daemon(_)) => unreachable!(),
         None => {
             eprintln!(
                 "No command specified. Use `homerun --no-tui list` or `homerun --no-tui status`."

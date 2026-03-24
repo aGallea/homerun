@@ -8,6 +8,99 @@ use crate::client::{
 use crate::AppState;
 
 #[tauri::command]
+pub async fn start_daemon(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_shell::ShellExt;
+    use std::time::Duration;
+
+    // Check if daemon is already running
+    let client = crate::client::DaemonClient::default_socket();
+    if client.socket_exists() {
+        let check = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.health(),
+        ).await;
+        if matches!(check, Ok(Ok(_))) {
+            return Err("Daemon is already running".to_string());
+        }
+        // Stale socket — remove it
+        let _ = std::fs::remove_file(client.socket_path());
+    }
+
+    // Spawn sidecar
+    let sidecar = app_handle
+        .shell()
+        .sidecar("binaries/homerund")
+        .map_err(|e| format!("Failed to find sidecar: {e}"))?;
+
+    let (_rx, _child) = sidecar
+        .spawn()
+        .map_err(|e| format!("Failed to spawn daemon: {e}"))?;
+
+    // Poll until healthy
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let fresh = crate::client::DaemonClient::default_socket();
+        if fresh.health().await.is_ok() {
+            return Ok(true);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(
+                "Daemon failed to start within 5 seconds — check logs at ~/.homerun/logs/"
+                    .to_string(),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// Helper: stop the daemon (not a Tauri command — avoids State<> lifetime issues)
+async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String> {
+    let client = crate::client::DaemonClient::new(socket_path.clone());
+    match client.shutdown().await {
+        Ok(_) => {} // 202 Accepted
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("launchd") || msg.contains("Uninstall the service") {
+                return Err(
+                    "Daemon is managed by launchd. Uninstall the service first.".to_string(),
+                );
+            }
+            // Already down — clean up stale socket
+            let _ = std::fs::remove_file(&socket_path);
+            return Ok(true);
+        }
+    }
+    // Wait for socket to disappear (no lock held)
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if !socket_path.exists() {
+            return Ok(true);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Daemon did not shut down in time".to_string());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
+#[tauri::command]
+pub async fn stop_daemon(state: State<'_, AppState>) -> Result<bool, String> {
+    let socket_path = state.client.lock().await.socket_path().to_path_buf();
+    do_stop_daemon(socket_path).await
+}
+
+#[tauri::command]
+pub async fn restart_daemon(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let socket_path = state.client.lock().await.socket_path().to_path_buf();
+    let _ = do_stop_daemon(socket_path).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    start_daemon(app_handle).await
+}
+
+#[tauri::command]
 pub async fn health_check(state: State<'_, AppState>) -> Result<bool, String> {
     // Use a fresh client to avoid mutex contention with other commands
     // that may be hanging when the daemon is down.

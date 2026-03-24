@@ -50,6 +50,21 @@ enum Commands {
         #[arg(long)]
         remote: bool,
     },
+    /// Manage the HomeRun daemon
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum DaemonAction {
+    /// Start the daemon
+    Start,
+    /// Stop the daemon
+    Stop,
+    /// Restart the daemon
+    Restart,
 }
 
 #[tokio::main]
@@ -61,6 +76,11 @@ async fn main() -> Result<()> {
             Commands::List => homerun::cli::CliCommand::List,
             Commands::Status => homerun::cli::CliCommand::Status,
             Commands::Scan { path, remote } => homerun::cli::CliCommand::Scan { path, remote },
+            Commands::Daemon { action } => homerun::cli::CliCommand::Daemon(match action {
+                DaemonAction::Start => homerun::cli::DaemonAction::Start,
+                DaemonAction::Stop => homerun::cli::DaemonAction::Stop,
+                DaemonAction::Restart => homerun::cli::DaemonAction::Restart,
+            }),
         }))
         .await;
     }
@@ -76,12 +96,8 @@ async fn run_tui() -> Result<()> {
     match client.health().await {
         Ok(_) => app.daemon_connected = true,
         Err(_) => {
-            eprintln!(
-                "Cannot connect to HomeRun daemon.\n\
-                 Make sure homerund is running:\n\n  \
-                 homerund\n"
-            );
-            std::process::exit(1);
+            app.daemon_connected = false;
+            app.active_tab = homerun::app::Tab::Daemon;
         }
     }
 
@@ -236,6 +252,45 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
         }
         Action::RefreshDaemonLogs => {
             refresh_daemon_logs(client, app).await;
+            Ok(())
+        }
+        Action::StartDaemon => {
+            match homerun::daemon_lifecycle::start_daemon().await {
+                Ok(()) => {
+                    app.daemon_connected = true;
+                    if let Ok(runners) = client.list_runners().await {
+                        app.runners = runners;
+                        app.rebuild_display_items();
+                    }
+                }
+                Err(e) => {
+                    app.status_message = Some(format!("Error: {e}"));
+                }
+            }
+            Ok(())
+        }
+        Action::StopDaemon => {
+            match homerun::daemon_lifecycle::stop_daemon().await {
+                Ok(()) => app.daemon_connected = false,
+                Err(e) => {
+                    app.status_message = Some(format!("Error: {e}"));
+                }
+            }
+            Ok(())
+        }
+        Action::RestartDaemon => {
+            match homerun::daemon_lifecycle::restart_daemon().await {
+                Ok(()) => {
+                    app.daemon_connected = true;
+                    if let Ok(runners) = client.list_runners().await {
+                        app.runners = runners;
+                        app.rebuild_display_items();
+                    }
+                }
+                Err(e) => {
+                    app.status_message = Some(format!("Error: {e}"));
+                }
+            }
             Ok(())
         }
     };
