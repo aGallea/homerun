@@ -97,7 +97,7 @@ export function JobProgress({
         marginBottom: 0,
         padding: 0,
         position: "relative",
-        ...(height ? { height, display: "flex", flexDirection: "column" as const } : {}),
+        ...(height ? { maxHeight: height, display: "flex", flexDirection: "column" as const } : {}),
       }}
     >
       {/* Header */}
