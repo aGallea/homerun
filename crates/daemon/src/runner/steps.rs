@@ -16,6 +16,7 @@ pub enum StepStatus {
     Succeeded,
     Failed,
     Skipped,
+    Cancelled,
 }
 
 /// Information about a single job step.
@@ -100,6 +101,7 @@ pub fn parse_step_event(line: &str) -> Option<StepEvent> {
             "Succeeded" => StepStatus::Succeeded,
             "Failed" => StepStatus::Failed,
             "Skipped" => StepStatus::Skipped,
+            "Cancelled" => StepStatus::Cancelled,
             _ => return None,
         };
         return Some(StepEvent::Completed { result, timestamp });
@@ -447,6 +449,17 @@ mod tests {
 
         watcher.stop_watching("runner-3").await;
         assert!(watcher.get_steps("runner-3").await.is_none());
+    }
+
+    #[test]
+    fn test_parse_step_cancelled() {
+        let line = "[2026-03-23 07:54:55Z INFO StepsRunner] Updating job result with current step result 'Cancelled'.";
+        let event = parse_step_event(line);
+        assert!(event.is_some());
+        match event.unwrap() {
+            StepEvent::Completed { result, .. } => assert_eq!(result, StepStatus::Cancelled),
+            other => panic!("Expected Completed, got {:?}", other),
+        }
     }
 
     #[tokio::test]

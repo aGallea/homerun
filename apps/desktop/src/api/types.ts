@@ -19,7 +19,7 @@ export type RunnerState =
   | "error"
   | "deleting";
 
-export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 
 export interface StepInfo {
   number: number;
