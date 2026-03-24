@@ -1743,20 +1743,20 @@ impl RunnerManager {
         }
     }
 
-    /// Delete a single job history entry by index (0-based, newest first).
-    pub async fn delete_job_history_entry(&self, runner_id: &str, index: usize) -> Result<()> {
+    /// Delete a single job history entry by its `started_at` timestamp.
+    pub async fn delete_job_history_entry(&self, runner_id: &str, started_at: &str) -> Result<()> {
+        let ts: chrono::DateTime<chrono::Utc> = started_at
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid timestamp: {e}"))?;
         let mut hist = self.job_history.write().await;
         let entries = hist
             .get_mut(runner_id)
             .ok_or_else(|| anyhow::anyhow!("No history for runner"))?;
-        // History is stored oldest-first, but API returns newest-first (reversed).
-        // Convert the "newest-first" index to the internal oldest-first index.
-        let len = entries.len();
-        if index >= len {
-            anyhow::bail!("History index out of range");
+        let before = entries.len();
+        entries.retain(|e| e.started_at != ts);
+        if entries.len() == before {
+            anyhow::bail!("No matching history entry found");
         }
-        let internal_index = len - 1 - index;
-        entries.remove(internal_index);
         history::save(&self.config.history_dir(), runner_id, entries)?;
         Ok(())
     }

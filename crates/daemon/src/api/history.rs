@@ -38,9 +38,15 @@ pub async fn clear_runner_history(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeleteHistoryEntryRequest {
+    pub started_at: String,
+}
+
 pub async fn delete_history_entry(
     State(state): State<AppState>,
-    Path((id, index)): Path<(String, usize)>,
+    Path(id): Path<String>,
+    Json(req): Json<DeleteHistoryEntryRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     state
         .runner_manager
@@ -50,7 +56,7 @@ pub async fn delete_history_entry(
 
     state
         .runner_manager
-        .delete_job_history_entry(&id, index)
+        .delete_job_history_entry(&id, &req.started_at)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 

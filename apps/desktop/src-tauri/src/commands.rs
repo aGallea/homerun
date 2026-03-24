@@ -276,10 +276,10 @@ pub async fn clear_runner_history(
 pub async fn delete_history_entry(
     state: State<'_, AppState>,
     runner_id: String,
-    index: usize,
+    started_at: String,
 ) -> Result<(), String> {
     let client = state.client.lock().await;
-    client.delete_history_entry(&runner_id, index).await
+    client.delete_history_entry(&runner_id, &started_at).await
 }
 
 #[tauri::command]

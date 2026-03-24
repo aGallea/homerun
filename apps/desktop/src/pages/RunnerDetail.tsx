@@ -216,7 +216,7 @@ export function RunnerDetail() {
   const { history, refresh: refreshHistory } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const expandedHistoryRef = useRef<HTMLDivElement | null>(null);
-  const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<number>>(new Set());
+  const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<string>>(new Set());
   const [clearingHistory, setClearingHistory] = useState(false);
 
   useEffect(() => {
@@ -821,7 +821,8 @@ export function RunnerDetail() {
                   );
                   const isExpanded = expandedHistoryIndex === i;
                   const hasSteps = entry.steps && entry.steps.length > 0;
-                  const isDeleting = clearingHistory || deletingHistoryEntries.has(i);
+                  const isDeleting =
+                    clearingHistory || deletingHistoryEntries.has(entry.started_at);
                   return (
                     <div key={i} ref={isExpanded ? expandedHistoryRef : undefined}>
                       <div
@@ -997,14 +998,15 @@ export function RunnerDetail() {
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              setDeletingHistoryEntries((s) => new Set(s).add(i));
+                              const key = entry.started_at;
+                              setDeletingHistoryEntries((s) => new Set(s).add(key));
                               api
-                                .deleteHistoryEntry(id!, i)
+                                .deleteHistoryEntry(id!, key)
                                 .then(() => refreshHistory())
                                 .finally(() =>
                                   setDeletingHistoryEntries((s) => {
                                     const next = new Set(s);
-                                    next.delete(i);
+                                    next.delete(key);
                                     return next;
                                   }),
                                 );

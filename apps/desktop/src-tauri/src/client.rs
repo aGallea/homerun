@@ -500,8 +500,9 @@ impl DaemonClient {
         Ok(())
     }
 
-    pub async fn delete_history_entry(&self, runner_id: &str, index: usize) -> Result<(), String> {
-        self.request("DELETE", &format!("/runners/{runner_id}/history/{index}"), None).await?;
+    pub async fn delete_history_entry(&self, runner_id: &str, started_at: &str) -> Result<(), String> {
+        let payload = serde_json::json!({ "started_at": started_at }).to_string();
+        self.request("DELETE", &format!("/runners/{runner_id}/history/entry"), Some(payload)).await?;
         Ok(())
     }
 
