@@ -9,6 +9,15 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.2.3](https://github.com/aGallea/homerun/compare/v0.2.2...v0.2.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* remove caching from release build and update Cargo.lock on release ([2aeaa92](https://github.com/aGallea/homerun/commit/2aeaa929937d30de73e4773abb410d2598b0852b))
+* remove caching from release build workflow ([a3dcb45](https://github.com/aGallea/homerun/commit/a3dcb45a8dc922644a12c306721220d47ac5c7e2))
+* use dtolnay/rust-toolchain instead of $HOME/.cargo/env in CI ([be9b695](https://github.com/aGallea/homerun/commit/be9b69534461a42a87a598b63a3896a503710dac))
+
 ## [0.2.2](https://github.com/aGallea/homerun/compare/v0.2.1...v0.2.2) (2026-03-24)
 
 
