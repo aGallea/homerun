@@ -446,7 +446,7 @@ export function RunnerDetail() {
             <div className="runner-card runner-card-job" style={{ overflow: "hidden" }}>
               <div className="runner-card-glow runner-card-glow-blue" />
               <div className="flex items-center justify-between">
-                <h3 className="runner-card-label">Current Job</h3>
+                <h3 className="runner-card-label">{current_job ? "Current Job" : "Last Job"}</h3>
                 {current_job && (
                   <a
                     href="#"
