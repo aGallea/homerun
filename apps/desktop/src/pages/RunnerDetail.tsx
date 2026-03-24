@@ -216,7 +216,7 @@ export function RunnerDetail() {
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [logsHeight, setLogsHeight] = useState(150);
   const [stepsHeight, setStepsHeight] = useState(300);
-  const [historyHeight, setHistoryHeight] = useState(250);
+  const [historyHeight, setHistoryHeight] = useState(150);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
