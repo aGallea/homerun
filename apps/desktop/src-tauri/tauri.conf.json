@@ -1,6 +1,6 @@
 {
   "productName": "HomeRun",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "com.homerun.app",
   "build": {
     "frontendDist": "../dist",

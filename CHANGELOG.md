@@ -9,6 +9,15 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.3.1](https://github.com/aGallea/homerun/compare/v0.3.0...v0.3.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* add shell:allow-execute permission for sidecar spawning ([9aa08d5](https://github.com/aGallea/homerun/commit/9aa08d56e74ad7c97c807ac7c6a1454c23d74227))
+* add shell:allow-execute permission for sidecar spawning ([069bd0e](https://github.com/aGallea/homerun/commit/069bd0ed4159af4e086bb0db22a3675bc56a8c92))
+* correct sidecar name and add shell:allow-spawn permission ([14de160](https://github.com/aGallea/homerun/commit/14de1600ec801f9c8cea16ae73acb6d4dfd9dd3f))
+
 ## [0.3.0](https://github.com/aGallea/homerun/compare/v0.2.3...v0.3.0) (2026-03-24)
 
 
