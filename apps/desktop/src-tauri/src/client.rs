@@ -62,6 +62,8 @@ pub struct RunnerInfo {
     pub job_started_at: Option<String>,
     #[serde(default)]
     pub last_completed_job: Option<CompletedJob>,
+    #[serde(default)]
+    pub estimated_job_duration_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
