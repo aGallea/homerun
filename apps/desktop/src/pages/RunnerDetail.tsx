@@ -795,26 +795,22 @@ export function RunnerDetail() {
                       >
                         <span
                           style={{
-                            width: 8,
-                            height: 8,
+                            width: 10,
+                            height: 10,
                             borderRadius: "50%",
                             background: entry.succeeded
                               ? "var(--accent-green)"
                               : "var(--accent-red)",
                             flexShrink: 0,
-                            marginTop: 3,
-                            alignSelf: "flex-start",
                           }}
                         />
                         {hasSteps && (
                           <span
                             style={{
-                              fontSize: 14,
+                              fontSize: 16,
                               lineHeight: 1,
                               color: "var(--text-secondary)",
                               flexShrink: 0,
-                              marginTop: 2,
-                              alignSelf: "flex-start",
                             }}
                           >
                             {isExpanded ? "\u25BE" : "\u25B8"}
