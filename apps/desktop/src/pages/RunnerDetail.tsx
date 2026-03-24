@@ -570,6 +570,18 @@ export function RunnerDetail() {
                       </span>
                     )}
                   </div>
+                  {!runner.last_completed_job.succeeded &&
+                    runner.last_completed_job.error_message && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--accent-red)",
+                          opacity: 0.8,
+                        }}
+                      >
+                        {runner.last_completed_job.error_message}
+                      </div>
+                    )}
                   {runner.last_completed_job.run_url && (
                     <a
                       href="#"
