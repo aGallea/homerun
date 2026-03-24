@@ -47,6 +47,7 @@ repos:
     hooks:
       - id: prettier
         types_or: [javascript, jsx, ts, tsx, css, json, yaml, markdown]
+        exclude: "CHANGELOG\\.md"
         additional_dependencies: ["prettier@3"]
 
   - repo: https://github.com/igorshubovych/markdownlint-cli
