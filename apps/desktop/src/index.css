@@ -270,8 +270,8 @@ p {
 }
 
 .sidebar {
-  width: 220px;
-  min-width: 220px;
+  width: 180px;
+  min-width: 180px;
   background: rgba(22, 27, 34, 0.5);
   border-right: 1px solid var(--border);
   display: flex;
@@ -386,7 +386,7 @@ p {
 }
 
 .sidebar-footer {
-  padding: 12px 8px 0;
+  padding: 12px 28px 0;
   border-top: 1px solid var(--border);
   margin-top: 8px;
 }
