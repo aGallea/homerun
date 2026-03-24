@@ -466,9 +466,13 @@ export function RunnerDetail() {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault();
-                      const url =
+                      const baseUrl =
                         job_context?.run_url ??
                         `https://github.com/${config.repo_owner}/${config.repo_name}/actions?query=is%3Ain_progress`;
+                      const url =
+                        job_context?.job_id != null
+                          ? `${baseUrl}/job/${job_context.job_id}`
+                          : baseUrl;
                       import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
                     }}
                     style={{ fontSize: 12, color: "var(--accent-blue)", whiteSpace: "nowrap" }}
@@ -1028,8 +1032,8 @@ export function RunnerDetail() {
                               strokeLinecap="round"
                               strokeLinejoin="round"
                             >
-                              <line x1="18" y1="6" x2="6" y2="18" />
-                              <line x1="6" y1="6" x2="18" y2="18" />
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                             </svg>
                           </a>
                         </div>
