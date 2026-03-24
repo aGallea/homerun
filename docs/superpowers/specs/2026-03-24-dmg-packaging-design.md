@@ -103,15 +103,17 @@ Note: The Tauri app does not use Tauri's `Command::sidecar()` API to spawn the d
 
 **Matrix strategy — two parallel jobs:**
 
-| Variant | Runner         | Target triple          |
-| ------- | -------------- | ---------------------- |
-| arm64   | `macos-latest` | `aarch64-apple-darwin` |
-| x86_64  | `macos-latest` | `x86_64-apple-darwin`  |
+| Variant | Runner         | Target triple          | Notes                   |
+| ------- | -------------- | ---------------------- | ----------------------- |
+| arm64   | `macos-latest` | `aarch64-apple-darwin` | Native build            |
+| x86_64  | `macos-latest` | `x86_64-apple-darwin`  | Cross-compiled from ARM |
+
+Both jobs run on ARM64 (`macos-latest`). The x86_64 build is cross-compiled via `--target x86_64-apple-darwin`. This works because macOS supports cross-compilation between architectures natively, and all dependencies (including `security-framework`) are pure Rust or have universal macOS system library support.
 
 **Steps per matrix job:**
 
 1. Checkout code
-2. Install Rust toolchain + `rustup target add <triple>`
+2. Install Rust toolchain + `rustup target add <triple>` (needed for x86_64 cross-compilation)
 3. Setup Node.js, run `npm ci` in `apps/desktop/`
 4. Build homerund: `cargo build --release -p homerund --target <triple>`
 5. Copy binary to `apps/desktop/src-tauri/binaries/homerund-<triple>`
@@ -139,7 +141,7 @@ Tauri automatically picks these up when present. No workflow changes needed to e
 
 ### Runner flexibility
 
-Default: GitHub-hosted (`macos-latest` for both). The existing CI uses `self-hosted` runners, but GitHub-hosted is preferred for release builds to avoid local toolchain assumptions. Can switch to self-hosted by changing `runs-on` values. Add `swatinem/rust-cache@v2` for build caching.
+Default: GitHub-hosted (`macos-latest` ARM64 for both, with cross-compilation for x86_64). The existing CI uses `self-hosted` runners, but GitHub-hosted is preferred for release builds to avoid local toolchain assumptions. Can switch to self-hosted by changing `runs-on` values. Add `swatinem/rust-cache@v2` for build caching.
 
 ## 4. Release Versioning with release-please
 
@@ -177,17 +179,7 @@ push to master
         {
           "type": "toml",
           "path": "Cargo.toml",
-          "key": "workspace.package.version"
-        },
-        {
-          "type": "toml",
-          "path": "crates/daemon/Cargo.toml",
-          "key": "package.version"
-        },
-        {
-          "type": "toml",
-          "path": "crates/tui/Cargo.toml",
-          "key": "package.version"
+          "jsonpath": "$.workspace.package.version"
         },
         {
           "type": "json",
@@ -202,7 +194,7 @@ push to master
         {
           "type": "toml",
           "path": "apps/desktop/src-tauri/Cargo.toml",
-          "key": "package.version"
+          "jsonpath": "$.package.version"
         }
       ]
     }
@@ -210,7 +202,7 @@ push to master
 }
 ```
 
-Using `release-type: "simple"` because the root `Cargo.toml` is a workspace manifest (has `workspace.package.version`, not `package.version`). All version bumps are handled explicitly via typed `extra-files` entries.
+Using `release-type: "simple"` because the root `Cargo.toml` is a workspace manifest (has `workspace.package.version`, not `package.version`). All version bumps are handled explicitly via typed `extra-files` with `jsonpath` syntax. Crate-level `Cargo.toml` files (`crates/daemon/`, `crates/tui/`) are excluded because they use `version.workspace = true` and inherit from the root automatically.
 
 **`.release-please-manifest.json`:**
 
