@@ -1264,6 +1264,24 @@ p {
   transition: width 0.3s ease;
 }
 
+@keyframes indeterminate-glow {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+.glow-bar-fill-indeterminate {
+  height: 100%;
+  width: 40%;
+  border-radius: 9999px;
+  background: var(--accent-blue);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+  animation: indeterminate-glow 1.5s ease-in-out infinite;
+}
+
 /* Label tags */
 .label-tag {
   font-size: 12px;

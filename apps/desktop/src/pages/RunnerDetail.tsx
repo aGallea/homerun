@@ -148,6 +148,58 @@ function StatusPill({ state, currentJob }: { state: string; currentJob?: string 
   );
 }
 
+function JobProgressBar({
+  estimatedDurationSecs,
+  jobStartedAt,
+}: {
+  estimatedDurationSecs?: number;
+  jobStartedAt?: string;
+}) {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (estimatedDurationSecs == null || jobStartedAt == null) {
+    return (
+      <div className="glow-bar-track">
+        <div className="glow-bar-fill-indeterminate" />
+      </div>
+    );
+  }
+
+  const elapsedSecs = (Date.now() - new Date(jobStartedAt).getTime()) / 1000;
+  const progress = Math.min(elapsedSecs / estimatedDurationSecs, 0.99);
+  const percent = Math.round(progress * 100);
+  const exceeding = elapsedSecs > estimatedDurationSecs;
+
+  return (
+    <div>
+      <div className="glow-bar-track">
+        <div
+          className="glow-bar-fill"
+          style={{
+            width: `${percent}%`,
+            background: exceeding ? "var(--accent-yellow)" : "var(--accent-blue)",
+            boxShadow: exceeding
+              ? "0 0 8px rgba(210, 153, 34, 0.8)"
+              : "0 0 8px rgba(59, 130, 246, 0.8)",
+          }}
+        />
+      </div>
+      {exceeding && (
+        <span
+          style={{ fontSize: 11, color: "var(--accent-yellow)", marginTop: 2, display: "block" }}
+        >
+          taking longer than usual
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function RunnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -450,16 +502,10 @@ export function RunnerDetail() {
                       )}
                     </div>
                   )}
-                  <div className="glow-bar-track">
-                    <div
-                      className="glow-bar-fill"
-                      style={{
-                        width: "60%",
-                        background: "var(--accent-blue)",
-                        boxShadow: "0 0 8px rgba(59, 130, 246, 0.8)",
-                      }}
-                    />
-                  </div>
+                  <JobProgressBar
+                    estimatedDurationSecs={runner.estimated_job_duration_secs ?? undefined}
+                    jobStartedAt={runner.job_started_at ?? undefined}
+                  />
                 </div>
               ) : runner.last_completed_job ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
