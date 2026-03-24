@@ -1,6 +1,6 @@
 {
   "productName": "HomeRun",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.homerun.app",
   "build": {
     "frontendDist": "../dist",
@@ -34,12 +34,23 @@
     ],
     "category": "DeveloperTool",
     "copyright": "© 2026 HomeRun contributors",
-    "externalBin": ["binaries/homerund"],
+    "externalBin": [
+      "binaries/homerund"
+    ],
     "macOS": {
       "dmg": {
-        "appPosition": { "x": 180, "y": 170 },
-        "applicationFolderPosition": { "x": 480, "y": 170 },
-        "windowSize": { "width": 660, "height": 400 }
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        },
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        }
       },
       "minimumSystemVersion": "13.0",
       "signingIdentity": null,
