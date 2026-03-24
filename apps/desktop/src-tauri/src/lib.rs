@@ -26,7 +26,7 @@ pub fn run() {
                 }
 
                 use tauri_plugin_shell::ShellExt;
-                let sidecar = match handle.shell().sidecar("binaries/homerund") {
+                let sidecar = match handle.shell().sidecar("homerund") {
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("Failed to find homerund sidecar: {e}");
