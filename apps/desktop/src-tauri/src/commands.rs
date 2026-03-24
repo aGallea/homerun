@@ -29,7 +29,7 @@ pub async fn start_daemon(app_handle: tauri::AppHandle) -> Result<bool, String> 
     // Spawn sidecar
     let sidecar = app_handle
         .shell()
-        .sidecar("binaries/homerund")
+        .sidecar("homerund")
         .map_err(|e| format!("Failed to find sidecar: {e}"))?;
 
     let (_rx, _child) = sidecar
