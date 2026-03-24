@@ -356,6 +356,38 @@ impl GitHubClient {
         let body = response.text().await?;
         Ok(body)
     }
+
+    /// Fetch the error/failure message for a completed job via check-run annotations.
+    /// Returns the first annotation message if any exist, otherwise None.
+    pub async fn get_job_failure_message(
+        &self,
+        owner: &str,
+        repo: &str,
+        job_id: u64,
+    ) -> Result<Option<String>> {
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/check-runs/{job_id}/annotations");
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "homerun")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+
+        #[derive(Deserialize)]
+        struct Annotation {
+            message: Option<String>,
+        }
+
+        let annotations: Vec<Annotation> = response.json().await?;
+        Ok(annotations.into_iter().find_map(|a| a.message))
+    }
 }
 
 /// Parse raw GitHub Actions job log text into sections by step name.

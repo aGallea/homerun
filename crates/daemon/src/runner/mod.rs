@@ -634,7 +634,45 @@ impl RunnerManager {
                                     }
                                 }
 
-                                let error_message = if succeeded { None } else { Some(result) };
+                                let error_message = if succeeded {
+                                    None
+                                } else {
+                                    // Try to fetch the full error message from GitHub annotations
+                                    let annotation_msg = {
+                                        let map = manager.runners.read().await;
+                                        let info = map.get(runner_id).and_then(|r| {
+                                            let ctx = r.job_context.as_ref()?;
+                                            let job_id = ctx.job_id?;
+                                            Some((
+                                                r.config.repo_owner.clone(),
+                                                r.config.repo_name.clone(),
+                                                job_id,
+                                            ))
+                                        });
+                                        if let Some((owner, repo, job_id)) = info {
+                                            let token = manager.auth_token.read().await.clone();
+                                            if let Some(token) = token {
+                                                if let Ok(gh) =
+                                                    crate::github::GitHubClient::new(Some(token))
+                                                {
+                                                    gh.get_job_failure_message(
+                                                        &owner, &repo, job_id,
+                                                    )
+                                                    .await
+                                                    .ok()
+                                                    .flatten()
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    };
+                                    Some(annotation_msg.unwrap_or(result))
+                                };
 
                                 // Build history entry and update runner state
                                 let history_entry = {
@@ -1298,7 +1336,7 @@ impl RunnerManager {
                                 .unwrap_or_default();
                             step_watcher.stop_watching(&rid).await;
 
-                            let error_message = if succeeded { None } else { Some(result) };
+                            let mut error_message = if succeeded { None } else { Some(result) };
 
                             // Fetch job context if the poller didn't get it in time
                             {
@@ -1334,6 +1372,37 @@ impl RunnerManager {
                                                         r.job_context = Some(ctx);
                                                     }
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Fetch full error message from GitHub annotations
+                            if !succeeded {
+                                let info = {
+                                    let map = runners.read().await;
+                                    map.get(&rid).and_then(|r| {
+                                        let ctx = r.job_context.as_ref()?;
+                                        let job_id = ctx.job_id?;
+                                        Some((
+                                            r.config.repo_owner.clone(),
+                                            r.config.repo_name.clone(),
+                                            job_id,
+                                        ))
+                                    })
+                                };
+                                if let Some((owner, repo, job_id)) = info {
+                                    let token = auth_token_clone.read().await.clone();
+                                    if let Some(token) = token {
+                                        if let Ok(gh) =
+                                            crate::github::GitHubClient::new(Some(token))
+                                        {
+                                            if let Ok(Some(msg)) = gh
+                                                .get_job_failure_message(&owner, &repo, job_id)
+                                                .await
+                                            {
+                                                error_message = Some(msg);
                                             }
                                         }
                                     }

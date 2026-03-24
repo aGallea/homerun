@@ -213,7 +213,7 @@ p {
   background-color: var(--bg-secondary);
   border: 1px solid rgba(88, 166, 255, 0.25);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 6px 14px;
   box-shadow:
     0 0 10px rgba(88, 166, 255, 0.15),
     0 0 30px rgba(88, 166, 255, 0.08);
