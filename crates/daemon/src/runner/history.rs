@@ -63,10 +63,10 @@ pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry) {
 /// Compute the median duration (in seconds) of succeeded history entries matching `job_name`.
 /// Returns `None` if there are no matching succeeded entries.
 pub fn median_duration_secs(entries: &[JobHistoryEntry], job_name: &str) -> Option<u64> {
-    let mut durations: Vec<i64> = entries
+    let mut durations: Vec<u64> = entries
         .iter()
         .filter(|e| e.succeeded && e.job_name == job_name)
-        .map(|e| (e.completed_at - e.started_at).num_seconds().max(0))
+        .map(|e| (e.completed_at - e.started_at).num_seconds().max(0) as u64)
         .collect();
 
     if durations.is_empty() {
@@ -81,7 +81,7 @@ pub fn median_duration_secs(entries: &[JobHistoryEntry], job_name: &str) -> Opti
         (durations[len / 2 - 1] + durations[len / 2]) / 2
     };
 
-    Some(median as u64)
+    Some(median)
 }
 
 #[cfg(test)]
