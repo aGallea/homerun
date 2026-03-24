@@ -812,14 +812,18 @@ impl RunnerManager {
     }
 
     pub async fn list_by_group(&self, group_id: &str) -> Vec<RunnerInfo> {
-        let history = self.job_history.read().await;
-        self.runners
+        let infos: Vec<RunnerInfo> = self
+            .runners
             .read()
             .await
             .values()
             .filter(|r| r.config.group_id.as_deref() == Some(group_id))
             .cloned()
             .map(Self::with_computed_uptime)
+            .collect();
+        let history = self.job_history.read().await;
+        infos
+            .into_iter()
             .map(|info| Self::with_job_estimate(info, &history))
             .collect()
     }
@@ -927,13 +931,17 @@ impl RunnerManager {
     }
 
     pub async fn list(&self) -> Vec<RunnerInfo> {
-        let history = self.job_history.read().await;
-        self.runners
+        let infos: Vec<RunnerInfo> = self
+            .runners
             .read()
             .await
             .values()
             .cloned()
             .map(Self::with_computed_uptime)
+            .collect();
+        let history = self.job_history.read().await;
+        infos
+            .into_iter()
             .map(|info| Self::with_job_estimate(info, &history))
             .collect()
     }
@@ -947,14 +955,20 @@ impl RunnerManager {
     }
 
     pub async fn get(&self, id: &str) -> Option<RunnerInfo> {
-        let history = self.job_history.read().await;
-        self.runners
+        let info = self
+            .runners
             .read()
             .await
             .get(id)
             .cloned()
-            .map(Self::with_computed_uptime)
-            .map(|info| Self::with_job_estimate(info, &history))
+            .map(Self::with_computed_uptime);
+        match info {
+            Some(info) => {
+                let history = self.job_history.read().await;
+                Some(Self::with_job_estimate(info, &history))
+            }
+            None => None,
+        }
     }
 
     /// Get the current step progress for a running job on the given runner.
@@ -2371,6 +2385,148 @@ mod tests {
             computed.uptime_secs.is_none(),
             "uptime should be None when not started"
         );
+    }
+
+    #[test]
+    fn test_with_job_estimate_busy_with_history() {
+        use crate::runner::types::{JobHistoryEntry, RunnerConfig, RunnerMode};
+        let now = chrono::Utc::now();
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: Some(now),
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let mut history = HashMap::new();
+        history.insert(
+            "runner-1".to_string(),
+            vec![JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(200),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                steps: vec![],
+            }],
+        );
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, Some(200));
+    }
+
+    #[test]
+    fn test_with_job_estimate_busy_no_history() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, None);
+    }
+
+    #[test]
+    fn test_with_job_estimate_online_ignored() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Online,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, None);
+    }
+
+    #[test]
+    fn test_with_job_estimate_busy_no_current_job() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            error_message: None,
+            job_started_at: None,
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history);
+        assert_eq!(result.estimated_job_duration_secs, None);
     }
 
     #[tokio::test]
