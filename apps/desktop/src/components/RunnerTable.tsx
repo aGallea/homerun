@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo } from "react";
+import { Fragment, useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { RunnerInfo } from "../api/types";
 import { StatusBadge } from "./StatusBadge";
@@ -225,6 +225,38 @@ export function RunnerTable({
   );
 }
 
+function MiniProgressBar({
+  estimatedDurationSecs,
+  jobStartedAt,
+}: {
+  estimatedDurationSecs: number;
+  jobStartedAt: string;
+}) {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const elapsedSecs = (Date.now() - new Date(jobStartedAt).getTime()) / 1000;
+  const progress = Math.min(elapsedSecs / estimatedDurationSecs, 0.99);
+  const percent = Math.round(progress * 100);
+  const exceeding = elapsedSecs > estimatedDurationSecs;
+
+  return (
+    <div className="runner-progress-mini">
+      <div
+        className="runner-progress-mini-fill"
+        style={{
+          width: `${percent}%`,
+          background: exceeding ? "var(--accent-yellow)" : "var(--accent-blue)",
+        }}
+      />
+    </div>
+  );
+}
+
 function RunnerRow({
   runner,
   cpuValue,
@@ -301,6 +333,14 @@ function RunnerRow({
           }
         >
           <StatusBadge state={runner.state} currentJob={runner.current_job ?? undefined} />
+          {runner.state === "busy" &&
+            runner.estimated_job_duration_secs != null &&
+            runner.job_started_at && (
+              <MiniProgressBar
+                estimatedDurationSecs={runner.estimated_job_duration_secs}
+                jobStartedAt={runner.job_started_at}
+              />
+            )}
         </div>
         <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
           <CpuValue value={cpuValue} />
