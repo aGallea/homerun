@@ -49,19 +49,15 @@ These are placed by the build pipeline before `tauri build` runs. The `binaries/
 
 1. `cargo build --release -p homerund --target <triple>`
 2. Copy `target/<triple>/release/homerund` → `apps/desktop/src-tauri/binaries/homerund-<triple>`
-3. `npm run tauri build -- --target <triple>` (from `apps/desktop/`)
+3. `npx tauri build --target <triple>` (from `apps/desktop/`)
 
 Tauri bundles the sidecar into `.app/Contents/MacOS/homerund`.
 
-### Launchd integration update
+### Launchd integration — no code changes needed
 
-The existing `install_service` command in `commands.rs` uses `std::env::current_exe()` to find the daemon binary path for the launchd plist. This must change to resolve the sidecar binary path.
+The daemon's `install_service` handler (in `crates/daemon/src/api/service.rs`) calls `std::env::current_exe()` to determine its own path for the launchd plist. When the daemon runs as a sidecar from `.app/Contents/MacOS/homerund`, `current_exe()` already returns the correct sidecar path. No changes to the Tauri app's `commands.rs` are needed — it simply delegates to the daemon.
 
-**New logic:**
-
-- Compute sidecar path relative to the app bundle: the Tauri app executable lives at `.app/Contents/MacOS/HomeRun`, and the sidecar is at `.app/Contents/MacOS/homerund`
-- Use `std::env::current_exe()` to get the app binary path, then resolve `../MacOS/homerund` relative to it
-- The launchd plist `ProgramArguments` points to this resolved path
+Note: The Tauri app does not use Tauri's `Command::sidecar()` API to spawn the daemon. The sidecar is bundled purely for distribution; the daemon is started via launchd or manually. No additional shell/sidecar permissions are needed in `capabilities/default.json`.
 
 **Edge case — app moved after launchd registration:**
 
@@ -110,16 +106,16 @@ The existing `install_service` command in `commands.rs` uses `std::env::current_
 | Variant | Runner         | Target triple          |
 | ------- | -------------- | ---------------------- |
 | arm64   | `macos-latest` | `aarch64-apple-darwin` |
-| x86_64  | `macos-13`     | `x86_64-apple-darwin`  |
+| x86_64  | `macos-latest` | `x86_64-apple-darwin`  |
 
 **Steps per matrix job:**
 
 1. Checkout code
-2. Install Rust toolchain + add target triple
+2. Install Rust toolchain + `rustup target add <triple>`
 3. Setup Node.js, run `npm ci` in `apps/desktop/`
 4. Build homerund: `cargo build --release -p homerund --target <triple>`
 5. Copy binary to `apps/desktop/src-tauri/binaries/homerund-<triple>`
-6. Run `npm run tauri build -- --target <triple>` from `apps/desktop/`
+6. Run `npx tauri build --target <triple>` from `apps/desktop/`
 7. Upload `.dmg` as workflow artifact
 
 **Code-signing environment variables (optional, for future use):**
@@ -130,6 +126,7 @@ The existing `install_service` command in `commands.rs` uses `std::env::current_
 - `APPLE_ID`
 - `APPLE_TEAM_ID`
 - `APPLE_PASSWORD`
+- `KEYCHAIN_PASSWORD` — for the temporary CI keychain
 
 Tauri automatically picks these up when present. No workflow changes needed to enable signing.
 
@@ -142,7 +139,7 @@ Tauri automatically picks these up when present. No workflow changes needed to e
 
 ### Runner flexibility
 
-Default: GitHub-hosted (`macos-latest`, `macos-13`). Can switch to self-hosted by changing `runs-on` values.
+Default: GitHub-hosted (`macos-latest` for both). The existing CI uses `self-hosted` runners, but GitHub-hosted is preferred for release builds to avoid local toolchain assumptions. Can switch to self-hosted by changing `runs-on` values. Add `swatinem/rust-cache@v2` for build caching.
 
 ## 4. Release Versioning with release-please
 
@@ -172,19 +169,48 @@ push to master
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "packages": {
     ".": {
-      "release-type": "rust",
+      "release-type": "simple",
       "component": "homerun",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "extra-files": [
-        "apps/desktop/package.json",
-        "apps/desktop/src-tauri/tauri.conf.json",
-        "apps/desktop/src-tauri/Cargo.toml"
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "key": "workspace.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/daemon/Cargo.toml",
+          "key": "package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/tui/Cargo.toml",
+          "key": "package.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/desktop/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/desktop/src-tauri/tauri.conf.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "toml",
+          "path": "apps/desktop/src-tauri/Cargo.toml",
+          "key": "package.version"
+        }
       ]
     }
   }
 }
 ```
+
+Using `release-type: "simple"` because the root `Cargo.toml` is a workspace manifest (has `workspace.package.version`, not `package.version`). All version bumps are handled explicitly via typed `extra-files` entries.
 
 **`.release-please-manifest.json`:**
 
@@ -203,15 +229,14 @@ push to master
 
 ## 5. Files Changed / Created
 
-| File                                         | Action   | Purpose                                      |
-| -------------------------------------------- | -------- | -------------------------------------------- |
-| `apps/desktop/src-tauri/tauri.conf.json`     | Modified | Add externalBin, DMG config, macOS settings  |
-| `apps/desktop/src-tauri/binaries/.gitignore` | Created  | Ignore sidecar binaries                      |
-| `apps/desktop/src-tauri/src/commands.rs`     | Modified | Update launchd plist path to resolve sidecar |
-| `.github/workflows/release-build.yml`        | Created  | Tag-triggered DMG build + GitHub Release     |
-| `.github/workflows/release-please.yml`       | Created  | Automated versioning + Release PRs           |
-| `.release-please-config.json`                | Created  | release-please monorepo config               |
-| `.release-please-manifest.json`              | Created  | Version tracking                             |
+| File                                         | Action   | Purpose                                     |
+| -------------------------------------------- | -------- | ------------------------------------------- |
+| `apps/desktop/src-tauri/tauri.conf.json`     | Modified | Add externalBin, DMG config, macOS settings |
+| `apps/desktop/src-tauri/binaries/.gitignore` | Created  | Ignore sidecar binaries                     |
+| `.github/workflows/release-build.yml`        | Created  | Tag-triggered DMG build + GitHub Release    |
+| `.github/workflows/release-please.yml`       | Created  | Automated versioning + Release PRs          |
+| `.release-please-config.json`                | Created  | release-please monorepo config              |
+| `.release-please-manifest.json`              | Created  | Version tracking                            |
 
 ## 6. Testing Strategy
 
