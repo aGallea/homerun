@@ -9,6 +9,14 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.2.2](https://github.com/aGallea/homerun/compare/v0.2.1...v0.2.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* remove signing env vars to allow unsigned DMG builds ([ba5b53c](https://github.com/aGallea/homerun/commit/ba5b53c0f45108d5daddb08724fd37641ac344d9))
+* remove signing env vars to allow unsigned DMG builds ([688001d](https://github.com/aGallea/homerun/commit/688001d95bf7a615ee15f0c57049f6626215d832))
+
 ## [0.2.1](https://github.com/aGallea/homerun/compare/v0.2.0...v0.2.1) (2026-03-24)
 
 
