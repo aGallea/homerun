@@ -62,14 +62,8 @@ jobs:
 
       - name: Build Tauri app
         working-directory: apps/desktop
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        # Code-signing env vars omitted — unsigned builds for now.
+        # Add APPLE_CERTIFICATE etc. when code-signing is set up (see #49).
         run: npx tauri build --target ${{ matrix.target }}
 
       - name: Upload DMG artifact
