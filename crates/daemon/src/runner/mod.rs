@@ -279,6 +279,21 @@ impl RunnerManager {
         info
     }
 
+    fn with_job_estimate(
+        mut info: RunnerInfo,
+        history: &HashMap<String, Vec<types::JobHistoryEntry>>,
+    ) -> RunnerInfo {
+        if info.state == RunnerState::Busy {
+            if let Some(ref job_name) = info.current_job {
+                if let Some(entries) = history.get(&info.config.id) {
+                    info.estimated_job_duration_secs =
+                        history::median_duration_secs(entries, job_name);
+                }
+            }
+        }
+        info
+    }
+
     // ── Persistence ────────────────────────────────────────────────
 
     /// Save all runner configs to disk as JSON.
@@ -351,6 +366,7 @@ impl RunnerManager {
                     error_message: None,
                     job_started_at: None,
                     last_completed_job: None,
+                    estimated_job_duration_secs: None,
                 },
             );
         }
@@ -754,6 +770,7 @@ impl RunnerManager {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
 
         self.runners.write().await.insert(id, runner.clone());
@@ -795,6 +812,7 @@ impl RunnerManager {
     }
 
     pub async fn list_by_group(&self, group_id: &str) -> Vec<RunnerInfo> {
+        let history = self.job_history.read().await;
         self.runners
             .read()
             .await
@@ -802,6 +820,7 @@ impl RunnerManager {
             .filter(|r| r.config.group_id.as_deref() == Some(group_id))
             .cloned()
             .map(Self::with_computed_uptime)
+            .map(|info| Self::with_job_estimate(info, &history))
             .collect()
     }
 
@@ -908,12 +927,14 @@ impl RunnerManager {
     }
 
     pub async fn list(&self) -> Vec<RunnerInfo> {
+        let history = self.job_history.read().await;
         self.runners
             .read()
             .await
             .values()
             .cloned()
             .map(Self::with_computed_uptime)
+            .map(|info| Self::with_job_estimate(info, &history))
             .collect()
     }
 
@@ -926,12 +947,14 @@ impl RunnerManager {
     }
 
     pub async fn get(&self, id: &str) -> Option<RunnerInfo> {
+        let history = self.job_history.read().await;
         self.runners
             .read()
             .await
             .get(id)
             .cloned()
             .map(Self::with_computed_uptime)
+            .map(|info| Self::with_job_estimate(info, &history))
     }
 
     /// Get the current step progress for a running job on the given runner.
@@ -2030,6 +2053,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2305,6 +2329,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         let uptime = computed.uptime_secs.expect("uptime should be computed");
@@ -2339,6 +2364,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
         let computed = RunnerManager::with_computed_uptime(info);
         assert!(
@@ -2553,6 +2579,7 @@ mod tests {
             error_message: None,
             job_started_at: None,
             last_completed_job: None,
+            estimated_job_duration_secs: None,
         };
 
         let json = serde_json::to_value(&info).unwrap();
@@ -2600,6 +2627,7 @@ mod tests {
                 error_message: None,
                 job_started_at: None,
                 last_completed_job: None,
+                estimated_job_duration_secs: None,
             },
         );
         manager

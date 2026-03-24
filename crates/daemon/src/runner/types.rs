@@ -75,6 +75,8 @@ pub struct RunnerInfo {
     pub job_started_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_completed_job: Option<CompletedJob>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub estimated_job_duration_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
