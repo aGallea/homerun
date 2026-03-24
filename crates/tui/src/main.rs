@@ -96,12 +96,8 @@ async fn run_tui() -> Result<()> {
     match client.health().await {
         Ok(_) => app.daemon_connected = true,
         Err(_) => {
-            eprintln!(
-                "Cannot connect to HomeRun daemon.\n\
-                 Make sure homerund is running:\n\n  \
-                 homerund\n"
-            );
-            std::process::exit(1);
+            app.daemon_connected = false;
+            app.active_tab = homerun::app::Tab::Daemon;
         }
     }
 
@@ -256,6 +252,45 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
         }
         Action::RefreshDaemonLogs => {
             refresh_daemon_logs(client, app).await;
+            Ok(())
+        }
+        Action::StartDaemon => {
+            match homerun::daemon_lifecycle::start_daemon().await {
+                Ok(()) => {
+                    app.daemon_connected = true;
+                    if let Ok(runners) = client.list_runners().await {
+                        app.runners = runners;
+                        app.rebuild_display_items();
+                    }
+                }
+                Err(e) => {
+                    app.status_message = Some(format!("Error: {e}"));
+                }
+            }
+            Ok(())
+        }
+        Action::StopDaemon => {
+            match homerun::daemon_lifecycle::stop_daemon().await {
+                Ok(()) => app.daemon_connected = false,
+                Err(e) => {
+                    app.status_message = Some(format!("Error: {e}"));
+                }
+            }
+            Ok(())
+        }
+        Action::RestartDaemon => {
+            match homerun::daemon_lifecycle::restart_daemon().await {
+                Ok(()) => {
+                    app.daemon_connected = true;
+                    if let Ok(runners) = client.list_runners().await {
+                        app.runners = runners;
+                        app.rebuild_display_items();
+                    }
+                }
+                Err(e) => {
+                    app.status_message = Some(format!("Error: {e}"));
+                }
+            }
             Ok(())
         }
     };
