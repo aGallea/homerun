@@ -344,8 +344,8 @@ export function RunnerDetail() {
         {state === "error" && runner.error_message && !actionError && (
           <div className="error-banner">{runner.error_message}</div>
         )}
-        {/* Top section: actions + stats on left, current job card on right */}
-        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+        {/* Top section: current job card on left, actions + stats on right */}
+        <div style={{ display: "flex", flexDirection: "row-reverse", gap: 16, marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             {/* Action buttons */}
             {isAuthenticated && (
