@@ -216,6 +216,8 @@ export function RunnerDetail() {
   const { history } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const expandedHistoryRef = useRef<HTMLDivElement | null>(null);
+  const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<number>>(new Set());
+  const [clearingHistory, setClearingHistory] = useState(false);
 
   useEffect(() => {
     if (expandedHistoryIndex != null && expandedHistoryRef.current) {
@@ -760,22 +762,28 @@ export function RunnerDetail() {
               </div>
               {!historyCollapsed && (
                 <button
+                  disabled={clearingHistory}
                   onClick={(e) => {
                     e.stopPropagation();
-                    api.clearRunnerHistory(id!).then(() => setExpandedHistoryIndex(null));
+                    setClearingHistory(true);
+                    api
+                      .clearRunnerHistory(id!)
+                      .then(() => setExpandedHistoryIndex(null))
+                      .finally(() => setClearingHistory(false));
                   }}
                   style={{
                     fontSize: 11,
                     color: "var(--text-secondary)",
                     background: "none",
                     border: "none",
-                    cursor: "pointer",
+                    cursor: clearingHistory ? "default" : "pointer",
                     padding: "2px 6px",
                     marginLeft: "auto",
+                    opacity: clearingHistory ? 0.5 : 1,
                   }}
                   title="Clear all history"
                 >
-                  Clear all
+                  {clearingHistory ? "Clearing..." : "Clear all"}
                 </button>
               )}
             </div>
@@ -798,6 +806,7 @@ export function RunnerDetail() {
                   );
                   const isExpanded = expandedHistoryIndex === i;
                   const hasSteps = entry.steps && entry.steps.length > 0;
+                  const isDeleting = clearingHistory || deletingHistoryEntries.has(i);
                   return (
                     <div key={i} ref={isExpanded ? expandedHistoryRef : undefined}>
                       <div
@@ -811,7 +820,10 @@ export function RunnerDetail() {
                           padding: "6px 12px",
                           background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
                           fontSize: 13,
-                          cursor: hasSteps ? "pointer" : "default",
+                          cursor: hasSteps && !isDeleting ? "pointer" : "default",
+                          opacity: isDeleting ? 0.4 : 1,
+                          pointerEvents: isDeleting ? "none" : "auto",
+                          transition: "opacity 0.2s",
                         }}
                       >
                         <span
@@ -970,7 +982,14 @@ export function RunnerDetail() {
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              api.deleteHistoryEntry(id!, i);
+                              setDeletingHistoryEntries((s) => new Set(s).add(i));
+                              api.deleteHistoryEntry(id!, i).finally(() =>
+                                setDeletingHistoryEntries((s) => {
+                                  const next = new Set(s);
+                                  next.delete(i);
+                                  return next;
+                                }),
+                              );
                             }}
                             style={{
                               color: "var(--text-secondary)",
