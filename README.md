@@ -56,7 +56,13 @@ For the full architecture deep-dive (runner lifecycle, state machine, process ma
    - **Apple Silicon** (M1/M2/M3/M4): `HomeRun_<version>_aarch64.dmg`
    - **Intel**: `HomeRun_<version>_x86_64.dmg`
 2. Open the `.dmg` and drag HomeRun to Applications
-3. Launch HomeRun — go to Settings > Startup > "Launch at login" to auto-start the daemon
+3. Remove the macOS quarantine flag (required because the app is not yet code-signed):
+
+   ```sh
+   xattr -cr /Applications/HomeRun.app
+   ```
+
+4. Launch HomeRun — go to Settings > Startup > "Launch at login" to auto-start the daemon
 
 The `.dmg` bundles the `homerund` daemon inside the app. Releases are automated via [release-please](https://github.com/googleapis/release-please) — every merge to `master` with conventional commits triggers a Release PR with version bumps and changelog.
 
