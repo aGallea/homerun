@@ -9,6 +9,17 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.2.1](https://github.com/aGallea/homerun/compare/v0.2.0...v0.2.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* also exclude CHANGELOG.md from markdownlint ([048c9d2](https://github.com/aGallea/homerun/commit/048c9d2757ae81383195549ae0008b8ad4700497))
+* exclude CHANGELOG.md from prettier ([5fd76d5](https://github.com/aGallea/homerun/commit/5fd76d5fe3356a3b4a91fc7659e478a5826028a4))
+* exclude CHANGELOG.md from prettier ([392ce5b](https://github.com/aGallea/homerun/commit/392ce5b38272806762da3652808260318d80efeb))
+* use PAT for release-please to trigger release build workflow ([417d3ec](https://github.com/aGallea/homerun/commit/417d3ecab778caf1a4d8b31cb52ccbf65777d077))
+* use PAT for release-please to trigger release build workflow ([6bdaaff](https://github.com/aGallea/homerun/commit/6bdaaff678bd28e6451a28c8af69b6e230692954))
+
 ## [0.2.0](https://github.com/aGallea/homerun/compare/v0.1.0...v0.2.0) (2026-03-24)
 
 
