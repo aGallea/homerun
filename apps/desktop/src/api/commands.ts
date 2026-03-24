@@ -69,6 +69,9 @@ export const api = {
   // Health
   healthCheck: () => invoke<boolean>("health_check"),
   daemonAvailable: () => invoke<boolean>("daemon_available"),
+  startDaemon: () => invoke<boolean>("start_daemon"),
+  stopDaemon: () => invoke<boolean>("stop_daemon"),
+  restartDaemon: () => invoke<boolean>("restart_daemon"),
 
   // Batch / Groups
   createBatch: (req: CreateBatchRequest) => invoke<BatchCreateResponse>("create_batch", { req }),

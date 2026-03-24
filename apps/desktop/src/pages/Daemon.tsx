@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useDaemonLogs } from "../hooks/useDaemonLogs";
 import { useMetrics } from "../hooks/useMetrics";
+import { api } from "../api/commands";
 
 const LOG_LEVELS = ["ERROR", "WARN", "INFO", "DEBUG", "TRACE"];
 
@@ -56,6 +57,20 @@ export function Daemon() {
   const { metrics } = useMetrics();
   const logContainerRef = useRef<HTMLDivElement>(null);
   const [childrenExpanded, setChildrenExpanded] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  const handleDaemonAction = async (action: "start" | "stop" | "restart") => {
+    setActionLoading(action);
+    try {
+      if (action === "start") await api.startDaemon();
+      else if (action === "stop") await api.stopDaemon();
+      else await api.restartDaemon();
+    } catch (err) {
+      console.error(`Daemon ${action} failed:`, err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const daemon = metrics?.daemon;
 
@@ -72,6 +87,31 @@ export function Daemon() {
       </div>
 
       {error && !error.includes("connect") && <div className="error-banner">{error}</div>}
+
+      {/* Daemon controls */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <button
+          className="btn btn-primary"
+          onClick={() => handleDaemonAction("start")}
+          disabled={actionLoading !== null || !!metrics?.daemon}
+        >
+          {actionLoading === "start" ? "Starting..." : "Start"}
+        </button>
+        <button
+          className="btn btn-secondary"
+          onClick={() => handleDaemonAction("stop")}
+          disabled={actionLoading !== null || !metrics?.daemon}
+        >
+          {actionLoading === "stop" ? "Stopping..." : "Stop"}
+        </button>
+        <button
+          className="btn btn-secondary"
+          onClick={() => handleDaemonAction("restart")}
+          disabled={actionLoading !== null || !metrics?.daemon}
+        >
+          {actionLoading === "restart" ? "Restarting..." : "Restart"}
+        </button>
+      </div>
 
       {/* Status cards */}
       <div className="stats-grid" style={{ marginBottom: 16 }}>

@@ -39,8 +39,29 @@ export function Layout() {
       </div>
       <main className="main-content">
         {!daemonConnected && (
-          <div className="error-banner" style={{ margin: "16px 24px 0", padding: "12px 16px" }}>
-            Unable to connect to the HomeRun daemon. Make sure it is running.
+          <div
+            className="error-banner"
+            style={{
+              margin: "16px 24px 0",
+              padding: "12px 16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>Unable to connect to the HomeRun daemon.</span>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={async () => {
+                try {
+                  await api.startDaemon();
+                } catch (err) {
+                  console.error("Failed to start daemon:", err);
+                }
+              }}
+            >
+              Start daemon
+            </button>
           </div>
         )}
         <Outlet />
