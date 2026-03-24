@@ -214,9 +214,9 @@ export function RunnerDetail() {
   );
   const { history } = useJobHistory(id);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
-  const [logsHeight, setLogsHeight] = useState(150);
+  const [logsHeight, setLogsHeight] = useState(140);
   const [stepsHeight, setStepsHeight] = useState(300);
-  const [historyHeight, setHistoryHeight] = useState(150);
+  const [historyHeight, setHistoryHeight] = useState(200);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -686,7 +686,8 @@ export function RunnerDetail() {
               display: "flex",
               flexDirection: "column",
               position: "relative",
-              height: historyHeight,
+              height: expandedHistoryIndex != null ? "auto" : historyHeight,
+              maxHeight: expandedHistoryIndex != null ? "50vh" : undefined,
               flex: "none",
             }}
           >
@@ -725,7 +726,17 @@ export function RunnerDetail() {
                 const isExpanded = expandedHistoryIndex === i;
                 const hasSteps = entry.steps && entry.steps.length > 0;
                 return (
-                  <div key={i}>
+                  <div
+                    key={i}
+                    ref={(el) => {
+                      if (isExpanded && el) {
+                        setTimeout(
+                          () => el.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+                          50,
+                        );
+                      }
+                    }}
+                  >
                     <div
                       onClick={() => {
                         if (hasSteps) setExpandedHistoryIndex(isExpanded ? null : i);
