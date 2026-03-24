@@ -52,17 +52,17 @@ For the full architecture deep-dive (runner lifecycle, state machine, process ma
 
 ### Install (DMG)
 
-1. Download the latest `.dmg` from [Releases](https://github.com/aGallea/homerun/releases)
+1. Download the latest `.dmg` for your architecture from [Releases](https://github.com/aGallea/homerun/releases):
+   - **Apple Silicon** (M1/M2/M3/M4): `HomeRun_<version>_aarch64.dmg`
+   - **Intel**: `HomeRun_<version>_x86_64.dmg`
 2. Open the `.dmg` and drag HomeRun to Applications
-3. Launch HomeRun — the daemon starts automatically
+3. Launch HomeRun — go to Settings > Startup > "Launch at login" to auto-start the daemon
+
+The `.dmg` bundles the `homerund` daemon inside the app. Releases are automated via [release-please](https://github.com/googleapis/release-please) — every merge to `master` with conventional commits triggers a Release PR with version bumps and changelog.
 
 ### Install (Homebrew)
 
-```sh
-brew install homerun
-```
-
-This installs both the `homerun` TUI/CLI and the `homerund` daemon.
+> _Coming soon — see [#18](https://github.com/aGallea/homerun/issues/18)._
 
 ### Run
 
