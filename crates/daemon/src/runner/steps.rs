@@ -182,25 +182,31 @@ impl WorkerLogWatcher {
             }
         }
 
-        let log_path = state.log_path.as_ref().unwrap();
+        {
+            let log_path = state.log_path.as_ref().unwrap();
+            let Ok(metadata) = std::fs::metadata(log_path) else {
+                return true;
+            };
 
-        let Ok(metadata) = std::fs::metadata(log_path) else {
-            return true;
-        };
-
-        let file_len = metadata.len();
-        if file_len <= state.file_offset {
-            // No new bytes — check if a newer log file appeared
-            if let Some(newer) = find_latest_worker_log(&state.work_dir) {
-                if newer != *log_path {
-                    state.log_path = Some(newer);
-                    state.file_offset = 0;
-                    state.steps.clear();
+            let file_len = metadata.len();
+            if file_len <= state.file_offset {
+                // No new bytes — check if a newer log file appeared
+                if let Some(newer) = find_latest_worker_log(&state.work_dir) {
+                    if newer != *log_path {
+                        state.log_path = Some(newer);
+                        state.file_offset = 0;
+                        state.steps.clear();
+                        // Fall through to read the new file immediately
+                    } else {
+                        return true;
+                    }
+                } else {
+                    return true;
                 }
             }
-            return true;
         }
 
+        let log_path = state.log_path.as_ref().unwrap();
         let Ok(content) = std::fs::read_to_string(log_path) else {
             return true;
         };
@@ -525,5 +531,47 @@ mod tests {
         let resp = watcher.get_steps("runner-4").await.unwrap();
         assert_eq!(resp.steps.len(), 0);
         assert_eq!(resp.job_name, "no-diag-job");
+    }
+
+    #[tokio::test]
+    async fn test_poll_detects_newer_log_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let diag = dir.path().join("_diag");
+        std::fs::create_dir_all(&diag).unwrap();
+
+        // Create an "old" Worker log with one step
+        let old_log = diag.join("Worker_20260323-070000-utc.log");
+        let old_content = "\
+[2026-03-23 07:00:00Z INFO StepsRunner] Processing step: DisplayName='OldStep'\n\
+[2026-03-23 07:00:00Z INFO StepsRunner] Starting the step.\n\
+[2026-03-23 07:00:01Z INFO StepsRunner] No need for updating job result with current step result 'Succeeded'.\n";
+        std::fs::write(&old_log, old_content).unwrap();
+
+        let watcher = WorkerLogWatcher::new();
+        watcher
+            .start_watching("runner-stale", "stale-job", dir.path())
+            .await;
+
+        // First poll reads old log
+        assert!(watcher.poll("runner-stale").await);
+        let resp = watcher.get_steps("runner-stale").await.unwrap();
+        assert_eq!(resp.steps.len(), 1);
+        assert_eq!(resp.steps[0].name, "OldStep");
+
+        // Create a newer Worker log (simulates new job's Worker process)
+        // Sleep briefly so the new file has a strictly newer mtime
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let new_log = diag.join("Worker_20260323-080000-utc.log");
+        let new_content = "\
+[2026-03-23 08:00:00Z INFO StepsRunner] Processing step: DisplayName='NewStep'\n\
+[2026-03-23 08:00:00Z INFO StepsRunner] Starting the step.\n";
+        std::fs::write(&new_log, new_content).unwrap();
+
+        // Second poll: no new bytes on old file → checks for newer log → switches
+        assert!(watcher.poll("runner-stale").await);
+        let resp = watcher.get_steps("runner-stale").await.unwrap();
+        assert_eq!(resp.steps.len(), 1);
+        assert_eq!(resp.steps[0].name, "NewStep");
+        assert_eq!(resp.steps[0].status, StepStatus::Running);
     }
 }
