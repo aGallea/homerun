@@ -60,6 +60,30 @@ pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry) {
     }
 }
 
+/// Compute the median duration (in seconds) of succeeded history entries matching `job_name`.
+/// Returns `None` if there are no matching succeeded entries.
+pub fn median_duration_secs(entries: &[JobHistoryEntry], job_name: &str) -> Option<u64> {
+    let mut durations: Vec<i64> = entries
+        .iter()
+        .filter(|e| e.succeeded && e.job_name == job_name)
+        .map(|e| (e.completed_at - e.started_at).num_seconds().max(0))
+        .collect();
+
+    if durations.is_empty() {
+        return None;
+    }
+
+    durations.sort_unstable();
+    let len = durations.len();
+    let median = if len % 2 == 1 {
+        durations[len / 2]
+    } else {
+        (durations[len / 2 - 1] + durations[len / 2]) / 2
+    };
+
+    Some(median as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +176,135 @@ mod tests {
         // Oldest entries should have been removed; first remaining should be job-10
         assert_eq!(entries[0].job_name, "job-10");
         assert_eq!(entries[99].job_name, "job-109");
+    }
+
+    #[test]
+    fn test_median_duration_no_entries() {
+        let entries: Vec<JobHistoryEntry> = vec![];
+        assert_eq!(median_duration_secs(&entries, "build"), None);
+    }
+
+    #[test]
+    fn test_median_duration_no_succeeded_entries() {
+        let now = Utc::now();
+        let entries = vec![JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(120),
+            completed_at: now,
+            succeeded: false,
+            branch: None,
+            pr_number: None,
+            run_url: None,
+            steps: vec![],
+        }];
+        assert_eq!(median_duration_secs(&entries, "build"), None);
+    }
+
+    #[test]
+    fn test_median_duration_single_entry() {
+        let now = Utc::now();
+        let entries = vec![JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(300),
+            completed_at: now,
+            succeeded: true,
+            branch: None,
+            pr_number: None,
+            run_url: None,
+            steps: vec![],
+        }];
+        assert_eq!(median_duration_secs(&entries, "build"), Some(300));
+    }
+
+    #[test]
+    fn test_median_duration_odd_count() {
+        let now = Utc::now();
+        let make = |secs: i64| JobHistoryEntry {
+            job_name: "test".to_string(),
+            started_at: now - chrono::Duration::seconds(secs),
+            completed_at: now,
+            succeeded: true,
+            branch: None,
+            pr_number: None,
+            run_url: None,
+            steps: vec![],
+        };
+        let entries = vec![make(100), make(200), make(300)];
+        assert_eq!(median_duration_secs(&entries, "test"), Some(200));
+    }
+
+    #[test]
+    fn test_median_duration_even_count() {
+        let now = Utc::now();
+        let make = |secs: i64| JobHistoryEntry {
+            job_name: "test".to_string(),
+            started_at: now - chrono::Duration::seconds(secs),
+            completed_at: now,
+            succeeded: true,
+            branch: None,
+            pr_number: None,
+            run_url: None,
+            steps: vec![],
+        };
+        let entries = vec![make(100), make(200), make(300), make(400)];
+        // median of [100, 200, 300, 400] = (200 + 300) / 2 = 250
+        assert_eq!(median_duration_secs(&entries, "test"), Some(250));
+    }
+
+    #[test]
+    fn test_median_duration_filters_by_job_name() {
+        let now = Utc::now();
+        let make = |name: &str, secs: i64| JobHistoryEntry {
+            job_name: name.to_string(),
+            started_at: now - chrono::Duration::seconds(secs),
+            completed_at: now,
+            succeeded: true,
+            branch: None,
+            pr_number: None,
+            run_url: None,
+            steps: vec![],
+        };
+        let entries = vec![make("build", 100), make("test", 500), make("build", 300)];
+        assert_eq!(median_duration_secs(&entries, "build"), Some(200));
+        assert_eq!(median_duration_secs(&entries, "test"), Some(500));
+    }
+
+    #[test]
+    fn test_median_duration_ignores_failed() {
+        let now = Utc::now();
+        let entries = vec![
+            JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(100),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                steps: vec![],
+            },
+            JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(9999),
+                completed_at: now,
+                succeeded: false, // should be ignored
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                steps: vec![],
+            },
+            JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(300),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                steps: vec![],
+            },
+        ];
+        assert_eq!(median_duration_secs(&entries, "build"), Some(200));
     }
 
     #[test]
