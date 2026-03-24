@@ -120,6 +120,8 @@ export function JobProgress({
               style={{
                 fontSize: 16,
                 lineHeight: 1,
+                position: "relative" as const,
+                top: -1,
                 color: "var(--text-secondary)",
                 flexShrink: 0,
               }}

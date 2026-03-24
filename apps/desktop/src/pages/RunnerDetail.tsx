@@ -621,6 +621,8 @@ export function RunnerDetail() {
                 style={{
                   fontSize: 16,
                   lineHeight: 1,
+                  position: "relative" as const,
+                  top: -1,
                   color: "var(--text-secondary)",
                   flexShrink: 0,
                 }}
@@ -785,7 +787,7 @@ export function RunnerDetail() {
                           display: "flex",
                           alignItems: "center",
                           gap: 12,
-                          padding: "8px 12px",
+                          padding: "6px 12px",
                           background: i % 2 === 0 ? "var(--bg-secondary)" : "var(--bg-primary)",
                           fontSize: 13,
                           cursor: hasSteps ? "pointer" : "default",
@@ -805,10 +807,9 @@ export function RunnerDetail() {
                         {hasSteps && (
                           <span
                             style={{
-                              fontSize: 11,
+                              fontSize: 14,
+                              lineHeight: 1,
                               color: "var(--text-secondary)",
-                              width: 12,
-                              textAlign: "center",
                               flexShrink: 0,
                             }}
                           >
