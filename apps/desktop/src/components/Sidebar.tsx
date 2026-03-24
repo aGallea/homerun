@@ -117,14 +117,14 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
               className="btn btn-primary"
               onClick={() => navigate("/settings")}
               style={{
-                fontSize: 12,
-                padding: collapsed ? "6px" : "6px 14px",
+                fontSize: 11,
+                padding: collapsed ? "4px" : "4px 10px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 6,
-                width: collapsed ? 32 : "100%",
-                borderRadius: 6,
+                gap: 5,
+                width: collapsed ? 28 : "100%",
+                borderRadius: 5,
               }}
               title={collapsed ? "Sign in with GitHub" : undefined}
             >
