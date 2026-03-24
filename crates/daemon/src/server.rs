@@ -267,7 +267,25 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
 
     let app = create_router(state);
 
-    axum::serve(listener, app).await?;
+    let server = axum::serve(listener, app);
+
+    let shutdown_signal = async {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        let sigint = tokio::signal::ctrl_c();
+        tokio::select! {
+            _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
+            _ = sigint => tracing::info!("Received SIGINT"),
+        }
+    };
+
+    server.with_graceful_shutdown(shutdown_signal).await?;
+
+    // Clean up socket after graceful shutdown
+    if socket_path.exists() {
+        let _ = std::fs::remove_file(&socket_path);
+    }
+    tracing::info!("Daemon shut down gracefully");
 
     Ok(())
 }
