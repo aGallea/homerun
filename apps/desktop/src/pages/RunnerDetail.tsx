@@ -802,6 +802,8 @@ export function RunnerDetail() {
                               ? "var(--accent-green)"
                               : "var(--accent-red)",
                             flexShrink: 0,
+                            marginTop: 3,
+                            alignSelf: "flex-start",
                           }}
                         />
                         {hasSteps && (
@@ -811,46 +813,36 @@ export function RunnerDetail() {
                               lineHeight: 1,
                               color: "var(--text-secondary)",
                               flexShrink: 0,
+                              marginTop: 2,
+                              alignSelf: "flex-start",
                             }}
                           >
                             {isExpanded ? "\u25BE" : "\u25B8"}
                           </span>
                         )}
-                        <span
-                          style={{
-                            flex: 1,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            color: "var(--text-primary)",
-                            fontWeight: 500,
-                          }}
-                          title={entry.job_name}
-                        >
-                          {entry.job_name}
-                          {!entry.succeeded && entry.error_message && (
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span
                               style={{
-                                fontSize: 11,
-                                color: "var(--accent-red)",
-                                fontWeight: 400,
-                                marginLeft: 8,
-                                opacity: 0.8,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                color: "var(--text-primary)",
+                                fontWeight: 500,
                               }}
+                              title={entry.job_name}
                             >
-                              — {entry.error_message}
+                              {entry.job_name}
                             </span>
-                          )}
-                        </span>
-                        {(entry.branch || entry.pr_number != null) && (
-                          <span
+                          </div>
+                          <div
                             style={{
-                              fontSize: 11,
-                              color: "var(--text-secondary)",
-                              flexShrink: 0,
                               display: "flex",
                               alignItems: "center",
-                              gap: 4,
+                              gap: 6,
+                              fontSize: 11,
+                              color: "var(--text-secondary)",
+                              marginTop: 2,
                             }}
                           >
                             {entry.branch && <span>{entry.branch}</span>}
@@ -859,63 +851,102 @@ export function RunnerDetail() {
                                 #{entry.pr_number}
                               </span>
                             )}
-                          </span>
-                        )}
-                        <span
-                          className="font-mono"
+                            {!entry.succeeded && entry.error_message && (
+                              <span style={{ color: "var(--accent-red)", opacity: 0.8 }}>
+                                {entry.error_message}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div
                           style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
                             flexShrink: 0,
                           }}
                         >
-                          {formatUptime(duration)}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {new Date(entry.completed_at).toLocaleTimeString()}
-                        </span>
-                        {entry.run_url && (
-                          <a
-                            href="#"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              import("@tauri-apps/plugin-shell").then(({ open }) =>
-                                open(entry.run_url!),
-                              );
-                            }}
-                            style={{
-                              fontSize: 11,
-                              color: "var(--accent-blue)",
-                              flexShrink: 0,
-                            }}
-                          >
-                            View →
-                          </a>
-                        )}
-                        {entry.run_url && id && (
-                          <a
-                            href="#"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              api.rerunWorkflow(id!, entry.run_url!).catch(() => {});
-                            }}
+                          <span
+                            className="font-mono"
                             style={{
                               fontSize: 11,
                               color: "var(--text-secondary)",
-                              flexShrink: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 3,
                             }}
                           >
-                            Re-run
-                          </a>
-                        )}
+                            <svg
+                              width="11"
+                              height="11"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <circle cx="12" cy="12" r="10" />
+                              <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                            {formatUptime(duration)}
+                          </span>
+                          {entry.run_url && (
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                import("@tauri-apps/plugin-shell").then(({ open }) =>
+                                  open(entry.run_url!),
+                                );
+                              }}
+                              style={{ color: "var(--accent-blue)", display: "flex" }}
+                              title="View on GitHub"
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                <polyline points="15 3 21 3 21 9" />
+                                <line x1="10" y1="14" x2="21" y2="3" />
+                              </svg>
+                            </a>
+                          )}
+                          {entry.run_url && id && (
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                api.rerunWorkflow(id!, entry.run_url!).catch(() => {});
+                              }}
+                              style={{ color: "var(--text-secondary)", display: "flex" }}
+                              title="Re-run"
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="23 4 23 10 17 10" />
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                              </svg>
+                            </a>
+                          )}
+                        </div>
                       </div>
                       {isExpanded && hasSteps && (
                         <div
