@@ -619,10 +619,9 @@ export function RunnerDetail() {
             <div className="flex items-center gap-8">
               <span
                 style={{
-                  fontSize: 14,
+                  fontSize: 16,
+                  lineHeight: 1,
                   color: "var(--text-secondary)",
-                  width: 14,
-                  textAlign: "center",
                   flexShrink: 0,
                 }}
               >
@@ -732,10 +731,9 @@ export function RunnerDetail() {
               <div className="flex items-center gap-8">
                 <span
                   style={{
-                    fontSize: 11,
+                    fontSize: 16,
+                    lineHeight: 1,
                     color: "var(--text-secondary)",
-                    width: 12,
-                    textAlign: "center",
                     flexShrink: 0,
                   }}
                 >
