@@ -50,6 +50,21 @@ enum Commands {
         #[arg(long)]
         remote: bool,
     },
+    /// Manage the HomeRun daemon
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum DaemonAction {
+    /// Start the daemon
+    Start,
+    /// Stop the daemon
+    Stop,
+    /// Restart the daemon
+    Restart,
 }
 
 #[tokio::main]
@@ -61,6 +76,11 @@ async fn main() -> Result<()> {
             Commands::List => homerun::cli::CliCommand::List,
             Commands::Status => homerun::cli::CliCommand::Status,
             Commands::Scan { path, remote } => homerun::cli::CliCommand::Scan { path, remote },
+            Commands::Daemon { action } => homerun::cli::CliCommand::Daemon(match action {
+                DaemonAction::Start => homerun::cli::DaemonAction::Start,
+                DaemonAction::Stop => homerun::cli::DaemonAction::Stop,
+                DaemonAction::Restart => homerun::cli::DaemonAction::Restart,
+            }),
         }))
         .await;
     }
