@@ -851,9 +851,11 @@ export function RunnerDetail() {
                                 #{entry.pr_number}
                               </span>
                             )}
+                            {(entry.branch || entry.pr_number != null) && <span>·</span>}
+                            <span>{new Date(entry.completed_at).toLocaleTimeString()}</span>
                             {!entry.succeeded && entry.error_message && (
                               <span style={{ color: "var(--accent-red)", opacity: 0.8 }}>
-                                {entry.error_message}
+                                · {entry.error_message}
                               </span>
                             )}
                           </div>
