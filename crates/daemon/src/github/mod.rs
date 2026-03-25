@@ -309,6 +309,25 @@ impl GitHubClient {
         Ok(None)
     }
 
+    /// Check the status of a workflow run. Returns (status, conclusion).
+    /// Status: "queued", "in_progress", "completed", etc.
+    /// Conclusion (only when completed): "success", "failure", "cancelled", etc.
+    pub async fn get_run_status(
+        &self,
+        owner: &str,
+        repo: &str,
+        run_id: u64,
+    ) -> Result<(String, Option<String>)> {
+        #[derive(Deserialize)]
+        struct RunInfo {
+            status: String,
+            conclusion: Option<String>,
+        }
+        let route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}");
+        let info: RunInfo = self.octocrab.get(&route, None::<&()>).await?;
+        Ok((info.status, info.conclusion))
+    }
+
     /// Re-run a workflow run by its run ID.
     pub async fn rerun_workflow(&self, owner: &str, repo: &str, run_id: u64) -> Result<()> {
         let url =

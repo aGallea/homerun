@@ -69,9 +69,13 @@ pub struct RerunRequest {
 }
 
 /// Extract the numeric run ID from a GitHub Actions run URL.
-/// e.g. "https://github.com/owner/repo/actions/runs/12345" -> 12345
+/// Handles both formats:
+/// - "https://github.com/owner/repo/actions/runs/12345"
+/// - "https://github.com/owner/repo/actions/runs/12345/job/67890"
 fn parse_run_id(run_url: &str) -> Option<u64> {
-    run_url.rsplit('/').next()?.parse().ok()
+    let parts: Vec<&str> = run_url.split('/').collect();
+    let runs_idx = parts.iter().position(|&p| p == "runs")?;
+    parts.get(runs_idx + 1)?.parse().ok()
 }
 
 pub async fn rerun_workflow(
@@ -114,12 +118,88 @@ pub async fn rerun_workflow(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RunStatusRequest {
+    pub run_url: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RunStatusResponse {
+    pub status: String,
+    pub conclusion: Option<String>,
+}
+
+pub async fn get_run_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RunStatusRequest>,
+) -> Result<Json<RunStatusResponse>, (StatusCode, String)> {
+    let runner = state
+        .runner_manager
+        .get(&id)
+        .await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Runner '{id}' not found")))?;
+
+    let run_id = parse_run_id(&req.run_url)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid run_url".to_string()))?;
+
+    let token = state.auth.token().await.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "No auth token available".to_string(),
+        )
+    })?;
+
+    let gh = GitHubClient::new(Some(token)).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create GitHub client: {e}"),
+        )
+    })?;
+
+    let (status, conclusion) = gh
+        .get_run_status(&runner.config.repo_owner, &runner.config.repo_name, run_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get run status: {e}"),
+            )
+        })?;
+
+    Ok(Json(RunStatusResponse { status, conclusion }))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::server::{create_router, AppState};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
+
+    use super::parse_run_id;
+
+    #[test]
+    fn test_parse_run_id_simple_url() {
+        let url = "https://github.com/owner/repo/actions/runs/12345";
+        assert_eq!(parse_run_id(url), Some(12345));
+    }
+
+    #[test]
+    fn test_parse_run_id_with_job_suffix() {
+        let url = "https://github.com/owner/repo/actions/runs/12345/job/67890";
+        assert_eq!(parse_run_id(url), Some(12345));
+    }
+
+    #[test]
+    fn test_parse_run_id_invalid_url() {
+        assert_eq!(parse_run_id("not-a-url"), None);
+    }
+
+    #[test]
+    fn test_parse_run_id_no_runs_segment() {
+        assert_eq!(parse_run_id("https://github.com/owner/repo"), None);
+    }
 
     #[tokio::test]
     async fn test_history_runner_not_found() {
