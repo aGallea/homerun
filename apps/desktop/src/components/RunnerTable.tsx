@@ -28,19 +28,30 @@ interface RunnerTableProps {
 function SvcBadge() {
   return (
     <span
+      title="Service runner"
       style={{
-        fontSize: 9,
-        fontWeight: 700,
-        padding: "2px 5px",
-        borderRadius: 3,
-        background: "rgba(59, 130, 246, 0.15)",
+        display: "inline-flex",
+        alignItems: "center",
+        marginRight: 6,
         color: "var(--accent-blue)",
-        letterSpacing: "0.04em",
-        textTransform: "uppercase" as const,
-        marginRight: 4,
+        opacity: 0.8,
       }}
     >
-      SVC
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="2" y="2" width="20" height="8" rx="2" />
+        <rect x="2" y="14" width="20" height="8" rx="2" />
+        <circle cx="6" cy="6" r="1" fill="currentColor" />
+        <circle cx="6" cy="18" r="1" fill="currentColor" />
+      </svg>
     </span>
   );
 }
