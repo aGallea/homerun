@@ -205,3 +205,5 @@ export function useRunners() {
     scaleGroup,
   };
 }
+
+export type RunnersContextType = ReturnType<typeof useRunners>;
