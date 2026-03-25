@@ -9,6 +9,17 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.3.2](https://github.com/aGallea/homerun/compare/v0.3.1...v0.3.2) (2026-03-25)
+
+
+### Bug Fixes
+
+* add Cancelled variant to StepStatus ([#52](https://github.com/aGallea/homerun/issues/52)) ([0da3629](https://github.com/aGallea/homerun/commit/0da3629de25eeaa5e9a8d9b5ffe24639eb47861c))
+* allow multiple job history entries to be expanded simultaneously ([32083c5](https://github.com/aGallea/homerun/commit/32083c5a8da7767e150c429e75e3767e73c66810))
+* defer Worker log discovery to poll() for reliable step tracking ([#52](https://github.com/aGallea/homerun/issues/52)) ([dc320f6](https://github.com/aGallea/homerun/commit/dc320f657c04da7733217da88dff21f4a7dd069b))
+* resolve missing job steps in dashboard ([#52](https://github.com/aGallea/homerun/issues/52)) ([f380d56](https://github.com/aGallea/homerun/commit/f380d560603a5f95f331cd90f0b0f2bbe0071b4a))
+* UI improvements and icon regeneration ([9b21698](https://github.com/aGallea/homerun/commit/9b21698d4b2eb0293951c7005ee85c8df7fe042b))
+
 ## [0.3.1](https://github.com/aGallea/homerun/compare/v0.3.0...v0.3.1) (2026-03-24)
 
 
