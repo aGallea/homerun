@@ -74,7 +74,7 @@ function SettingsIcon() {
 }
 
 const navItems = [
-  { to: "/", label: "Runners", icon: <RunnersIcon /> },
+  { to: "/dashboard", label: "Runners", icon: <RunnersIcon /> },
   { to: "/repositories", label: "Repositories", icon: <RepositoriesIcon /> },
   { to: "/daemon", label: "Daemon", icon: <DaemonIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
@@ -105,7 +105,6 @@ export function Sidebar({ collapsed, runners }: { collapsed: boolean; runners: R
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === "/"}
             className={({ isActive }) => `sidebar-link${isActive ? " sidebar-link-active" : ""}`}
             title={collapsed ? item.label : undefined}
           >
