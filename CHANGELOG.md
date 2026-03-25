@@ -9,6 +9,23 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.5.0](https://github.com/aGallea/homerun/compare/v0.4.0...v0.5.0) (2026-03-25)
+
+
+### Features
+
+* add ActiveRunners component for sidebar ([#71](https://github.com/aGallea/homerun/issues/71)) ([d4de51d](https://github.com/aGallea/homerun/commit/d4de51dfd9709323bc3d0186bee63136e781d9dd))
+* add formatElapsed utility for sidebar active runners ([#71](https://github.com/aGallea/homerun/issues/71)) ([fc658a1](https://github.com/aGallea/homerun/commit/fc658a19f7ad792ca4d4fe79aeec3c452180077e))
+* add job progress bar to sidebar runner entries ([#71](https://github.com/aGallea/homerun/issues/71)) ([6a4e217](https://github.com/aGallea/homerun/commit/6a4e217cb29f28ad7d3a01fc550fd6e37ce6edb4))
+* show active/busy runners in sidebar ([#71](https://github.com/aGallea/homerun/issues/71)) ([21a8716](https://github.com/aGallea/homerun/commit/21a8716b7d4e1a8e23eac1b716e3925ca1707772))
+* wire ActiveRunners into sidebar via shared useRunners context ([#71](https://github.com/aGallea/homerun/issues/71)) ([a560861](https://github.com/aGallea/homerun/commit/a5608618fb94ee3a5f07ff42416d1c26f17ffa91))
+
+
+### Bug Fixes
+
+* Runners tab active state by pointing to /dashboard route ([#71](https://github.com/aGallea/homerun/issues/71)) ([7a07452](https://github.com/aGallea/homerun/commit/7a074525007adba720756ae46c93f944c1819472))
+* sort runners with null job_started_at last in sidebar ([#71](https://github.com/aGallea/homerun/issues/71)) ([17aa7db](https://github.com/aGallea/homerun/commit/17aa7dbd5ba5f76b6d5050378eb4bcd1c7e383ba))
+
 ## [0.4.0](https://github.com/aGallea/homerun/compare/v0.3.2...v0.4.0) (2026-03-25)
 
 
