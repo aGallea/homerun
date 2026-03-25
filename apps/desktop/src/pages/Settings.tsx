@@ -16,6 +16,7 @@ export function Settings() {
   // Device flow state
   const [deviceFlow, setDeviceFlow] = useState<DeviceFlowState>({ stage: "idle" });
   const [deviceFlowStarting, setDeviceFlowStarting] = useState(false);
+  const [copied, setCopied] = useState(false);
   const cancelledRef = useRef(false);
 
   // Cancel any in-flight device flow poll on unmount
@@ -222,6 +223,7 @@ export function Settings() {
                     </div>
                     <div
                       style={{
+                        position: "relative",
                         fontFamily: "var(--font-mono, monospace)",
                         fontSize: 28,
                         fontWeight: 700,
@@ -233,9 +235,56 @@ export function Settings() {
                         background: "var(--bg-secondary)",
                         borderRadius: 6,
                         border: "1px solid var(--border)",
+                        cursor: "pointer",
                       }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(deviceFlow.flow.user_code);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      title="Click to copy"
                     >
                       {deviceFlow.flow.user_code}
+                      <span
+                        style={{
+                          position: "absolute",
+                          right: 12,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          fontSize: 14,
+                          opacity: 0.6,
+                          color: copied ? "var(--accent-green, #4ade80)" : "var(--text-secondary)",
+                        }}
+                      >
+                        {copied ? (
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <rect x="9" y="9" width="13" height="13" rx="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                        )}
+                      </span>
                     </div>
                     <div
                       style={{

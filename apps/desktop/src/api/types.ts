@@ -94,6 +94,11 @@ export interface StepLogsResponse {
   lines: string[];
 }
 
+export interface RunStatusResponse {
+  status: string;
+  conclusion: string | null;
+}
+
 export interface GitHubUser {
   login: string;
   avatar_url: string;

@@ -16,6 +16,7 @@ import type {
   ScaleGroupResponse,
   StepsResponse,
   StepLogsResponse,
+  RunStatusResponse,
 } from "./types";
 
 export const api = {
@@ -61,6 +62,8 @@ export const api = {
     invoke<JobHistoryEntry[]>("get_runner_history", { runner_id: runnerId }),
   rerunWorkflow: (runnerId: string, runUrl: string) =>
     invoke<void>("rerun_workflow", { runner_id: runnerId, run_url: runUrl }),
+  getRunStatus: (runnerId: string, runUrl: string) =>
+    invoke<RunStatusResponse>("get_run_status", { runner_id: runnerId, run_url: runUrl }),
   clearRunnerHistory: (runnerId: string) =>
     invoke<void>("clear_runner_history", { runner_id: runnerId }),
   deleteHistoryEntry: (runnerId: string, startedAt: string) =>

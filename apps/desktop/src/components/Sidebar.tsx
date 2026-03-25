@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
-function DashboardIcon() {
+function RunnersIcon() {
   return (
     <svg
       width="20"
@@ -13,10 +13,7 @@ function DashboardIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <rect x="3" y="3" width="7" height="7" rx="1" />
-      <rect x="14" y="3" width="7" height="7" rx="1" />
-      <rect x="3" y="14" width="7" height="7" rx="1" />
-      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }
@@ -75,7 +72,7 @@ function SettingsIcon() {
 }
 
 const navItems = [
-  { to: "/", label: "Runners", icon: <DashboardIcon /> },
+  { to: "/", label: "Runners", icon: <RunnersIcon /> },
   { to: "/repositories", label: "Repositories", icon: <RepositoriesIcon /> },
   { to: "/daemon", label: "Daemon", icon: <DaemonIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },

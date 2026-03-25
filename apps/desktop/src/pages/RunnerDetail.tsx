@@ -65,21 +65,42 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
       style={{
         position: "absolute",
         bottom: 0,
+        left: 0,
         right: 0,
-        width: 20,
-        height: 20,
-        cursor: "nwse-resize",
+        height: 10,
+        cursor: "ns-resize",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         opacity: 0.4,
-        fontSize: 10,
         color: "var(--text-secondary)",
         userSelect: "none",
+        transition: "opacity 0.15s",
       }}
       title="Drag to resize"
+      onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.8")}
+      onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.4")}
     >
-      ⟍
+      <svg width="24" height="6" viewBox="0 0 24 6">
+        <line
+          x1="8"
+          y1="1"
+          x2="16"
+          y2="1"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <line
+          x1="8"
+          y1="4.5"
+          x2="16"
+          y2="4.5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
     </div>
   );
 }
@@ -217,7 +238,56 @@ export function RunnerDetail() {
   const [expandedHistoryIndices, setExpandedHistoryIndices] = useState<Set<number>>(new Set());
   const expandedHistoryRef = useRef<HTMLDivElement | null>(null);
   const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<string>>(new Set());
+  // Tracks entries where rerun is in-flight (spinner) or queued (queued icon)
+  const [rerunningEntries, setRerunningEntries] = useState<Map<string, "loading" | "queued">>(
+    new Map(),
+  );
+  const rerunTimers = useRef<Map<string, number>>(new Map());
   const [clearingHistory, setClearingHistory] = useState(false);
+
+  // Poll queued entries every 10s to verify they're still queued.
+  // Clears the entry if the run is no longer queued (started, completed, or error).
+  useEffect(() => {
+    const queuedEntries = [...rerunningEntries.entries()].filter(([, s]) => s === "queued");
+    if (queuedEntries.length === 0 || !id) return;
+
+    const interval = setInterval(() => {
+      for (const [key] of queuedEntries) {
+        // Find the history entry to get the run_url
+        const entry = history.find((e) => e.started_at === key);
+        if (!entry?.run_url) continue;
+        api
+          .getRunStatus(id!, entry.run_url)
+          .then((res) => {
+            // "queued" or "waiting" means still in queue — keep showing queued
+            if (res.status === "queued" || res.status === "waiting") return;
+            // Any other status (in_progress, completed) — clear it
+            setRerunningEntries((m) => {
+              const next = new Map(m);
+              next.delete(key);
+              return next;
+            });
+          })
+          .catch(() => {
+            // API error — clear to avoid stuck state
+            setRerunningEntries((m) => {
+              const next = new Map(m);
+              next.delete(key);
+              return next;
+            });
+          });
+      }
+    }, 10_000);
+
+    return () => clearInterval(interval);
+  }, [rerunningEntries, id, history]);
+
+  // Cleanup all timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const t of rerunTimers.current.values()) clearTimeout(t);
+    };
+  }, []);
 
   useEffect(() => {
     if (expandedHistoryIndices.size > 0 && expandedHistoryRef.current) {
@@ -978,32 +1048,92 @@ export function RunnerDetail() {
                               </svg>
                             </a>
                           )}
-                          {entry.run_url && id && (
-                            <a
-                              href="#"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                api.rerunWorkflow(id!, entry.run_url!).catch(() => {});
-                              }}
-                              style={{ color: "var(--text-secondary)", display: "flex" }}
-                              title="Re-run"
-                            >
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polyline points="23 4 23 10 17 10" />
-                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                              </svg>
-                            </a>
-                          )}
+                          {entry.run_url &&
+                            id &&
+                            (() => {
+                              const rerunState = rerunningEntries.get(entry.started_at);
+                              return rerunState === "queued" ? (
+                                <span
+                                  style={{
+                                    color: "var(--accent-yellow, #facc15)",
+                                    display: "flex",
+                                  }}
+                                  title="Queued"
+                                >
+                                  <svg
+                                    width="13"
+                                    height="13"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <circle cx="12" cy="12" r="10" />
+                                    <polyline points="12 6 12 12 16 14" />
+                                  </svg>
+                                </span>
+                              ) : (
+                                <a
+                                  href="#"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (rerunState) return;
+                                    const key = entry.started_at;
+                                    setRerunningEntries((m) => new Map(m).set(key, "loading"));
+                                    api
+                                      .rerunWorkflow(id!, entry.run_url!)
+                                      .then(() => {
+                                        setRerunningEntries((m) => new Map(m).set(key, "queued"));
+                                      })
+                                      .catch(() => {
+                                        setRerunningEntries((m) => {
+                                          const next = new Map(m);
+                                          next.delete(key);
+                                          return next;
+                                        });
+                                      });
+                                  }}
+                                  style={{
+                                    color: "var(--text-secondary)",
+                                    display: "flex",
+                                    pointerEvents: rerunState ? "none" : undefined,
+                                  }}
+                                  title="Re-run"
+                                >
+                                  {rerunState === "loading" ? (
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2.5"
+                                      strokeLinecap="round"
+                                      style={{ animation: "spin 1s linear infinite" }}
+                                    >
+                                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                    </svg>
+                                  ) : (
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <polyline points="23 4 23 10 17 10" />
+                                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                    </svg>
+                                  )}
+                                </a>
+                              );
+                            })()}
                           <a
                             href="#"
                             onClick={(e) => {
