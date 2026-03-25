@@ -377,8 +377,8 @@ p {
 }
 
 .sidebar-link-active {
-  background: var(--bg-tertiary);
-  color: var(--accent-blue) !important;
+  background: rgba(31, 111, 235, 0.12);
+  color: #58a6ff !important;
   font-weight: 500;
 }
 
