@@ -412,7 +412,21 @@ impl GitHubClient {
             return Ok(None);
         };
 
-        // Fetch annotations for this job
+        // Fetch annotations for this job (reuse get_annotations_by_job_id)
+        self.get_annotations_by_job_id(owner, repo, job_id).await
+    }
+
+    /// Fetch error/failure annotations directly by job ID.
+    ///
+    /// Preferred over [`get_job_failure_message`] when the job ID is already known
+    /// (e.g. from [`JobContext::job_id`]), as it avoids searching recent runs which
+    /// can match the wrong run under concurrency cancellation.
+    pub async fn get_annotations_by_job_id(
+        &self,
+        owner: &str,
+        repo: &str,
+        job_id: u64,
+    ) -> Result<Option<String>> {
         let url =
             format!("https://api.github.com/repos/{owner}/{repo}/check-runs/{job_id}/annotations");
         let client = reqwest::Client::new();
@@ -428,14 +442,20 @@ impl GitHubClient {
             return Ok(None);
         }
 
-        #[derive(Deserialize)]
-        struct Annotation {
-            message: Option<String>,
-        }
-
-        let annotations: Vec<Annotation> = response.json().await?;
-        Ok(annotations.into_iter().find_map(|a| a.message))
+        let body = response.text().await?;
+        Ok(extract_annotation_message(&body))
     }
+}
+
+/// Extract the first annotation message from a GitHub check-run annotations JSON response.
+fn extract_annotation_message(json: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Annotation {
+        message: Option<String>,
+    }
+
+    let annotations: Vec<Annotation> = serde_json::from_str(json).ok()?;
+    annotations.into_iter().find_map(|a| a.message)
 }
 
 /// Parse raw GitHub Actions job log text into sections by step name.
@@ -713,5 +733,64 @@ mod tests {
             .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_extract_annotation_message_with_cancellation() {
+        let json = r#"[
+            {"message": "Canceling since a higher priority waiting request exists", "annotation_level": "failure"},
+            {"message": "The operation was canceled.", "annotation_level": "failure"}
+        ]"#;
+        let result = extract_annotation_message(json);
+        assert_eq!(
+            result.as_deref(),
+            Some("Canceling since a higher priority waiting request exists")
+        );
+    }
+
+    #[test]
+    fn test_extract_annotation_message_with_test_failure() {
+        let json = r#"[
+            {"message": "Process completed with exit code 1.", "annotation_level": "failure"}
+        ]"#;
+        let result = extract_annotation_message(json);
+        assert_eq!(
+            result.as_deref(),
+            Some("Process completed with exit code 1.")
+        );
+    }
+
+    #[test]
+    fn test_extract_annotation_message_empty_annotations() {
+        let json = "[]";
+        let result = extract_annotation_message(json);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_annotation_message_no_message_field() {
+        let json = r#"[{"annotation_level": "failure"}]"#;
+        let result = extract_annotation_message(json);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_annotation_message_null_message() {
+        let json = r#"[{"message": null}]"#;
+        let result = extract_annotation_message(json);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_annotation_message_invalid_json() {
+        let result = extract_annotation_message("not json");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_annotation_message_skips_null_finds_real() {
+        let json = r#"[{"message": null}, {"message": "Real error"}]"#;
+        let result = extract_annotation_message(json);
+        assert_eq!(result.as_deref(), Some("Real error"));
     }
 }

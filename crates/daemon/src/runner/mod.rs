@@ -637,7 +637,9 @@ impl RunnerManager {
                                 let error_message = if succeeded {
                                     None
                                 } else {
-                                    // Try to fetch the full error message from GitHub annotations
+                                    // Try to fetch the full error message from GitHub annotations.
+                                    // Prefer direct job_id lookup (avoids matching wrong run under
+                                    // concurrency cancellation), fall back to search if unavailable.
                                     let annotation_msg = {
                                         let map = manager.runners.read().await;
                                         let info = map.get(runner_id).map(|r| {
@@ -646,23 +648,32 @@ impl RunnerManager {
                                                 r.config.repo_name.clone(),
                                                 r.config.name.clone(),
                                                 r.current_job.clone().unwrap_or_default(),
+                                                r.job_context.as_ref().and_then(|c| c.job_id),
                                             )
                                         });
-                                        if let Some((owner, repo, runner_name, job_name)) = info {
+                                        if let Some((owner, repo, runner_name, job_name, job_id)) =
+                                            info
+                                        {
                                             let token = manager.auth_token.read().await.clone();
                                             if let Some(token) = token {
                                                 if let Ok(gh) =
                                                     crate::github::GitHubClient::new(Some(token))
                                                 {
-                                                    match gh
-                                                        .get_job_failure_message(
+                                                    let msg = if let Some(jid) = job_id {
+                                                        gh.get_annotations_by_job_id(
+                                                            &owner, &repo, jid,
+                                                        )
+                                                        .await
+                                                    } else {
+                                                        gh.get_job_failure_message(
                                                             &owner,
                                                             &repo,
                                                             &runner_name,
                                                             &job_name,
                                                         )
                                                         .await
-                                                    {
+                                                    };
+                                                    match msg {
                                                         Ok(msg) => {
                                                             tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
                                                             msg
@@ -1393,7 +1404,8 @@ impl RunnerManager {
                                 }
                             }
 
-                            // Fetch full error message from GitHub annotations
+                            // Fetch full error message from GitHub annotations.
+                            // Prefer direct job_id lookup when available.
                             if !succeeded {
                                 let info = {
                                     let map = runners.read().await;
@@ -1403,24 +1415,29 @@ impl RunnerManager {
                                             r.config.repo_name.clone(),
                                             r.config.name.clone(),
                                             r.current_job.clone().unwrap_or_default(),
+                                            r.job_context.as_ref().and_then(|c| c.job_id),
                                         )
                                     })
                                 };
-                                if let Some((owner, repo, runner_name, job_name)) = info {
+                                if let Some((owner, repo, runner_name, job_name, job_id)) = info {
                                     let token = auth_token_clone.read().await.clone();
                                     if let Some(token) = token {
                                         if let Ok(gh) =
                                             crate::github::GitHubClient::new(Some(token))
                                         {
-                                            match gh
-                                                .get_job_failure_message(
+                                            let result = if let Some(jid) = job_id {
+                                                gh.get_annotations_by_job_id(&owner, &repo, jid)
+                                                    .await
+                                            } else {
+                                                gh.get_job_failure_message(
                                                     &owner,
                                                     &repo,
                                                     &runner_name,
                                                     &job_name,
                                                 )
                                                 .await
-                                            {
+                                            };
+                                            match result {
                                                 Ok(Some(msg)) => {
                                                     tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
                                                     error_message = Some(msg);
