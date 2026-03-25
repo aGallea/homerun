@@ -10,7 +10,8 @@ use crate::config::Config;
 use crate::github::GitHubClient;
 use crate::runner::binary::ensure_runner_binary;
 use crate::runner::process::{
-    configure_runner, find_runner_pid, kill_orphaned_processes, remove_runner, start_runner,
+    clean_runner_config, configure_runner, find_runner_pid, kill_orphaned_processes, remove_runner,
+    start_runner,
 };
 use crate::runner::state::RunnerState;
 use crate::runner::steps::{StepsResponse, WorkerLogWatcher};
@@ -1250,19 +1251,7 @@ impl RunnerManager {
         // must remove the old configuration first.
         if already_configured {
             let _ = remove_runner(&config.work_dir, &reg.token).await;
-            for file_name in [
-                ".runner",
-                ".runner_migrated",
-                ".credentials",
-                ".credentials_rsaparams",
-            ] {
-                let path = config.work_dir.join(file_name);
-                if path.exists() {
-                    if let Err(e) = std::fs::remove_file(&path) {
-                        tracing::warn!("Failed to remove {file_name}: {e}");
-                    }
-                }
-            }
+            clean_runner_config(&config.work_dir);
         }
 
         let repo_url = format!(
@@ -3053,5 +3042,49 @@ mod tests {
         // Stop watching: get_steps returns None again
         manager.step_watcher.stop_watching(runner_id).await;
         assert!(manager.get_steps(runner_id).await.is_none());
+    }
+
+    #[test]
+    fn test_already_configured_detects_runner_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!dir.path().join(".runner").exists());
+        assert!(!dir.path().join(".runner_migrated").exists());
+
+        // Neither file → not configured
+        let configured =
+            dir.path().join(".runner").exists() || dir.path().join(".runner_migrated").exists();
+        assert!(!configured);
+
+        // .runner exists → configured
+        std::fs::write(dir.path().join(".runner"), "{}").unwrap();
+        let configured =
+            dir.path().join(".runner").exists() || dir.path().join(".runner_migrated").exists();
+        assert!(configured);
+    }
+
+    #[test]
+    fn test_already_configured_detects_runner_migrated_file() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // .runner_migrated exists (no .runner) → configured
+        std::fs::write(dir.path().join(".runner_migrated"), "{}").unwrap();
+        let configured =
+            dir.path().join(".runner").exists() || dir.path().join(".runner_migrated").exists();
+        assert!(configured);
+    }
+
+    #[test]
+    fn test_clean_runner_config_called_from_mod() {
+        // Verify clean_runner_config is accessible and works end-to-end
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".runner_migrated"), "{}").unwrap();
+        std::fs::write(dir.path().join(".credentials"), "cred").unwrap();
+        std::fs::write(dir.path().join(".credentials_rsaparams"), "rsa").unwrap();
+
+        clean_runner_config(dir.path());
+
+        assert!(!dir.path().join(".runner_migrated").exists());
+        assert!(!dir.path().join(".credentials").exists());
+        assert!(!dir.path().join(".credentials_rsaparams").exists());
     }
 }

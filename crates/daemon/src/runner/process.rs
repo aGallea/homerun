@@ -161,6 +161,26 @@ pub async fn start_runner(runner_dir: &Path) -> Result<Child> {
     Ok(child)
 }
 
+/// Remove stale configuration files left by a previous `config.sh` run.
+/// The GitHub Actions runner checks `.runner` (or `.runner_migrated` in newer
+/// versions) and refuses to configure if either exists.  This helper removes
+/// all four known config files so that a subsequent `config.sh` succeeds.
+pub fn clean_runner_config(runner_dir: &Path) {
+    for file_name in [
+        ".runner",
+        ".runner_migrated",
+        ".credentials",
+        ".credentials_rsaparams",
+    ] {
+        let path = runner_dir.join(file_name);
+        if path.exists() {
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::warn!("Failed to remove {file_name}: {e}");
+            }
+        }
+    }
+}
+
 pub async fn remove_runner(runner_dir: &Path, token: &str) -> Result<()> {
     let status = Command::new(runner_dir.join("config.sh"))
         .args(["remove", "--token", token])
@@ -209,6 +229,65 @@ mod tests {
         let result = remove_runner(dir.path(), "fake-token").await;
         // Should fail because config.sh doesn't exist
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_clean_runner_config_removes_all_config_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create all four config files
+        for name in [
+            ".runner",
+            ".runner_migrated",
+            ".credentials",
+            ".credentials_rsaparams",
+        ] {
+            std::fs::write(dir.path().join(name), "test").unwrap();
+        }
+        clean_runner_config(dir.path());
+        for name in [
+            ".runner",
+            ".runner_migrated",
+            ".credentials",
+            ".credentials_rsaparams",
+        ] {
+            assert!(!dir.path().join(name).exists(), "{name} should be removed");
+        }
+    }
+
+    #[test]
+    fn test_clean_runner_config_removes_only_runner_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        // Only .runner_migrated exists (newer runner version)
+        std::fs::write(dir.path().join(".runner_migrated"), "{}").unwrap();
+        std::fs::write(dir.path().join(".credentials"), "cred").unwrap();
+        clean_runner_config(dir.path());
+        assert!(!dir.path().join(".runner_migrated").exists());
+        assert!(!dir.path().join(".credentials").exists());
+    }
+
+    #[test]
+    fn test_clean_runner_config_noop_when_no_config_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // No config files — should not panic or error
+        clean_runner_config(dir.path());
+    }
+
+    #[test]
+    fn test_clean_runner_config_preserves_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".runner"), "test").unwrap();
+        std::fs::write(dir.path().join("config.sh"), "#!/bin/bash").unwrap();
+        std::fs::write(dir.path().join("run.sh"), "#!/bin/bash").unwrap();
+        clean_runner_config(dir.path());
+        assert!(!dir.path().join(".runner").exists());
+        assert!(
+            dir.path().join("config.sh").exists(),
+            "config.sh should be preserved"
+        );
+        assert!(
+            dir.path().join("run.sh").exists(),
+            "run.sh should be preserved"
+        );
     }
 
     #[tokio::test]
