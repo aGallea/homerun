@@ -52,8 +52,31 @@ pub fn delete(history_dir: &Path, runner_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Extract the numeric run ID from a GitHub Actions run URL.
+/// Handles both `…/runs/12345` and `…/runs/12345/job/67890`.
+fn extract_run_id(run_url: &str) -> Option<u64> {
+    let parts: Vec<&str> = run_url.split('/').collect();
+    let runs_idx = parts.iter().position(|&p| p == "runs")?;
+    parts.get(runs_idx + 1)?.parse().ok()
+}
+
 /// Append a history entry, keeping the list capped at MAX_HISTORY_PER_RUNNER.
+///
+/// When a workflow run is re-run, the new attempt shares the same `run_id` but
+/// gets a different `job_id`. If an existing entry matches on both `run_id`
+/// (extracted from `run_url`) and `job_name`, it is replaced with the new entry
+/// so that history reflects the latest result for each run.
 pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry) {
+    if let Some(new_run_id) = entry.run_url.as_deref().and_then(extract_run_id) {
+        if let Some(pos) = entries.iter().position(|e| {
+            e.job_name == entry.job_name
+                && e.run_url.as_deref().and_then(extract_run_id) == Some(new_run_id)
+        }) {
+            entries[pos] = entry;
+            return;
+        }
+    }
+
     entries.push(entry);
     if entries.len() > MAX_HISTORY_PER_RUNNER {
         entries.remove(0);
@@ -366,5 +389,151 @@ mod tests {
             loaded_entry.run_url,
             Some("https://github.com/owner/repo/actions/runs/123".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_run_id_simple() {
+        assert_eq!(
+            extract_run_id("https://github.com/owner/repo/actions/runs/12345"),
+            Some(12345)
+        );
+    }
+
+    #[test]
+    fn test_extract_run_id_with_job() {
+        assert_eq!(
+            extract_run_id("https://github.com/owner/repo/actions/runs/12345/job/67890"),
+            Some(12345)
+        );
+    }
+
+    #[test]
+    fn test_extract_run_id_invalid() {
+        assert_eq!(extract_run_id("not-a-url"), None);
+        assert_eq!(extract_run_id("https://github.com/owner/repo"), None);
+    }
+
+    #[test]
+    fn test_append_replaces_rerun_same_run_id_and_job_name() {
+        let now = Utc::now();
+        let mut entries = vec![JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
+            error_message: Some("Process completed with exit code 1.".to_string()),
+            steps: vec![],
+        }];
+
+        // Re-run: same run_id (100), same job_name, different job_id (999)
+        let rerun_entry = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(120),
+            completed_at: now,
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/owner/repo/actions/runs/100/job/999".to_string()),
+            error_message: None,
+            steps: vec![],
+        };
+
+        append(&mut entries, rerun_entry);
+
+        // Should replace, not append
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].succeeded);
+        assert_eq!(
+            entries[0].run_url.as_deref(),
+            Some("https://github.com/owner/repo/actions/runs/100/job/999")
+        );
+        assert!(entries[0].error_message.is_none());
+    }
+
+    #[test]
+    fn test_append_does_not_replace_different_run_id() {
+        let now = Utc::now();
+        let mut entries = vec![JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
+            error_message: None,
+            steps: vec![],
+        }];
+
+        // Different run_id (999), same job_name
+        let new_entry = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(120),
+            completed_at: now,
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/owner/repo/actions/runs/999/job/888".to_string()),
+            error_message: None,
+            steps: vec![],
+        };
+
+        append(&mut entries, new_entry);
+
+        // Should append, not replace
+        assert_eq!(entries.len(), 2);
+        assert!(!entries[0].succeeded);
+        assert!(entries[1].succeeded);
+    }
+
+    #[test]
+    fn test_append_does_not_replace_different_job_name_same_run_id() {
+        let now = Utc::now();
+        let mut entries = vec![JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
+            error_message: None,
+            steps: vec![],
+        }];
+
+        // Same run_id (100), different job_name
+        let new_entry = JobHistoryEntry {
+            job_name: "test".to_string(),
+            started_at: now - chrono::Duration::seconds(120),
+            completed_at: now,
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/owner/repo/actions/runs/100/job/300".to_string()),
+            error_message: None,
+            steps: vec![],
+        };
+
+        append(&mut entries, new_entry);
+
+        // Should append — different jobs from the same run are separate entries
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].job_name, "build");
+        assert_eq!(entries[1].job_name, "test");
+    }
+
+    #[test]
+    fn test_append_no_run_url_still_appends() {
+        let mut entries = vec![make_entry("build")];
+        let mut new_entry = make_entry("build");
+        new_entry.run_url = None;
+
+        append(&mut entries, new_entry);
+
+        // Without run_url we can't detect re-runs, so always append
+        assert_eq!(entries.len(), 2);
     }
 }

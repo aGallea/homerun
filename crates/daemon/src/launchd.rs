@@ -27,6 +27,11 @@ fn build_plist(daemon_path: &Path) -> Result<String> {
     <array>
         <string>{}</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -253,5 +258,15 @@ mod tests {
         let plist = build_plist(&daemon_path).unwrap();
         assert!(plist.contains("<key>KeepAlive</key>"));
         assert!(plist.contains("<true/>"));
+    }
+
+    #[test]
+    fn test_build_plist_contains_path_env() {
+        let daemon_path = PathBuf::from("/usr/bin/homerund");
+        let plist = build_plist(&daemon_path).unwrap();
+        assert!(plist.contains("<key>EnvironmentVariables</key>"));
+        assert!(plist.contains("<key>PATH</key>"));
+        assert!(plist.contains("/usr/local/bin"));
+        assert!(plist.contains("/opt/homebrew/bin"));
     }
 }
