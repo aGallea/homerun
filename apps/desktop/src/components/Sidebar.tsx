@@ -1,5 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import type { RunnerInfo } from "../api/types";
+import { ActiveRunners } from "./ActiveRunners";
 
 function RunnersIcon() {
   return (
@@ -72,13 +74,13 @@ function SettingsIcon() {
 }
 
 const navItems = [
-  { to: "/", label: "Runners", icon: <RunnersIcon /> },
+  { to: "/dashboard", label: "Runners", icon: <RunnersIcon /> },
   { to: "/repositories", label: "Repositories", icon: <RepositoriesIcon /> },
   { to: "/daemon", label: "Daemon", icon: <DaemonIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 
-export function Sidebar({ collapsed }: { collapsed: boolean }) {
+export function Sidebar({ collapsed, runners }: { collapsed: boolean; runners: RunnerInfo[] }) {
   const { auth } = useAuth();
   const navigate = useNavigate();
 
@@ -103,7 +105,6 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === "/"}
             className={({ isActive }) => `sidebar-link${isActive ? " sidebar-link-active" : ""}`}
             title={collapsed ? item.label : undefined}
           >
@@ -112,6 +113,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           </NavLink>
         ))}
       </div>
+      <ActiveRunners runners={runners} collapsed={collapsed} />
       <div className="sidebar-footer">
         {auth.user ? (
           <div className="sidebar-user">
