@@ -71,7 +71,7 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
         }
     }
     // Wait for socket to disappear (no lock held)
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         if !socket_path.exists() {
             return Ok(true);

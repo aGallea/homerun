@@ -159,6 +159,32 @@ export function NewRunnerWizard({
               onSelect={handleSelectRepo}
             />
           )}
+          {step === 1 && !selectedRepo && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                padding: "48px 0",
+                color: "var(--text-secondary)",
+                fontSize: 13,
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 16,
+                  height: 16,
+                  border: "2px solid var(--border)",
+                  borderTopColor: "var(--text-primary)",
+                  borderRadius: "50%",
+                  animation: "spin 0.6s linear infinite",
+                }}
+              />
+              Loading repository...
+            </div>
+          )}
           {step === 1 && selectedRepo && (
             <StepConfigure
               repo={selectedRepo}
@@ -224,7 +250,11 @@ export function NewRunnerWizard({
               </button>
             )}
             {step === 1 && (
-              <button className="btn btn-primary" disabled={isNextDisabled} onClick={handleNext}>
+              <button
+                className="btn btn-primary"
+                disabled={isNextDisabled || !selectedRepo}
+                onClick={handleNext}
+              >
                 Next
               </button>
             )}

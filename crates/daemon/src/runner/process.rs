@@ -10,6 +10,14 @@ pub async fn configure_runner(
     name: &str,
     labels: &[String],
 ) -> Result<()> {
+    // Remove stale local config so config.sh doesn't refuse to reconfigure
+    for file in &[".runner", ".credentials", ".credentials_rsaparams"] {
+        let path = runner_dir.join(file);
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     let labels_str = labels.join(",");
     let dir_str = runner_dir.to_string_lossy().to_string();
     let output = Command::new(runner_dir.join("config.sh"))

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import type { DeviceFlowResponse, Preferences } from "../api/types";
 
 type DeviceFlowState =
@@ -25,6 +26,12 @@ export function Settings() {
     return () => {
       cancelledRef.current = true;
     };
+  }, []);
+
+  // App version
+  const [appVersion, setAppVersion] = useState<string>("");
+  useEffect(() => {
+    getVersion().then(setAppVersion);
   }, []);
 
   // PAT section
@@ -541,6 +548,10 @@ export function Settings() {
             <div className="flex items-center justify-between">
               <span>HomeRun</span>
               <span className="font-mono">desktop</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Version</span>
+              <span className="font-mono">{appVersion}</span>
             </div>
             <div className="flex items-center justify-between">
               <span>Daemon connection</span>

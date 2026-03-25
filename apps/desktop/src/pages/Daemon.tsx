@@ -58,15 +58,26 @@ export function Daemon() {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const [childrenExpanded, setChildrenExpanded] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const resultTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const handleDaemonAction = async (action: "start" | "stop" | "restart") => {
     setActionLoading(action);
+    setActionResult(null);
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
     try {
       if (action === "start") await api.startDaemon();
       else if (action === "stop") await api.stopDaemon();
       else await api.restartDaemon();
+      const label = action.charAt(0).toUpperCase() + action.slice(1);
+      setActionResult({ type: "success", message: `Daemon ${label.toLowerCase()}ed successfully` });
+      resultTimerRef.current = setTimeout(() => setActionResult(null), 4000);
     } catch (err) {
-      console.error(`Daemon ${action} failed:`, err);
+      const reason = err instanceof Error ? err.message : String(err);
+      setActionResult({ type: "error", message: reason });
     } finally {
       setActionLoading(null);
     }
@@ -112,6 +123,25 @@ export function Daemon() {
           {actionLoading === "restart" ? "Restarting..." : "Restart"}
         </button>
       </div>
+
+      {actionResult && (
+        <div
+          style={{
+            marginBottom: 12,
+            padding: "8px 12px",
+            borderRadius: 6,
+            fontSize: 13,
+            color: actionResult.type === "success" ? "var(--accent-green)" : "var(--accent-red)",
+            background:
+              actionResult.type === "success" ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)",
+            border: `1px solid ${
+              actionResult.type === "success" ? "rgba(34, 197, 94, 0.2)" : "rgba(239, 68, 68, 0.2)"
+            }`,
+          }}
+        >
+          {actionResult.message}
+        </div>
+      )}
 
       {/* Status cards */}
       <div className="stats-grid" style={{ marginBottom: 16 }}>

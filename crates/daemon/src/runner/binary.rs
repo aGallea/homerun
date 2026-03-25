@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use tokio::sync::Mutex;
+
+/// Global lock to prevent concurrent downloads/extractions of the runner binary.
+static DOWNLOAD_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// Constructs the GitHub Actions runner download URL for the given version, OS, and architecture.
 pub fn runner_download_url(version: &str, os: &str, arch: &str) -> String {
@@ -49,6 +53,16 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
     let runner_dir = cache_dir.join(format!("runner-{version}"));
     let run_sh = runner_dir.join("run.sh");
 
+    // Fast path: already cached, no lock needed
+    if run_sh.exists() {
+        tracing::debug!("Runner binary already cached at {:?}", runner_dir);
+        return Ok(runner_dir);
+    }
+
+    // Serialize concurrent downloads — only one caller extracts at a time
+    let _guard = DOWNLOAD_LOCK.lock().await;
+
+    // Re-check after acquiring lock (another caller may have finished)
     if run_sh.exists() {
         tracing::debug!("Runner binary already cached at {:?}", runner_dir);
         return Ok(runner_dir);

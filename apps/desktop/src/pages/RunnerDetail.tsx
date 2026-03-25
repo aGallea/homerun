@@ -813,16 +813,8 @@ export function RunnerDetail() {
               display: "flex",
               flexDirection: "column",
               position: "relative",
-              height: historyCollapsed
-                ? "auto"
-                : expandedHistoryIndices.size > 0
-                  ? "auto"
-                  : historyHeight,
-              maxHeight: historyCollapsed
-                ? undefined
-                : expandedHistoryIndices.size > 0
-                  ? "50vh"
-                  : undefined,
+              height: historyCollapsed ? "auto" : historyHeight,
+              maxHeight: historyCollapsed ? undefined : "calc(100vh - 300px)",
               flex: "none",
             }}
           >
