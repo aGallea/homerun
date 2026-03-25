@@ -3,6 +3,34 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
+/// Resolve the full PATH from the user's login shell.
+/// This picks up paths added by nvm, fnm, Homebrew, etc. that aren't
+/// available in a bare launchd environment.
+pub fn resolve_shell_path() -> Option<String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = std::process::Command::new(&shell)
+        .args(["-l", "-c", "echo $PATH"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+/// Cached shell PATH resolved once at first use.
+static SHELL_PATH: std::sync::LazyLock<Option<String>> = std::sync::LazyLock::new(|| {
+    let path = resolve_shell_path();
+    if let Some(ref p) = path {
+        tracing::info!("Resolved shell PATH: {p}");
+    }
+    path
+});
+
 pub async fn configure_runner(
     runner_dir: &Path,
     url: &str,
@@ -20,9 +48,14 @@ pub async fn configure_runner(
 
     let labels_str = labels.join(",");
     let dir_str = runner_dir.to_string_lossy().to_string();
-    let output = Command::new(runner_dir.join("config.sh"))
+    let mut config_cmd = Command::new(runner_dir.join("config.sh"));
+    config_cmd
         .env("HOMERUN_RUNNER_DIR", &dir_str)
-        .env("HOMERUN_MANAGED", "1")
+        .env("HOMERUN_MANAGED", "1");
+    if let Some(ref path) = *SHELL_PATH {
+        config_cmd.env("PATH", path);
+    }
+    let output = config_cmd
         .args([
             "--url",
             url,
@@ -154,6 +187,10 @@ pub async fn start_runner(runner_dir: &Path) -> Result<Child> {
         // Tag all child processes so we can always find them
         .env("HOMERUN_RUNNER_DIR", &dir_str)
         .env("HOMERUN_MANAGED", "1");
+    // Pass the user's full shell PATH so runners can find node, docker, etc.
+    if let Some(ref path) = *SHELL_PATH {
+        cmd.env("PATH", path);
+    }
 
     // Spawn in its own process group so we can signal the entire tree
     // (run.sh spawns child .NET processes that hold the GitHub session).
