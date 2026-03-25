@@ -1207,8 +1207,8 @@ impl RunnerManager {
     }
 
     /// Common register-and-start flow (assumes already in Registering state):
-    /// Downloads runner binary if needed, then always runs config.sh --replace
-    /// to clear any stale GitHub sessions before starting run.sh.
+    /// Downloads runner binary if needed, removes stale configuration via
+    /// `config.sh remove`, then runs `config.sh` to register before starting run.sh.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         self.set_auth_token(Some(auth_token.to_string())).await;
 
@@ -1218,15 +1218,17 @@ impl RunnerManager {
             .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
         let config = &runner.config;
 
-        let already_configured = config.work_dir.join(".runner").exists();
+        // Check both .runner and .runner_migrated (newer runner versions rename
+        // the config file during a migration).
+        let already_configured = config.work_dir.join(".runner").exists()
+            || config.work_dir.join(".runner_migrated").exists();
 
         if !already_configured {
-            // 1. Download / cache runner binary
+            // First-time setup: download binary and copy to work_dir
             let cached_runner_dir = ensure_runner_binary(&self.config.cache_dir())
                 .await
                 .context("Failed to download runner binary")?;
 
-            // 2. Copy binary files to runner work_dir
             copy_dir_recursive(&cached_runner_dir, &config.work_dir)
                 .context("Failed to copy runner binary to work dir")?;
         } else {
@@ -1237,19 +1239,31 @@ impl RunnerManager {
         // BEFORE reconfiguring, so the old process releases the GitHub session.
         kill_orphaned_processes(&config.work_dir).await;
 
-        // Remove stale .runner file so config.sh accepts --replace
-        let runner_file = config.work_dir.join(".runner");
-        if runner_file.exists() {
-            let _ = std::fs::remove_file(&runner_file);
-        }
-
-        // Always run config.sh --replace to clear any stale GitHub sessions
-        // (e.g. after daemon restart where the old session was not deregistered)
         let gh = GitHubClient::new(Some(auth_token.to_string()))?;
         let reg = gh
             .get_runner_registration_token(&config.repo_owner, &config.repo_name)
             .await
             .context("Failed to get registration token")?;
+
+        // If already configured, deregister before re-configuring.
+        // config.sh refuses to configure an already-configured runner, so we
+        // must remove the old configuration first.
+        if already_configured {
+            let _ = remove_runner(&config.work_dir, &reg.token).await;
+            for file_name in [
+                ".runner",
+                ".runner_migrated",
+                ".credentials",
+                ".credentials_rsaparams",
+            ] {
+                let path = config.work_dir.join(file_name);
+                if path.exists() {
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        tracing::warn!("Failed to remove {file_name}: {e}");
+                    }
+                }
+            }
+        }
 
         let repo_url = format!(
             "https://github.com/{}/{}",
