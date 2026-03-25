@@ -480,6 +480,8 @@ p {
   text-decoration: none;
   color: inherit;
   transition: background 0.15s;
+  position: relative;
+  overflow: hidden;
 }
 
 .sidebar-active-entry:hover {
@@ -524,6 +526,28 @@ p {
   font-size: 10px;
   color: #484f58;
   flex-shrink: 0;
+}
+
+.sidebar-active-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0 0 5px 5px;
+  overflow: hidden;
+}
+
+.sidebar-active-progress-bar {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 0 0 5px 5px;
+  transition: width 2s linear;
+}
+
+.sidebar-active-progress-over {
+  background: var(--accent-yellow);
 }
 
 .sidebar-active-overflow {

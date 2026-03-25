@@ -11,6 +11,16 @@ function elapsedSeconds(jobStartedAt: string | null | undefined): number | null 
   return Math.floor((Date.now() - started) / 1000);
 }
 
+function jobProgress(
+  jobStartedAt: string | null | undefined,
+  estimatedDuration: number | null | undefined,
+): number | null {
+  if (!jobStartedAt || !estimatedDuration || estimatedDuration <= 0) return null;
+  const elapsed = elapsedSeconds(jobStartedAt);
+  if (elapsed == null) return null;
+  return Math.min(elapsed / estimatedDuration, 1);
+}
+
 export function ActiveRunners({
   runners,
   collapsed,
@@ -64,6 +74,17 @@ export function ActiveRunners({
             <span className="sidebar-active-time">
               {formatElapsed(elapsedSeconds(runner.job_started_at))}
             </span>
+            {(() => {
+              const pct = jobProgress(runner.job_started_at, runner.estimated_job_duration_secs);
+              return pct != null ? (
+                <div className="sidebar-active-progress">
+                  <div
+                    className={`sidebar-active-progress-bar${pct >= 1 ? " sidebar-active-progress-over" : ""}`}
+                    style={{ width: `${Math.min(pct, 1) * 100}%` }}
+                  />
+                </div>
+              ) : null;
+            })()}
           </Link>
         ))}
         {overflow > 0 && (
