@@ -445,6 +445,23 @@ p {
   font-size: 10px;
   color: var(--accent-yellow);
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.sidebar-active-count::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-yellow);
+  animation: spin-badge 1s linear infinite;
 }
 
 .sidebar-active-list {
