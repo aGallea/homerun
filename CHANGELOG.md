@@ -9,6 +9,14 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.5.1](https://github.com/aGallea/homerun/compare/v0.5.0...v0.5.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* add PATH env to launchd plist and deduplicate re-run history ent… ([9b2d735](https://github.com/aGallea/homerun/commit/9b2d735b1e15435e26626349b955c765af2af9ea))
+* add PATH env to launchd plist and deduplicate re-run history entries ([d4c82bc](https://github.com/aGallea/homerun/commit/d4c82bcc940bf586303425039f230451b95290a7))
+
 ## [0.5.0](https://github.com/aGallea/homerun/compare/v0.4.0...v0.5.0) (2026-03-25)
 
 
