@@ -9,6 +9,23 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.4.0](https://github.com/aGallea/homerun/compare/v0.3.2...v0.4.0) (2026-03-25)
+
+
+### Features
+
+* add copy-to-clipboard button for device flow auth code ([176dba7](https://github.com/aGallea/homerun/commit/176dba75061c6e2c9081e58d60126b622861018f))
+* add run status endpoint and fix parse_run_id for job URLs ([edf7bee](https://github.com/aGallea/homerun/commit/edf7beeb0e85122c2e567880288ab8e06ead4e96))
+
+
+### Bug Fixes
+
+* improve resize handle visibility and rerun job feedback ([e06fab7](https://github.com/aGallea/homerun/commit/e06fab75670659f2a88a8927435cbc574f00617c))
+* runner restart with migrated config, scale-up count, and delete UX ([78be891](https://github.com/aGallea/homerun/commit/78be8916d2b7ed2be5bd6625d179a9887be9a415))
+* runner restart with migrated config, scale-up count, and delete UX ([3b5583e](https://github.com/aGallea/homerun/commit/3b5583e4ef2b04e2de07510ba0d64447a73288cf))
+* use job_id directly for annotation fetch ([63825f5](https://github.com/aGallea/homerun/commit/63825f59a4f3e1cc8d6fa0dccf8c675fbd6db1e0))
+* use job_id directly for annotation fetch to avoid wrong-run matching ([263e0ac](https://github.com/aGallea/homerun/commit/263e0ac8a2ac25163e1588464d6ae9bb304b008b))
+
 ## [0.3.2](https://github.com/aGallea/homerun/compare/v0.3.1...v0.3.2) (2026-03-25)
 
 
