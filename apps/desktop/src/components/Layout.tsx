@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
+import { useRunners } from "../hooks/useRunners";
 
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [daemonConnected, setDaemonConnected] = useState(true);
+  const runnersHook = useRunners();
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +30,7 @@ export function Layout() {
   return (
     <div className="app">
       <div className="sidebar-wrapper">
-        <Sidebar collapsed={sidebarCollapsed} />
+        <Sidebar collapsed={sidebarCollapsed} runners={runnersHook.runners} />
         <button
           className="sidebar-fab"
           onClick={() => setSidebarCollapsed((c) => !c)}
@@ -64,7 +66,7 @@ export function Layout() {
             </button>
           </div>
         )}
-        <Outlet />
+        <Outlet context={runnersHook} />
       </main>
     </div>
   );

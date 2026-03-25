@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { useRepos } from "../hooks/useRepos";
-import { useRunners } from "../hooks/useRunners";
+import type { RunnersContextType } from "../hooks/useRunners";
 import { useAuth } from "../hooks/useAuth";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 
@@ -9,7 +9,7 @@ export function Repositories() {
   const { auth } = useAuth();
   const navigate = useNavigate();
   const { repos, loading: reposLoading, error: reposError } = useRepos();
-  const { runners, createRunner, createBatch } = useRunners();
+  const { runners, createRunner, createBatch } = useOutletContext<RunnersContextType>();
   const [search, setSearch] = useState("");
   const [wizardRepo, setWizardRepo] = useState<string | null>(null);
 

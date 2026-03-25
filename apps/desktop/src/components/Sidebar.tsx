@@ -1,5 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import type { RunnerInfo } from "../api/types";
+import { ActiveRunners } from "./ActiveRunners";
 
 function RunnersIcon() {
   return (
@@ -78,7 +80,7 @@ const navItems = [
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 
-export function Sidebar({ collapsed }: { collapsed: boolean }) {
+export function Sidebar({ collapsed, runners }: { collapsed: boolean; runners: RunnerInfo[] }) {
   const { auth } = useAuth();
   const navigate = useNavigate();
 
@@ -112,6 +114,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           </NavLink>
         ))}
       </div>
+      <ActiveRunners runners={runners} collapsed={collapsed} />
       <div className="sidebar-footer">
         {auth.user ? (
           <div className="sidebar-user">

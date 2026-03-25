@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { useRunners } from "../hooks/useRunners";
+import { useParams, useNavigate, Link, useOutletContext } from "react-router-dom";
+import type { RunnersContextType } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../api/commands";
@@ -227,7 +227,8 @@ export function RunnerDetail() {
   const navigate = useNavigate();
   const { auth, handleUnauthorized } = useAuth();
   const isAuthenticated = auth.authenticated;
-  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } = useRunners();
+  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } =
+    useOutletContext<RunnersContextType>();
   const { metrics } = useMetrics();
   const runner = runners.find((r) => r.config.id === id);
   const { steps, stepsDiscovered, jobName, expandedStep, stepLogs, toggleStep } = useJobSteps(

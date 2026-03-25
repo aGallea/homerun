@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useRunners } from "../hooks/useRunners";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import type { RunnersContextType } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
 import { useAuth } from "../hooks/useAuth";
 import { StatsCard } from "../components/StatsCard";
@@ -26,7 +26,7 @@ export function Dashboard() {
     restartGroup,
     deleteGroup,
     scaleGroup,
-  } = useRunners();
+  } = useOutletContext<RunnersContextType>();
   const { metrics } = useMetrics();
   const [showWizard, setShowWizard] = useState(false);
   const [filter, setFilter] = useState("");
