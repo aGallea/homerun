@@ -202,6 +202,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rerun_runner_not_found() {
+        let state = AppState::new_test();
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners/nonexistent-id/rerun")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"run_url":"https://github.com/o/r/actions/runs/123"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_rerun_invalid_url() {
+        let state = AppState::new_test_authenticated();
+        // Create a runner first
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"owner/repo"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let id = runner["config"]["id"].as_str().unwrap();
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/runners/{id}/rerun"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"run_url":"not-a-valid-url"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_run_status_runner_not_found() {
+        let state = AppState::new_test();
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners/nonexistent-id/run-status")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"run_url":"https://github.com/o/r/actions/runs/123"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_run_status_invalid_url() {
+        let state = AppState::new_test_authenticated();
+        let app = create_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/runners")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"repo_full_name":"owner/repo"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runner: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let id = runner["config"]["id"].as_str().unwrap();
+
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/runners/{id}/run-status"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"run_url":"not-valid"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn test_history_runner_not_found() {
         let state = AppState::new_test();
         let app = create_router(state);
