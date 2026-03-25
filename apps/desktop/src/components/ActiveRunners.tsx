@@ -21,8 +21,8 @@ export function ActiveRunners({
   const busy = runners
     .filter((r) => r.state === "busy")
     .sort((a, b) => {
-      const aTime = a.job_started_at ? new Date(a.job_started_at).getTime() : 0;
-      const bTime = b.job_started_at ? new Date(b.job_started_at).getTime() : 0;
+      const aTime = a.job_started_at ? new Date(a.job_started_at).getTime() : -Infinity;
+      const bTime = b.job_started_at ? new Date(b.job_started_at).getTime() : -Infinity;
       if (bTime !== aTime) return bTime - aTime;
       return a.config.name.localeCompare(b.config.name);
     });

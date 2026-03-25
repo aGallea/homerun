@@ -115,6 +115,28 @@ describe("ActiveRunners", () => {
     expect(entries[1].textContent).toContain("old-runner");
   });
 
+  it("sorts runners with null job_started_at last", () => {
+    vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW);
+    const runners = [
+      makeRunner({
+        name: "no-time",
+        state: "busy",
+        current_job: "j1",
+        job_started_at: null,
+      }),
+      makeRunner({
+        name: "has-time",
+        state: "busy",
+        current_job: "j2",
+        job_started_at: new Date(FIXED_NOW - 60_000).toISOString(),
+      }),
+    ];
+    renderWithRouter(<ActiveRunners runners={runners} collapsed={false} />);
+    const entries = document.querySelectorAll(".sidebar-active-entry");
+    expect(entries[0].textContent).toContain("has-time");
+    expect(entries[1].textContent).toContain("no-time");
+  });
+
   it("shows only badge with count when collapsed", () => {
     renderWithRouter(
       <ActiveRunners
