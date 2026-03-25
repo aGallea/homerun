@@ -84,6 +84,16 @@ jobs:
           min-coverage-percentage: "80"
           fail-under-coverage-percentage: "false"
 
+  environment:
+    name: Runner environment
+    runs-on: self-hosted
+    steps:
+      - name: Verify Docker is available
+        run: docker version
+
+      - name: Run hello-world container
+        run: docker run --rm hello-world
+
   typescript:
     name: TypeScript (type check + build)
     runs-on: self-hosted
