@@ -75,7 +75,7 @@ function SettingsIcon() {
 }
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: <DashboardIcon /> },
+  { to: "/", label: "Runners", icon: <DashboardIcon /> },
   { to: "/repositories", label: "Repositories", icon: <RepositoriesIcon /> },
   { to: "/daemon", label: "Daemon", icon: <DaemonIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
@@ -88,7 +88,17 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   return (
     <nav className={`sidebar ${collapsed ? "sidebar-collapsed" : ""}`}>
       <div className="sidebar-header">
-        <img src="/icon.png" alt="HomeRun" style={{ width: 48, height: 48, borderRadius: 12 }} />
+        <img
+          src="/icon.png"
+          alt="HomeRun"
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 12,
+            transform: "scale(1.35)",
+            transformOrigin: "center",
+          }}
+        />
         {!collapsed && <span className="sidebar-title">HomeRun</span>}
       </div>
       <div className="sidebar-nav">

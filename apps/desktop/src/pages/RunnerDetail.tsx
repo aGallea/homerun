@@ -214,19 +214,19 @@ export function RunnerDetail() {
     runner?.state === "busy",
   );
   const { history, refresh: refreshHistory } = useJobHistory(id);
-  const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
+  const [expandedHistoryIndices, setExpandedHistoryIndices] = useState<Set<number>>(new Set());
   const expandedHistoryRef = useRef<HTMLDivElement | null>(null);
   const [deletingHistoryEntries, setDeletingHistoryEntries] = useState<Set<string>>(new Set());
   const [clearingHistory, setClearingHistory] = useState(false);
 
   useEffect(() => {
-    if (expandedHistoryIndex != null && expandedHistoryRef.current) {
+    if (expandedHistoryIndices.size > 0 && expandedHistoryRef.current) {
       setTimeout(
         () => expandedHistoryRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
         50,
       );
     }
-  }, [expandedHistoryIndex]);
+  }, [expandedHistoryIndices]);
 
   const [logsHeight, setLogsHeight] = useState(140);
   const [logsCollapsed, setLogsCollapsed] = useState(false);
@@ -277,7 +277,7 @@ export function RunnerDetail() {
       <div className="page">
         <div className="page-header">
           <button className="btn" onClick={() => navigate("/dashboard")}>
-            ← Back to Dashboard
+            ← Back to Runners
           </button>
         </div>
         <p className="text-muted">Runner not found.</p>
@@ -323,7 +323,7 @@ export function RunnerDetail() {
       <header className="runner-detail-header">
         <div className="runner-detail-breadcrumbs">
           <Link to="/dashboard" className="breadcrumb-link">
-            Dashboard
+            Runners
           </Link>
           <span className="breadcrumb-sep">›</span>
           <span className="breadcrumb-current">{config.name}</span>
@@ -733,12 +733,12 @@ export function RunnerDetail() {
               position: "relative",
               height: historyCollapsed
                 ? "auto"
-                : expandedHistoryIndex != null
+                : expandedHistoryIndices.size > 0
                   ? "auto"
                   : historyHeight,
               maxHeight: historyCollapsed
                 ? undefined
-                : expandedHistoryIndex != null
+                : expandedHistoryIndices.size > 0
                   ? "50vh"
                   : undefined,
               flex: "none",
@@ -785,7 +785,7 @@ export function RunnerDetail() {
                     api
                       .clearRunnerHistory(id!)
                       .then(() => {
-                        setExpandedHistoryIndex(null);
+                        setExpandedHistoryIndices(new Set());
                         return refreshHistory();
                       })
                       .finally(() => setClearingHistory(false));
@@ -823,7 +823,7 @@ export function RunnerDetail() {
                       new Date(entry.started_at).getTime()) /
                       1000,
                   );
-                  const isExpanded = expandedHistoryIndex === i;
+                  const isExpanded = expandedHistoryIndices.has(i);
                   const hasSteps = entry.steps && entry.steps.length > 0;
                   const isDeleting =
                     clearingHistory || deletingHistoryEntries.has(entry.started_at);
@@ -831,7 +831,14 @@ export function RunnerDetail() {
                     <div key={i} ref={isExpanded ? expandedHistoryRef : undefined}>
                       <div
                         onClick={() => {
-                          if (hasSteps) setExpandedHistoryIndex(isExpanded ? null : i);
+                          if (hasSteps) {
+                            setExpandedHistoryIndices((prev) => {
+                              const next = new Set(prev);
+                              if (isExpanded) next.delete(i);
+                              else next.add(i);
+                              return next;
+                            });
+                          }
                         }}
                         style={{
                           display: "flex",

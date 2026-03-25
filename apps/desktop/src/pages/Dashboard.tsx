@@ -103,7 +103,7 @@ export function Dashboard() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1 className="page-title">Dashboard</h1>
+        <h1 className="page-title">Runners</h1>
         <div className="flex items-center gap-8">
           <input
             className="input"
