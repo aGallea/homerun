@@ -43,6 +43,7 @@ export function RunnerGroupRow({
   const activeCount = runners.filter((r) => r.state === "online" || r.state === "busy").length;
   const hasRunning = activeCount > 0;
   const hasStopped = runners.some((r) => r.state === "offline" || r.state === "error");
+  const scaleGroupCount = runners.filter((r) => r.config.group_id === allGroupIds[0]).length;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -135,17 +136,17 @@ export function RunnerGroupRow({
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() => onScaleGroup(allGroupIds[0], runners.length + 1)}
+                    onClick={() => onScaleGroup(allGroupIds[0], scaleGroupCount + 1)}
                     title="Scale up"
-                    disabled={loading || runners.length >= 10}
+                    disabled={loading || scaleGroupCount >= 10}
                   >
                     ▲
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() => onScaleGroup(allGroupIds[0], runners.length - 1)}
+                    onClick={() => onScaleGroup(allGroupIds[0], scaleGroupCount - 1)}
                     title="Scale down"
-                    disabled={loading || runners.length <= 1}
+                    disabled={loading || scaleGroupCount <= 1}
                   >
                     ▼
                   </button>
@@ -204,20 +205,20 @@ export function RunnerGroupRow({
                       <button
                         className="actions-dropdown-item"
                         onClick={() => {
-                          onScaleGroup(allGroupIds[0], runners.length + 1);
+                          onScaleGroup(allGroupIds[0], scaleGroupCount + 1);
                           setMenuOpen(false);
                         }}
-                        disabled={runners.length >= 10}
+                        disabled={scaleGroupCount >= 10}
                       >
                         ▲ Scale Up
                       </button>
                       <button
                         className="actions-dropdown-item"
                         onClick={() => {
-                          onScaleGroup(allGroupIds[0], runners.length - 1);
+                          onScaleGroup(allGroupIds[0], scaleGroupCount - 1);
                           setMenuOpen(false);
                         }}
-                        disabled={runners.length <= 1}
+                        disabled={scaleGroupCount <= 1}
                       >
                         ▼ Scale Down
                       </button>

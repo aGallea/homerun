@@ -194,9 +194,15 @@ p {
   color: var(--accent-green);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background-color: rgba(63, 185, 80, 0.1);
   border-color: var(--accent-green);
+}
+
+.btn-primary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .btn-danger {

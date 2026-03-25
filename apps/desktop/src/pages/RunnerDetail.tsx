@@ -306,6 +306,7 @@ export function RunnerDetail() {
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [followLogs, setFollowLogs] = useState(true);
@@ -365,6 +366,7 @@ export function RunnerDetail() {
   const canDelete = !isTransient && state !== "busy";
 
   async function doAction(fn: () => Promise<void>) {
+    if (deleting) return;
     setActionError(null);
     try {
       await fn();
@@ -377,10 +379,12 @@ export function RunnerDetail() {
 
   async function handleDelete() {
     setConfirmDelete(false);
+    setDeleting(true);
     try {
       await deleteRunner(config.id);
       navigate("/dashboard");
     } catch (e) {
+      setDeleting(false);
       setActionError(String(e));
     }
   }
@@ -423,7 +427,7 @@ export function RunnerDetail() {
             {/* Action buttons */}
             {isAuthenticated && (
               <div className="flex items-center gap-8" style={{ marginBottom: 16 }}>
-                {isTransient && (
+                {(isTransient || deleting) && (
                   <span
                     style={{
                       display: "inline-block",
@@ -436,10 +440,16 @@ export function RunnerDetail() {
                     }}
                   />
                 )}
+                {deleting && (
+                  <span className="text-muted" style={{ fontSize: 13 }}>
+                    Deleting…
+                  </span>
+                )}
                 {isStopped && (
                   <button
                     className="btn btn-primary"
                     onClick={() => doAction(() => startRunner(config.id))}
+                    disabled={deleting}
                   >
                     ▶ Start
                   </button>
@@ -448,6 +458,7 @@ export function RunnerDetail() {
                   <button
                     className="runner-action-btn"
                     onClick={() => doAction(() => stopRunner(config.id))}
+                    disabled={deleting}
                   >
                     ■ Stop
                   </button>
@@ -455,14 +466,14 @@ export function RunnerDetail() {
                 <button
                   className="runner-action-btn"
                   onClick={() => doAction(() => restartRunner(config.id))}
-                  disabled={!canRestart}
+                  disabled={!canRestart || deleting}
                 >
                   ↺ Restart
                 </button>
                 <button
                   className="runner-action-btn runner-action-btn-danger"
                   onClick={() => setConfirmDelete(true)}
-                  disabled={!canDelete}
+                  disabled={!canDelete || deleting}
                 >
                   Delete
                 </button>
@@ -848,9 +859,10 @@ export function RunnerDetail() {
               </div>
               {!historyCollapsed && (
                 <button
-                  disabled={clearingHistory}
+                  disabled={clearingHistory || deleting}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (deleting) return;
                     setClearingHistory(true);
                     api
                       .clearRunnerHistory(id!)
@@ -896,7 +908,7 @@ export function RunnerDetail() {
                   const isExpanded = expandedHistoryIndices.has(i);
                   const hasSteps = entry.steps && entry.steps.length > 0;
                   const isDeleting =
-                    clearingHistory || deletingHistoryEntries.has(entry.started_at);
+                    deleting || clearingHistory || deletingHistoryEntries.has(entry.started_at);
                   return (
                     <div key={i} ref={isExpanded ? expandedHistoryRef : undefined}>
                       <div
