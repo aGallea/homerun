@@ -61,17 +61,26 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("launchd") || msg.contains("Uninstall the service") {
-                return Err(
-                    "Daemon is managed by launchd. Uninstall the service first.".to_string(),
-                );
+                // Uninstall the launchd service, then retry shutdown
+                let client = crate::client::DaemonClient::new(socket_path.clone());
+                client.uninstall_service().await.map_err(|e| format!("Failed to uninstall launchd service: {e}"))?;
+                // Retry shutdown after uninstalling service
+                if let Err(e2) = client.shutdown().await {
+                    let _ = std::fs::remove_file(&socket_path);
+                    let msg2 = e2.to_string();
+                    if !msg2.contains("connect") {
+                        return Err(format!("Failed to stop daemon after uninstalling service: {msg2}"));
+                    }
+                }
+            } else {
+                // Already down — clean up stale socket
+                let _ = std::fs::remove_file(&socket_path);
+                return Ok(true);
             }
-            // Already down — clean up stale socket
-            let _ = std::fs::remove_file(&socket_path);
-            return Ok(true);
         }
     }
     // Wait for socket to disappear (no lock held)
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         if !socket_path.exists() {
             return Ok(true);

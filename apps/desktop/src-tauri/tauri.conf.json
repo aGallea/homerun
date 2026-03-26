@@ -40,16 +40,16 @@
     "macOS": {
       "dmg": {
         "appPosition": {
-          "x": 180,
-          "y": 170
+          "x": 200,
+          "y": 200
         },
         "applicationFolderPosition": {
-          "x": 480,
-          "y": 170
+          "x": 560,
+          "y": 200
         },
         "windowSize": {
-          "width": 660,
-          "height": 400
+          "width": 760,
+          "height": 440
         }
       },
       "minimumSystemVersion": "13.0",

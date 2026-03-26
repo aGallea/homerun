@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
@@ -7,6 +7,9 @@ import { useRunners } from "../hooks/useRunners";
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [daemonConnected, setDaemonConnected] = useState(true);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [starting, setStarting] = useState(false);
+  const wasDisconnectedRef = useRef(false);
   const runnersHook = useRunners();
 
   useEffect(() => {
@@ -14,13 +17,26 @@ export function Layout() {
     async function check() {
       try {
         const ok = await api.healthCheck();
-        if (!cancelled) setDaemonConnected(ok);
+        if (!cancelled) {
+          if (ok) {
+            setRetryAttempt(0);
+            wasDisconnectedRef.current = false;
+          } else {
+            wasDisconnectedRef.current = true;
+            setRetryAttempt((n) => n + 1);
+          }
+          setDaemonConnected(ok);
+        }
       } catch {
-        if (!cancelled) setDaemonConnected(false);
+        if (!cancelled) {
+          wasDisconnectedRef.current = true;
+          setRetryAttempt((n) => n + 1);
+          setDaemonConnected(false);
+        }
       }
     }
     check();
-    const timer = setInterval(check, 3000);
+    const timer = setInterval(check, 10000);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -51,18 +67,27 @@ export function Layout() {
               justifyContent: "space-between",
             }}
           >
-            <span>Unable to connect to the HomeRun daemon.</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span>Unable to connect to the HomeRun daemon.</span>
+              <span style={{ fontSize: 12, opacity: 0.7 }}>
+                Retrying... (attempt {retryAttempt})
+              </span>
+            </div>
             <button
               className="btn btn-primary btn-sm"
+              disabled={starting}
               onClick={async () => {
+                setStarting(true);
                 try {
                   await api.startDaemon();
                 } catch (err) {
                   console.error("Failed to start daemon:", err);
+                } finally {
+                  setStarting(false);
                 }
               }}
             >
-              Start daemon
+              {starting ? "Starting..." : "Start daemon"}
             </button>
           </div>
         )}
