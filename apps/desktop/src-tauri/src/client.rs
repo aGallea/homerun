@@ -98,6 +98,16 @@ pub struct StepLogsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunAttempt {
+    pub attempt: u32,
+    pub succeeded: bool,
+    pub runner_name: String,
+    pub completed_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletedJob {
     pub job_name: String,
     pub succeeded: bool,
@@ -108,6 +118,8 @@ pub struct CompletedJob {
     pub run_url: Option<String>,
     #[serde(default)]
     pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub latest_attempt: Option<RunAttempt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +134,8 @@ pub struct JobHistoryEntry {
     #[serde(default)]
     pub error_message: Option<String>,
     pub steps: Vec<StepInfo>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub latest_attempt: Option<RunAttempt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
