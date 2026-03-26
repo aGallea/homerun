@@ -604,7 +604,8 @@ mod tests {
         assert_eq!(runner["config"]["name"], "custom-name");
         let labels = runner["config"]["labels"].as_array().unwrap();
         assert!(labels.iter().any(|l| l.as_str() == Some("gpu")));
-        assert!(labels.iter().any(|l| l.as_str() == Some("self-hosted")));
+        // User-provided labels are used as-is — no defaults merged
+        assert_eq!(labels.len(), 1);
     }
 
     #[tokio::test]

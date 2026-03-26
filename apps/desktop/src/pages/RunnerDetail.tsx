@@ -545,6 +545,22 @@ export function RunnerDetail() {
                   </div>
                 </>
               )}
+              {config.labels.length > 0 && (
+                <>
+                  <span style={{ color: "var(--border)" }}>|</span>
+                  <div className="flex items-center" style={{ gap: 4 }}>
+                    {config.labels.map((lbl) => (
+                      <span
+                        key={lbl}
+                        className="label-tag"
+                        style={{ fontSize: 11, padding: "1px 6px" }}
+                      >
+                        {lbl}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
           {/* Right: Current Job card */}

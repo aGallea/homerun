@@ -572,8 +572,12 @@ impl DaemonClient {
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
-    pub async fn shutdown(&self) -> Result<String, String> {
-        self.request("POST", "/daemon/shutdown", None).await
+    /// Returns the number of active runners being stopped during shutdown.
+    pub async fn shutdown(&self) -> Result<usize, String> {
+        let body = self.request("POST", "/daemon/shutdown", None).await?;
+        let json: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
+        Ok(json["active_runners"].as_u64().unwrap_or(0) as usize)
     }
 
     pub async fn get_daemon_logs_recent(

@@ -92,7 +92,7 @@ export function Daemon() {
   }, [logs, follow]);
 
   return (
-    <div className="page" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="page" style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div className="page-header">
         <h1 className="page-title">Daemon</h1>
       </div>

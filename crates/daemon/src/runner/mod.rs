@@ -944,19 +944,30 @@ impl RunnerManager {
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
-        let mut default_labels = vec!["self-hosted".to_string(), "macOS".to_string()];
-        if cfg!(target_arch = "aarch64") {
-            default_labels.push("ARM64".to_string());
-        } else {
-            default_labels.push("X64".to_string());
-        }
-        if let Some(extra) = labels {
-            for label in extra {
-                if !default_labels.contains(&label) {
-                    default_labels.push(label);
+        let resolved_labels = if let Some(user_labels) = labels {
+            if user_labels.is_empty() {
+                // No labels provided — use platform defaults
+                let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
+                if cfg!(target_arch = "aarch64") {
+                    defaults.push("ARM64".to_string());
+                } else {
+                    defaults.push("X64".to_string());
                 }
+                defaults
+            } else {
+                // User explicitly chose labels — use as-is
+                user_labels
             }
-        }
+        } else {
+            // None — use platform defaults
+            let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
+            if cfg!(target_arch = "aarch64") {
+                defaults.push("ARM64".to_string());
+            } else {
+                defaults.push("X64".to_string());
+            }
+            defaults
+        };
 
         let runner = RunnerInfo {
             config: RunnerConfig {
@@ -964,7 +975,7 @@ impl RunnerManager {
                 name,
                 repo_owner: owner.to_string(),
                 repo_name: repo.to_string(),
-                labels: default_labels,
+                labels: resolved_labels,
                 mode: mode.unwrap_or(RunnerMode::App),
                 work_dir,
                 group_id,
