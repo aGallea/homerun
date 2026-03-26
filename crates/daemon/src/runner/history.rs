@@ -643,5 +643,77 @@ mod tests {
         }"#;
         let entry: JobHistoryEntry = serde_json::from_str(json).unwrap();
         assert!(entry.latest_attempt.is_none());
+        assert_eq!(entry.job_number, 0);
+    }
+
+    #[test]
+    fn test_extract_run_id_from_url_public() {
+        assert_eq!(
+            extract_run_id_from_url("https://github.com/o/r/actions/runs/42"),
+            Some(42)
+        );
+        assert_eq!(
+            extract_run_id_from_url("https://github.com/o/r/actions/runs/42/job/99"),
+            Some(42)
+        );
+        assert_eq!(extract_run_id_from_url("not-a-url"), None);
+    }
+
+    #[test]
+    fn test_append_assigns_job_number() {
+        let mut entries: Vec<JobHistoryEntry> = Vec::new();
+        append(&mut entries, make_entry("job-a"), "runner-1");
+        assert_eq!(entries[0].job_number, 1);
+
+        append(&mut entries, make_entry("job-b"), "runner-1");
+        assert_eq!(entries[1].job_number, 2);
+
+        append(&mut entries, make_entry("job-c"), "runner-1");
+        assert_eq!(entries[2].job_number, 3);
+    }
+
+    #[test]
+    fn test_append_rerun_keeps_original_job_number() {
+        let now = Utc::now();
+        let mut entries = vec![];
+
+        // First job gets number 1
+        let entry1 = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+        append(&mut entries, entry1, "runner-1");
+        assert_eq!(entries[0].job_number, 1);
+
+        // Re-run of the same run_id keeps number 1
+        let rerun = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(60),
+            completed_at: now,
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/999".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+        append(&mut entries, rerun, "runner-1");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].job_number, 1,
+            "re-run should keep original job_number"
+        );
+        assert!(entries[0].succeeded);
     }
 }

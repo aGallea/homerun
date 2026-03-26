@@ -3645,4 +3645,215 @@ mod tests {
         assert!(!dir.path().join(".credentials").exists());
         assert!(!dir.path().join(".credentials_rsaparams").exists());
     }
+
+    #[tokio::test]
+    async fn test_record_job_history_assigns_job_number() {
+        let manager = create_test_manager();
+        let runner_id = "runner-hist-test";
+        manager.runners.write().await.insert(
+            runner_id.to_string(),
+            RunnerInfo {
+                config: RunnerConfig {
+                    id: runner_id.to_string(),
+                    name: "test-runner".to_string(),
+                    repo_owner: "owner".to_string(),
+                    repo_name: "repo".to_string(),
+                    labels: vec![],
+                    mode: RunnerMode::App,
+                    work_dir: std::path::PathBuf::from("/tmp/test"),
+                    group_id: None,
+                },
+                state: RunnerState::Online,
+                pid: None,
+                uptime_secs: None,
+                started_at: None,
+                jobs_completed: 0,
+                jobs_failed: 0,
+                current_job: None,
+                job_context: None,
+                error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
+                estimated_job_duration_secs: None,
+            },
+        );
+
+        let entry = types::JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            succeeded: true,
+            branch: None,
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+
+        manager.record_job_history(runner_id, entry).await;
+
+        let hist = manager.job_history.read().await;
+        let entries = hist.get(runner_id).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].job_number, 1);
+    }
+
+    #[tokio::test]
+    async fn test_annotate_cross_runner_reruns() {
+        let manager = create_test_manager();
+
+        // Create two runners
+        for (id, name) in [("r1", "runner-1"), ("r2", "runner-2")] {
+            manager.runners.write().await.insert(
+                id.to_string(),
+                RunnerInfo {
+                    config: RunnerConfig {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        repo_owner: "owner".to_string(),
+                        repo_name: "repo".to_string(),
+                        labels: vec![],
+                        mode: RunnerMode::App,
+                        work_dir: std::path::PathBuf::from(format!("/tmp/{id}")),
+                        group_id: None,
+                    },
+                    state: RunnerState::Online,
+                    pid: None,
+                    uptime_secs: None,
+                    started_at: None,
+                    jobs_completed: 0,
+                    jobs_failed: 0,
+                    current_job: None,
+                    job_context: None,
+                    error_message: None,
+                    job_started_at: None,
+                    last_completed_job: None,
+                    estimated_job_duration_secs: None,
+                },
+            );
+        }
+
+        let now = chrono::Utc::now();
+
+        // Runner-1 has a failed entry for run 100
+        let failed_entry = types::JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: Some("exit 1".to_string()),
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 1,
+        };
+        {
+            let mut hist = manager.job_history.write().await;
+            hist.entry("r1".to_string()).or_default().push(failed_entry);
+        }
+
+        // Runner-2 completes a re-run of the same run_id (100) successfully
+        let rerun_entry = types::JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(60),
+            completed_at: now,
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/999".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+
+        // Record on runner-2 — should annotate runner-1's entry
+        manager.record_job_history("r2", rerun_entry).await;
+
+        // Check runner-1's entry got annotated
+        let hist = manager.job_history.read().await;
+        let r1_entries = hist.get("r1").unwrap();
+        assert_eq!(r1_entries.len(), 1);
+        let la = r1_entries[0].latest_attempt.as_ref().unwrap();
+        assert!(la.succeeded);
+        assert_eq!(la.runner_name, "runner-2");
+
+        // Check runner-2's entry was recorded
+        let r2_entries = hist.get("r2").unwrap();
+        assert_eq!(r2_entries.len(), 1);
+        assert_eq!(r2_entries[0].job_number, 1);
+    }
+
+    #[tokio::test]
+    async fn test_backfill_job_numbers_on_load() {
+        let manager = create_test_manager();
+        let history_dir = manager.config.history_dir();
+        std::fs::create_dir_all(&history_dir).unwrap();
+
+        // Write a history file with job_number: 0 (old format)
+        let entries = vec![
+            types::JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: chrono::Utc::now(),
+                completed_at: chrono::Utc::now(),
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
+            },
+            types::JobHistoryEntry {
+                job_name: "test".to_string(),
+                started_at: chrono::Utc::now(),
+                completed_at: chrono::Utc::now(),
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
+            },
+        ];
+        history::save(&history_dir, "backfill-runner", &entries).unwrap();
+
+        // Create the runner so load_from_disk finds it
+        let runners_path = manager.config.runners_json_path();
+        if let Some(parent) = runners_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let persisted = serde_json::json!([{
+            "id": "backfill-runner",
+            "name": "test-runner",
+            "repo_owner": "o",
+            "repo_name": "r",
+            "labels": [],
+            "mode": "app",
+            "work_dir": "/tmp/backfill",
+            "was_running": false
+        }]);
+        std::fs::write(&runners_path, persisted.to_string()).unwrap();
+
+        manager.load_from_disk().await.unwrap();
+
+        // Verify backfill happened
+        let hist = manager.job_history.read().await;
+        let entries = hist.get("backfill-runner").unwrap();
+        assert_eq!(entries[0].job_number, 1);
+        assert_eq!(entries[1].job_number, 2);
+
+        // Verify it was persisted to disk
+        let on_disk = history::load_all(&history_dir).unwrap();
+        let disk_entries = on_disk.get("backfill-runner").unwrap();
+        assert_eq!(disk_entries[0].job_number, 1);
+        assert_eq!(disk_entries[1].job_number, 2);
+    }
 }
