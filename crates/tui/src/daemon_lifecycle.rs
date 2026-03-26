@@ -55,8 +55,8 @@ pub async fn stop_daemon() -> Result<()> {
         bail!("Daemon is not running (no socket file)");
     }
     let client = DaemonClient::new(socket.clone());
-    match client.shutdown().await {
-        Ok(()) => {}
+    let active_runners = match client.shutdown().await {
+        Ok(count) => count,
         Err(e) => {
             let msg = format!("{e}");
             if msg.contains("launchd") || msg.contains("Uninstall the service") {
@@ -70,8 +70,11 @@ pub async fn stop_daemon() -> Result<()> {
             }
             return Ok(());
         }
-    }
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    };
+    // Scale timeout: 5s base + 15s per active runner (each runner may take up to 15s to stop).
+    // Runners are stopped concurrently, so we use a single 15s window, not N * 15s.
+    let timeout_secs = 5 + if active_runners > 0 { 15 } else { 0 };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
     loop {
         if !socket.exists() {
             return Ok(());

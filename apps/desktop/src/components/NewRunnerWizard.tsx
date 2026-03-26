@@ -15,6 +15,7 @@ interface NewRunnerWizardProps {
   preselectedRepo?: string;
 }
 
+const DEFAULT_LABELS = ["self-hosted", "macOS", "ARM64"];
 const STEPS = ["Select Repository", "Configure", "Launch"];
 
 function generateName(repoName: string): string {
@@ -53,6 +54,7 @@ export function NewRunnerWizard({
   }, [preselectedRepo, repos, resolvedPreselect]);
 
   const [name, setName] = useState("");
+  const [labelsInput, setLabelsInput] = useState(DEFAULT_LABELS.join(", "));
   const [mode, setMode] = useState<"app" | "service">("app");
   const [count, setCount] = useState(1);
   const [launching, setLaunching] = useState(false);
@@ -84,12 +86,17 @@ export function NewRunnerWizard({
     if (!selectedRepo) return;
     setLaunching(true);
     setLaunchError(null);
+    const labels = labelsInput
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean);
 
     if (count === 1) {
       try {
         await onCreate({
           repo_full_name: selectedRepo.full_name,
           name: name.trim() || undefined,
+          labels,
           mode,
         });
         setLaunched(true);
@@ -104,6 +111,7 @@ export function NewRunnerWizard({
         const result = await onCreateBatch({
           repo_full_name: selectedRepo.full_name,
           count,
+          labels,
           mode,
         });
         const results: BatchResult[] = result.runners.map((r) => ({
@@ -126,6 +134,11 @@ export function NewRunnerWizard({
       }
     }
   }
+
+  const labels = labelsInput
+    .split(",")
+    .map((l) => l.trim())
+    .filter(Boolean);
 
   const isNextDisabled = count === 1 ? !name.trim() : false;
 
@@ -190,6 +203,8 @@ export function NewRunnerWizard({
               repo={selectedRepo}
               name={name}
               onName={setName}
+              labelsInput={labelsInput}
+              onLabelsInput={setLabelsInput}
               mode={mode}
               onMode={setMode}
               count={count}
@@ -200,6 +215,7 @@ export function NewRunnerWizard({
             <StepLaunch
               repo={selectedRepo}
               name={name}
+              labels={labels}
               mode={mode}
               count={count}
               error={launchError}
@@ -350,13 +366,25 @@ interface StepConfigureProps {
   repo: RepoInfo;
   name: string;
   onName: (v: string) => void;
+  labelsInput: string;
+  onLabelsInput: (v: string) => void;
   mode: "app" | "service";
   onMode: (v: "app" | "service") => void;
   count: number;
   onCount: (v: number) => void;
 }
 
-function StepConfigure({ repo, name, onName, mode, onMode, count, onCount }: StepConfigureProps) {
+function StepConfigure({
+  repo,
+  name,
+  onName,
+  labelsInput,
+  onLabelsInput,
+  mode,
+  onMode,
+  count,
+  onCount,
+}: StepConfigureProps) {
   return (
     <div>
       <div className="form-group">
@@ -493,6 +521,20 @@ function StepConfigure({ repo, name, onName, mode, onMode, count, onCount }: Ste
           disabled={count > 1}
         />
       </div>
+
+      <div className="form-group">
+        <label className="form-label" htmlFor="runner-labels">
+          Labels
+        </label>
+        <input
+          id="runner-labels"
+          type="text"
+          value={labelsInput}
+          onChange={(e) => onLabelsInput(e.target.value)}
+          style={{ width: "100%" }}
+          placeholder="e.g. self-hosted, macOS, ARM64"
+        />
+      </div>
     </div>
   );
 }
@@ -500,12 +542,13 @@ function StepConfigure({ repo, name, onName, mode, onMode, count, onCount }: Ste
 interface StepLaunchProps {
   repo: RepoInfo;
   name: string;
+  labels: string[];
   mode: string;
   count: number;
   error: string | null;
 }
 
-function StepLaunch({ repo, name, mode, count, error }: StepLaunchProps) {
+function StepLaunch({ repo, name, labels, mode, count, error }: StepLaunchProps) {
   const slug = repo.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
 
   return (
@@ -530,6 +573,10 @@ function StepLaunch({ repo, name, mode, count, error }: StepLaunchProps) {
         <div className="launch-summary-row">
           <span className="launch-summary-key">Count</span>
           <span className="launch-summary-value">{count}</span>
+        </div>
+        <div className="launch-summary-row">
+          <span className="launch-summary-key">Labels</span>
+          <span className="launch-summary-value">{labels.join(", ")}</span>
         </div>
         <div className="launch-summary-row">
           <span className="launch-summary-key">Mode</span>

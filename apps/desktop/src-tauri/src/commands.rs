@@ -56,8 +56,8 @@ pub async fn start_daemon(app_handle: tauri::AppHandle) -> Result<bool, String> 
 /// Helper: stop the daemon (not a Tauri command — avoids State<> lifetime issues)
 async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String> {
     let client = crate::client::DaemonClient::new(socket_path.clone());
-    match client.shutdown().await {
-        Ok(_) => {} // 202 Accepted
+    let active_runners = match client.shutdown().await {
+        Ok(count) => count,
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("launchd") || msg.contains("Uninstall the service") {
@@ -65,11 +65,15 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
                 let client = crate::client::DaemonClient::new(socket_path.clone());
                 client.uninstall_service().await.map_err(|e| format!("Failed to uninstall launchd service: {e}"))?;
                 // Retry shutdown after uninstalling service
-                if let Err(e2) = client.shutdown().await {
-                    let _ = std::fs::remove_file(&socket_path);
-                    let msg2 = e2.to_string();
-                    if !msg2.contains("connect") {
-                        return Err(format!("Failed to stop daemon after uninstalling service: {msg2}"));
+                match client.shutdown().await {
+                    Ok(count) => count,
+                    Err(e2) => {
+                        let _ = std::fs::remove_file(&socket_path);
+                        let msg2 = e2.to_string();
+                        if !msg2.contains("connect") {
+                            return Err(format!("Failed to stop daemon after uninstalling service: {msg2}"));
+                        }
+                        0
                     }
                 }
             } else {
@@ -78,9 +82,10 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
                 return Ok(true);
             }
         }
-    }
-    // Wait for socket to disappear (no lock held)
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    };
+    // Scale timeout: 5s base + 15s if there are active runners (stopped concurrently)
+    let timeout_secs: u64 = 5 + if active_runners > 0 { 15 } else { 0 };
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     loop {
         if !socket_path.exists() {
             return Ok(true);

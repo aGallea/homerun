@@ -303,7 +303,6 @@ export function RunnerDetail() {
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [stepsHeight, setStepsHeight] = useState(300);
   const [stepsCollapsed, setStepsCollapsed] = useState(false);
-  const [historyHeight, setHistoryHeight] = useState(200);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -543,6 +542,22 @@ export function RunnerDetail() {
                     >
                       {formatBytes(runnerMetrics.memory_bytes)}
                     </span>
+                  </div>
+                </>
+              )}
+              {config.labels.length > 0 && (
+                <>
+                  <span style={{ color: "var(--border)" }}>|</span>
+                  <div className="flex items-center" style={{ gap: 4 }}>
+                    {config.labels.map((lbl) => (
+                      <span
+                        key={lbl}
+                        className="label-tag"
+                        style={{ fontSize: 11, padding: "1px 6px" }}
+                      >
+                        {lbl}
+                      </span>
+                    ))}
                   </div>
                 </>
               )}
@@ -824,9 +839,9 @@ export function RunnerDetail() {
               display: "flex",
               flexDirection: "column",
               position: "relative",
-              height: historyCollapsed ? "auto" : historyHeight,
+              minHeight: historyCollapsed ? undefined : 150,
               maxHeight: historyCollapsed ? undefined : "calc(100vh - 300px)",
-              flex: "none",
+              flex: historyCollapsed ? "none" : "1 1 auto",
             }}
           >
             <div
@@ -950,6 +965,20 @@ export function RunnerDetail() {
                             flexShrink: 0,
                           }}
                         />
+                        {entry.job_number > 0 && (
+                          <span
+                            className="font-mono"
+                            style={{
+                              fontSize: 10,
+                              color: "var(--text-secondary)",
+                              opacity: 0.5,
+                              flexShrink: 0,
+                              minWidth: 20,
+                            }}
+                          >
+                            #{entry.job_number}
+                          </span>
+                        )}
                         {hasSteps && (
                           <span
                             style={{
@@ -963,6 +992,29 @@ export function RunnerDetail() {
                           </span>
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
+                          {entry.latest_attempt && (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: 10,
+                                fontWeight: 600,
+                                padding: "1px 6px",
+                                borderRadius: 3,
+                                lineHeight: "16px",
+                                background: entry.latest_attempt.succeeded
+                                  ? "rgba(34, 197, 94, 0.15)"
+                                  : "rgba(239, 68, 68, 0.15)",
+                                color: entry.latest_attempt.succeeded
+                                  ? "var(--accent-green)"
+                                  : "var(--accent-red)",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={`Re-run on ${entry.latest_attempt.runner_name}: ${entry.latest_attempt.succeeded ? "succeeded" : "failed"}`}
+                            >
+                              Re-run: {entry.latest_attempt.succeeded ? "\u2713" : "\u2717"}{" "}
+                              {entry.latest_attempt.runner_name}
+                            </span>
+                          )}
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span
                               style={{
@@ -984,7 +1036,7 @@ export function RunnerDetail() {
                               gap: 6,
                               fontSize: 11,
                               color: "var(--text-secondary)",
-                              marginTop: 2,
+                              marginTop: entry.latest_attempt ? 0 : 2,
                             }}
                           >
                             {entry.branch && <span>{entry.branch}</span>}
@@ -996,8 +1048,14 @@ export function RunnerDetail() {
                             {(entry.branch || entry.pr_number != null) && <span>·</span>}
                             <span>{new Date(entry.completed_at).toLocaleTimeString()}</span>
                             {!entry.succeeded && entry.error_message && (
-                              <span style={{ color: "var(--accent-red)", opacity: 0.8 }}>
-                                · {entry.error_message}
+                              <span
+                                style={{ color: "var(--accent-red)", opacity: 0.8 }}
+                                title={entry.error_message}
+                              >
+                                ·{" "}
+                                {entry.error_message.length > 80
+                                  ? entry.error_message.slice(0, 80) + "\u2026"
+                                  : entry.error_message}
                               </span>
                             )}
                           </div>
@@ -1280,9 +1338,6 @@ export function RunnerDetail() {
                   );
                 })}
               </div>
-            )}
-            {!historyCollapsed && (
-              <ResizeHandle onMouseDown={makeResizeHandler(setHistoryHeight, 150, 800)} />
             )}
           </div>
         )}

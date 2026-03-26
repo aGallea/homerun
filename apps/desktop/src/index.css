@@ -616,7 +616,7 @@ p {
 /* Page layout */
 .page {
   padding: 24px 32px;
-  min-height: 100%;
+  min-height: 0;
   flex: 1;
 }
 

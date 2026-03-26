@@ -60,23 +60,45 @@ fn extract_run_id(run_url: &str) -> Option<u64> {
     parts.get(runs_idx + 1)?.parse().ok()
 }
 
+/// Public version of run-ID extraction for use by the re-run poller.
+pub fn extract_run_id_from_url(run_url: &str) -> Option<u64> {
+    extract_run_id(run_url)
+}
+
 /// Append a history entry, keeping the list capped at MAX_HISTORY_PER_RUNNER.
 ///
 /// When a workflow run is re-run, the new attempt shares the same `run_id` but
 /// gets a different `job_id`. If an existing entry matches on both `run_id`
 /// (extracted from `run_url`) and `job_name`, it is replaced with the new entry
-/// so that history reflects the latest result for each run.
-pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry) {
+/// so that history reflects the latest result for each run. The replaced entry's
+/// info is preserved in `latest_attempt` so the UI can show re-run context.
+pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry, runner_name: &str) {
     if let Some(new_run_id) = entry.run_url.as_deref().and_then(extract_run_id) {
         if let Some(pos) = entries.iter().position(|e| {
             e.job_name == entry.job_name
                 && e.run_url.as_deref().and_then(extract_run_id) == Some(new_run_id)
         }) {
+            let old = &entries[pos];
+            let mut entry = entry;
+            // Keep the original job_number on re-run replacement
+            entry.job_number = old.job_number;
+            // Preserve the previous attempt's info so the UI can show re-run context
+            entry.latest_attempt = Some(crate::runner::types::RunAttempt {
+                attempt: 0,
+                succeeded: old.succeeded,
+                runner_name: runner_name.to_string(),
+                completed_at: old.completed_at,
+                run_url: old.run_url.clone(),
+            });
             entries[pos] = entry;
             return;
         }
     }
 
+    // Assign next job_number (max existing + 1, or 1 if empty)
+    let next_number = entries.iter().map(|e| e.job_number).max().unwrap_or(0) + 1;
+    let mut entry = entry;
+    entry.job_number = next_number;
     entries.push(entry);
     if entries.len() > MAX_HISTORY_PER_RUNNER {
         entries.remove(0);
@@ -125,6 +147,8 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         }
     }
 
@@ -193,7 +217,11 @@ mod tests {
         let mut entries: Vec<JobHistoryEntry> = Vec::new();
 
         for i in 0..110 {
-            append(&mut entries, make_entry(&format!("job-{}", i)));
+            append(
+                &mut entries,
+                make_entry(&format!("job-{}", i)),
+                "test-runner",
+            );
         }
 
         assert_eq!(entries.len(), MAX_HISTORY_PER_RUNNER);
@@ -221,6 +249,8 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         }];
         assert_eq!(median_duration_secs(&entries, "build"), None);
     }
@@ -238,6 +268,8 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         }];
         assert_eq!(median_duration_secs(&entries, "build"), Some(300));
     }
@@ -255,6 +287,8 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         };
         let entries = vec![make(100), make(200), make(300)];
         assert_eq!(median_duration_secs(&entries, "test"), Some(200));
@@ -273,6 +307,8 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         };
         let entries = vec![make(100), make(200), make(300), make(400)];
         // median of [100, 200, 300, 400] = (200 + 300) / 2 = 250
@@ -292,6 +328,8 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         };
         let entries = vec![make("build", 100), make("test", 500), make("build", 300)];
         assert_eq!(median_duration_secs(&entries, "build"), Some(200));
@@ -312,6 +350,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             },
             JobHistoryEntry {
                 job_name: "build".to_string(),
@@ -323,6 +363,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             },
             JobHistoryEntry {
                 job_name: "build".to_string(),
@@ -334,6 +376,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             },
         ];
         assert_eq!(median_duration_secs(&entries, "build"), Some(200));
@@ -369,6 +413,8 @@ mod tests {
                     completed_at: None,
                 },
             ],
+            latest_attempt: None,
+            job_number: 0,
         };
 
         save(&history_dir, "runner-steps", std::slice::from_ref(&entry)).unwrap();
@@ -426,6 +472,8 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
             error_message: Some("Process completed with exit code 1.".to_string()),
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         }];
 
         // Re-run: same run_id (100), same job_name, different job_id (999)
@@ -439,9 +487,11 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/999".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         };
 
-        append(&mut entries, rerun_entry);
+        append(&mut entries, rerun_entry, "test-runner");
 
         // Should replace, not append
         assert_eq!(entries.len(), 1);
@@ -451,6 +501,10 @@ mod tests {
             Some("https://github.com/owner/repo/actions/runs/100/job/999")
         );
         assert!(entries[0].error_message.is_none());
+        // Should preserve the old entry's info in latest_attempt
+        let prev = entries[0].latest_attempt.as_ref().unwrap();
+        assert!(!prev.succeeded);
+        assert_eq!(prev.runner_name, "test-runner");
     }
 
     #[test]
@@ -466,6 +520,8 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         }];
 
         // Different run_id (999), same job_name
@@ -479,9 +535,11 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/999/job/888".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         };
 
-        append(&mut entries, new_entry);
+        append(&mut entries, new_entry, "test-runner");
 
         // Should append, not replace
         assert_eq!(entries.len(), 2);
@@ -502,6 +560,8 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         }];
 
         // Same run_id (100), different job_name
@@ -515,9 +575,11 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/300".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
         };
 
-        append(&mut entries, new_entry);
+        append(&mut entries, new_entry, "test-runner");
 
         // Should append — different jobs from the same run are separate entries
         assert_eq!(entries.len(), 2);
@@ -531,9 +593,127 @@ mod tests {
         let mut new_entry = make_entry("build");
         new_entry.run_url = None;
 
-        append(&mut entries, new_entry);
+        append(&mut entries, new_entry, "test-runner");
 
         // Without run_url we can't detect re-runs, so always append
         assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_latest_attempt_serialization_roundtrip() {
+        let now = Utc::now();
+        let entry = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(300),
+            completed_at: now,
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: Some("exit code 1".to_string()),
+            steps: vec![],
+            latest_attempt: Some(crate::runner::types::RunAttempt {
+                attempt: 2,
+                succeeded: true,
+                runner_name: "runner-2".to_string(),
+                completed_at: now,
+                run_url: Some("https://github.com/o/r/actions/runs/100/job/500".to_string()),
+            }),
+            job_number: 0,
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: JobHistoryEntry = serde_json::from_str(&json).unwrap();
+        assert!(back.latest_attempt.is_some());
+        let attempt = back.latest_attempt.unwrap();
+        assert_eq!(attempt.attempt, 2);
+        assert!(attempt.succeeded);
+        assert_eq!(attempt.runner_name, "runner-2");
+    }
+
+    #[test]
+    fn test_latest_attempt_none_by_default_in_old_json() {
+        let json = r#"{
+            "job_name": "build",
+            "started_at": "2026-03-24T10:00:00Z",
+            "completed_at": "2026-03-24T10:05:00Z",
+            "succeeded": false,
+            "run_url": "https://github.com/o/r/actions/runs/100/job/200",
+            "steps": []
+        }"#;
+        let entry: JobHistoryEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.latest_attempt.is_none());
+        assert_eq!(entry.job_number, 0);
+    }
+
+    #[test]
+    fn test_extract_run_id_from_url_public() {
+        assert_eq!(
+            extract_run_id_from_url("https://github.com/o/r/actions/runs/42"),
+            Some(42)
+        );
+        assert_eq!(
+            extract_run_id_from_url("https://github.com/o/r/actions/runs/42/job/99"),
+            Some(42)
+        );
+        assert_eq!(extract_run_id_from_url("not-a-url"), None);
+    }
+
+    #[test]
+    fn test_append_assigns_job_number() {
+        let mut entries: Vec<JobHistoryEntry> = Vec::new();
+        append(&mut entries, make_entry("job-a"), "runner-1");
+        assert_eq!(entries[0].job_number, 1);
+
+        append(&mut entries, make_entry("job-b"), "runner-1");
+        assert_eq!(entries[1].job_number, 2);
+
+        append(&mut entries, make_entry("job-c"), "runner-1");
+        assert_eq!(entries[2].job_number, 3);
+    }
+
+    #[test]
+    fn test_append_rerun_keeps_original_job_number() {
+        let now = Utc::now();
+        let mut entries = vec![];
+
+        // First job gets number 1
+        let entry1 = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+        append(&mut entries, entry1, "runner-1");
+        assert_eq!(entries[0].job_number, 1);
+
+        // Re-run of the same run_id keeps number 1
+        let rerun = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(60),
+            completed_at: now,
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/999".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+        append(&mut entries, rerun, "runner-1");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].job_number, 1,
+            "re-run should keep original job_number"
+        );
+        assert!(entries[0].succeeded);
     }
 }

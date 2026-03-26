@@ -98,6 +98,16 @@ pub struct StepLogsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunAttempt {
+    pub attempt: u32,
+    pub succeeded: bool,
+    pub runner_name: String,
+    pub completed_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletedJob {
     pub job_name: String,
     pub succeeded: bool,
@@ -108,6 +118,8 @@ pub struct CompletedJob {
     pub run_url: Option<String>,
     #[serde(default)]
     pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub latest_attempt: Option<RunAttempt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +134,10 @@ pub struct JobHistoryEntry {
     #[serde(default)]
     pub error_message: Option<String>,
     pub steps: Vec<StepInfo>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub latest_attempt: Option<RunAttempt>,
+    #[serde(default)]
+    pub job_number: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -556,8 +572,12 @@ impl DaemonClient {
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
-    pub async fn shutdown(&self) -> Result<String, String> {
-        self.request("POST", "/daemon/shutdown", None).await
+    /// Returns the number of active runners being stopped during shutdown.
+    pub async fn shutdown(&self) -> Result<usize, String> {
+        let body = self.request("POST", "/daemon/shutdown", None).await?;
+        let json: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
+        Ok(json["active_runners"].as_u64().unwrap_or(0) as usize)
     }
 
     pub async fn get_daemon_logs_recent(

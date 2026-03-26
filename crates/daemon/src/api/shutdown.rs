@@ -5,7 +5,7 @@ use crate::server::AppState;
 
 pub async fn shutdown_daemon(
     State(state): State<AppState>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     if crate::launchd::is_daemon_installed() {
         return Err((
             StatusCode::CONFLICT,
@@ -17,18 +17,34 @@ pub async fn shutdown_daemon(
 
     tracing::info!("Shutdown requested via API");
 
+    let runners = state.runner_manager.list().await;
+    let active_runners: Vec<_> = runners
+        .iter()
+        .filter(|r| {
+            r.state == crate::runner::state::RunnerState::Online
+                || r.state == crate::runner::state::RunnerState::Busy
+        })
+        .collect();
+    let active_count = active_runners.len();
+
     tokio::spawn(async move {
         let runners = state.runner_manager.list().await;
+        let mut stop_futures = Vec::new();
         for runner in &runners {
             if runner.state == crate::runner::state::RunnerState::Online
                 || runner.state == crate::runner::state::RunnerState::Busy
             {
                 tracing::info!("Stopping runner {} for shutdown", runner.config.name);
-                if let Err(e) = state.runner_manager.stop_process(&runner.config.id).await {
-                    tracing::warn!("Failed to stop runner {}: {}", runner.config.name, e);
-                }
+                let manager = state.runner_manager.clone();
+                let id = runner.config.id.clone();
+                stop_futures.push(async move {
+                    if let Err(e) = manager.stop_process(&id).await {
+                        tracing::warn!("Failed to stop runner {}: {}", id, e);
+                    }
+                });
             }
         }
+        futures::future::join_all(stop_futures).await;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let socket_path = state.config.read().await.socket_path();
         if socket_path.exists() {
@@ -38,7 +54,10 @@ pub async fn shutdown_daemon(
         std::process::exit(0);
     });
 
-    Ok(StatusCode::ACCEPTED)
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "active_runners": active_count })),
+    ))
 }
 
 #[cfg(test)]
@@ -100,5 +119,30 @@ mod tests {
             // If launchd is not installed, shutdown should be allowed
             assert_eq!(response.status(), StatusCode::ACCEPTED);
         }
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_returns_active_runners_count() {
+        if crate::launchd::is_daemon_installed() {
+            return; // Skip — shutdown blocked by launchd
+        }
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/daemon/shutdown")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // No runners in test state, so active_runners should be 0
+        assert_eq!(json["active_runners"], 0);
     }
 }

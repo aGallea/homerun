@@ -215,6 +215,104 @@ impl RunnerManager {
         });
     }
 
+    /// After recording a job completion, check all OTHER runners' history for
+    /// entries with the same `run_id`. If found, annotate them with
+    /// `latest_attempt` so the UI shows the re-run result.
+    async fn annotate_cross_runner_reruns(
+        &self,
+        source_runner_id: &str,
+        entry: &types::JobHistoryEntry,
+    ) {
+        let run_id = match entry
+            .run_url
+            .as_deref()
+            .and_then(history::extract_run_id_from_url)
+        {
+            Some(id) => id,
+            None => return,
+        };
+
+        let source_runner_name = {
+            let map = self.runners.read().await;
+            match map.get(source_runner_id) {
+                Some(r) => r.config.name.clone(),
+                None => return,
+            }
+        };
+
+        let attempt = types::RunAttempt {
+            attempt: 0, // not available from local data; displayed as "re-run"
+            succeeded: entry.succeeded,
+            runner_name: source_runner_name,
+            completed_at: entry.completed_at,
+            run_url: entry.run_url.clone(),
+        };
+
+        // Phase 1: annotate history entries and collect affected runner IDs
+        let mut annotated_runners: Vec<String> = Vec::new();
+        {
+            let mut hist = self.job_history.write().await;
+            for (other_id, other_entries) in hist.iter_mut() {
+                if other_id == source_runner_id {
+                    continue;
+                }
+                let mut changed = false;
+                for e in other_entries.iter_mut() {
+                    if e.job_name == entry.job_name
+                        && e.run_url
+                            .as_deref()
+                            .and_then(history::extract_run_id_from_url)
+                            == Some(run_id)
+                    {
+                        e.latest_attempt = Some(attempt.clone());
+                        changed = true;
+                    }
+                }
+                if changed {
+                    if let Err(e) =
+                        history::save(&self.config.history_dir(), other_id, other_entries)
+                    {
+                        tracing::warn!("Failed to save rerun annotation for {other_id}: {e}");
+                    }
+                    annotated_runners.push(other_id.clone());
+                }
+            }
+        }
+
+        // Phase 2: update last_completed_job and emit events for affected runners
+        if !annotated_runners.is_empty() {
+            let mut runners = self.runners.write().await;
+            for other_id in &annotated_runners {
+                if let Some(r) = runners.get_mut(other_id) {
+                    if let Some(ref mut lc) = r.last_completed_job {
+                        if lc
+                            .run_url
+                            .as_deref()
+                            .and_then(history::extract_run_id_from_url)
+                            == Some(run_id)
+                        {
+                            lc.latest_attempt = Some(attempt.clone());
+                        }
+                    }
+                }
+                tracing::info!(
+                    source = %source_runner_id,
+                    target = %other_id,
+                    run_id,
+                    job = %entry.job_name,
+                    succeeded = entry.succeeded,
+                    "Annotated cross-runner re-run"
+                );
+                let _ = self.event_tx.send(RunnerEvent {
+                    runner_id: other_id.clone(),
+                    event_type: "state_changed".to_string(),
+                    data: serde_json::json!({"rerun_updated": true}),
+                    timestamp: chrono::Utc::now(),
+                });
+            }
+        }
+    }
+
     async fn next_runner_number(&self, repo_name: &str) -> u32 {
         // Find existing numbers for this repo to pick the next available one
         let runners = self.runners.read().await;
@@ -396,7 +494,24 @@ impl RunnerManager {
 
         // Load job history from disk
         match history::load_all(&self.config.history_dir()) {
-            Ok(hist) => {
+            Ok(mut hist) => {
+                // Backfill job_number for entries created before the field existed
+                for (runner_id, entries) in hist.iter_mut() {
+                    let needs_backfill = entries.iter().any(|e| e.job_number == 0);
+                    if needs_backfill {
+                        for (idx, entry) in entries.iter_mut().enumerate() {
+                            if entry.job_number == 0 {
+                                entry.job_number = (idx + 1) as u32;
+                            }
+                        }
+                        if let Err(e) =
+                            history::save(&self.config.history_dir(), runner_id, entries)
+                        {
+                            tracing::warn!("Failed to backfill job_number for {runner_id}: {e}");
+                        }
+                    }
+                }
+
                 // Populate last_completed_job for each runner from most recent history entry
                 let mut runners = self.runners.write().await;
                 for (runner_id, entries) in &hist {
@@ -413,6 +528,7 @@ impl RunnerManager {
                                 pr_number: last.pr_number,
                                 run_url: last.run_url.clone(),
                                 error_message: None,
+                                latest_attempt: None,
                             });
                         }
                     }
@@ -750,6 +866,8 @@ impl RunnerManager {
                                             }),
                                             error_message: error_message.clone(),
                                             steps,
+                                            latest_attempt: None,
+                                            job_number: 0,
                                         };
 
                                         r.last_completed_job = Some(types::CompletedJob {
@@ -761,6 +879,7 @@ impl RunnerManager {
                                             pr_number: entry.pr_number,
                                             run_url: entry.run_url.clone(),
                                             error_message: error_message.clone(),
+                                            latest_attempt: None,
                                         });
 
                                         if succeeded {
@@ -825,19 +944,30 @@ impl RunnerManager {
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
-        let mut default_labels = vec!["self-hosted".to_string(), "macOS".to_string()];
-        if cfg!(target_arch = "aarch64") {
-            default_labels.push("ARM64".to_string());
-        } else {
-            default_labels.push("X64".to_string());
-        }
-        if let Some(extra) = labels {
-            for label in extra {
-                if !default_labels.contains(&label) {
-                    default_labels.push(label);
+        let resolved_labels = if let Some(user_labels) = labels {
+            if user_labels.is_empty() {
+                // No labels provided — use platform defaults
+                let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
+                if cfg!(target_arch = "aarch64") {
+                    defaults.push("ARM64".to_string());
+                } else {
+                    defaults.push("X64".to_string());
                 }
+                defaults
+            } else {
+                // User explicitly chose labels — use as-is
+                user_labels
             }
-        }
+        } else {
+            // None — use platform defaults
+            let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
+            if cfg!(target_arch = "aarch64") {
+                defaults.push("ARM64".to_string());
+            } else {
+                defaults.push("X64".to_string());
+            }
+            defaults
+        };
 
         let runner = RunnerInfo {
             config: RunnerConfig {
@@ -845,7 +975,7 @@ impl RunnerManager {
                 name,
                 repo_owner: owner.to_string(),
                 repo_name: repo.to_string(),
-                labels: default_labels,
+                labels: resolved_labels,
                 mode: mode.unwrap_or(RunnerMode::App),
                 work_dir,
                 group_id,
@@ -1484,6 +1614,8 @@ impl RunnerManager {
                                         }),
                                         error_message: error_message.clone(),
                                         steps: steps_data,
+                                        latest_attempt: None,
+                                        job_number: 0,
                                     };
 
                                     r.last_completed_job = Some(types::CompletedJob {
@@ -1495,6 +1627,7 @@ impl RunnerManager {
                                         pr_number: entry.pr_number,
                                         run_url: entry.run_url.clone(),
                                         error_message: error_message.clone(),
+                                        latest_attempt: None,
                                     });
 
                                     if succeeded {
@@ -1515,11 +1648,70 @@ impl RunnerManager {
 
                             // Record history via cloned Arcs
                             if let Some(entry) = history_entry {
+                                let self_name = {
+                                    let map = runners.read().await;
+                                    map.get(&rid)
+                                        .map(|r| r.config.name.clone())
+                                        .unwrap_or_default()
+                                };
                                 let mut hist = job_history_arc.write().await;
                                 let entries = hist.entry(rid.clone()).or_default();
-                                history::append(entries, entry);
+                                history::append(entries, entry.clone(), &self_name);
                                 if let Err(e) = history::save(&history_dir, &rid, entries) {
                                     tracing::warn!("Failed to save job history for {}: {}", rid, e);
+                                }
+
+                                // Annotate other runners' history entries for the same run_id
+                                if let Some(run_id) = entry
+                                    .run_url
+                                    .as_deref()
+                                    .and_then(history::extract_run_id_from_url)
+                                {
+                                    let runner_name = {
+                                        let map = runners.read().await;
+                                        map.get(&rid).map(|r| r.config.name.clone())
+                                    };
+                                    if let Some(runner_name) = runner_name {
+                                        let attempt = types::RunAttempt {
+                                            attempt: 0,
+                                            succeeded: entry.succeeded,
+                                            runner_name,
+                                            completed_at: entry.completed_at,
+                                            run_url: entry.run_url.clone(),
+                                        };
+                                        for (other_id, other_entries) in hist.iter_mut() {
+                                            if *other_id == rid {
+                                                continue;
+                                            }
+                                            let mut changed = false;
+                                            for e in other_entries.iter_mut() {
+                                                if e.job_name == entry.job_name
+                                                    && e.run_url
+                                                        .as_deref()
+                                                        .and_then(history::extract_run_id_from_url)
+                                                        == Some(run_id)
+                                                {
+                                                    e.latest_attempt = Some(attempt.clone());
+                                                    changed = true;
+                                                }
+                                            }
+                                            if changed {
+                                                if let Err(e) = history::save(
+                                                    &history_dir,
+                                                    other_id,
+                                                    other_entries,
+                                                ) {
+                                                    tracing::warn!("Failed to save rerun annotation for {other_id}: {e}");
+                                                }
+                                                let _ = event_tx_stdout.send(RunnerEvent {
+                                                    runner_id: other_id.clone(),
+                                                    event_type: "state_changed".to_string(),
+                                                    data: serde_json::json!({"rerun_updated": true}),
+                                                    timestamp: chrono::Utc::now(),
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -1745,14 +1937,23 @@ impl RunnerManager {
         });
     }
 
-    /// Record a completed job in history.
+    /// Record a completed job in history, then annotate other runners' entries
+    /// for the same workflow run with `latest_attempt`.
     pub async fn record_job_history(&self, runner_id: &str, entry: types::JobHistoryEntry) {
+        let runner_name = {
+            let map = self.runners.read().await;
+            map.get(runner_id)
+                .map(|r| r.config.name.clone())
+                .unwrap_or_default()
+        };
         let mut hist = self.job_history.write().await;
         let entries = hist.entry(runner_id.to_string()).or_default();
-        history::append(entries, entry);
+        history::append(entries, entry.clone(), &runner_name);
         if let Err(e) = history::save(&self.config.history_dir(), runner_id, entries) {
             tracing::warn!("Failed to save job history for {}: {}", runner_id, e);
         }
+        drop(hist);
+        self.annotate_cross_runner_reruns(runner_id, &entry).await;
     }
 
     /// Get job history for a runner (newest first).
@@ -2357,15 +2558,72 @@ mod tests {
             .unwrap();
 
         assert_eq!(runner.config.name, "my-runner");
-        // "macOS" is in the default list so should not be duplicated
-        let count = runner
-            .config
-            .labels
-            .iter()
-            .filter(|l| l.as_str() == "macOS")
-            .count();
-        assert_eq!(count, 1, "macOS label should not be duplicated");
+        // User-provided labels are used as-is, no defaults merged
+        assert_eq!(runner.config.labels.len(), 2);
         assert!(runner.config.labels.contains(&"gpu".to_string()));
+        assert!(runner.config.labels.contains(&"macOS".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_empty_labels_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                Some(vec![]),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Empty labels should fall back to platform defaults
+        assert!(runner.config.labels.contains(&"self-hosted".to_string()));
+        assert!(runner.config.labels.contains(&"macOS".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_none_labels_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create("owner/repo", None, None, None, None)
+            .await
+            .unwrap();
+
+        // None labels should fall back to platform defaults
+        assert!(runner.config.labels.contains(&"self-hosted".to_string()));
+        assert!(runner.config.labels.contains(&"macOS".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_single_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                Some(vec!["self-hosted".to_string()]),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Only the user-provided label, no defaults added
+        assert_eq!(runner.config.labels, vec!["self-hosted".to_string()]);
     }
 
     #[tokio::test]
@@ -2597,6 +2855,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             }],
         );
         let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
@@ -2742,6 +3002,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             }],
         );
         // Runners map — both runners share group-a
@@ -2821,6 +3083,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             }],
         );
         // sibling runner-1 history: 500s
@@ -2836,6 +3100,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             }],
         );
         let mut runners = HashMap::new();
@@ -2949,6 +3215,8 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
             }],
         );
         let mut runners = HashMap::new();
@@ -3376,5 +3644,216 @@ mod tests {
         assert!(!dir.path().join(".runner_migrated").exists());
         assert!(!dir.path().join(".credentials").exists());
         assert!(!dir.path().join(".credentials_rsaparams").exists());
+    }
+
+    #[tokio::test]
+    async fn test_record_job_history_assigns_job_number() {
+        let manager = create_test_manager();
+        let runner_id = "runner-hist-test";
+        manager.runners.write().await.insert(
+            runner_id.to_string(),
+            RunnerInfo {
+                config: RunnerConfig {
+                    id: runner_id.to_string(),
+                    name: "test-runner".to_string(),
+                    repo_owner: "owner".to_string(),
+                    repo_name: "repo".to_string(),
+                    labels: vec![],
+                    mode: RunnerMode::App,
+                    work_dir: std::path::PathBuf::from("/tmp/test"),
+                    group_id: None,
+                },
+                state: RunnerState::Online,
+                pid: None,
+                uptime_secs: None,
+                started_at: None,
+                jobs_completed: 0,
+                jobs_failed: 0,
+                current_job: None,
+                job_context: None,
+                error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
+                estimated_job_duration_secs: None,
+            },
+        );
+
+        let entry = types::JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: chrono::Utc::now(),
+            completed_at: chrono::Utc::now(),
+            succeeded: true,
+            branch: None,
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+
+        manager.record_job_history(runner_id, entry).await;
+
+        let hist = manager.job_history.read().await;
+        let entries = hist.get(runner_id).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].job_number, 1);
+    }
+
+    #[tokio::test]
+    async fn test_annotate_cross_runner_reruns() {
+        let manager = create_test_manager();
+
+        // Create two runners
+        for (id, name) in [("r1", "runner-1"), ("r2", "runner-2")] {
+            manager.runners.write().await.insert(
+                id.to_string(),
+                RunnerInfo {
+                    config: RunnerConfig {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        repo_owner: "owner".to_string(),
+                        repo_name: "repo".to_string(),
+                        labels: vec![],
+                        mode: RunnerMode::App,
+                        work_dir: std::path::PathBuf::from(format!("/tmp/{id}")),
+                        group_id: None,
+                    },
+                    state: RunnerState::Online,
+                    pid: None,
+                    uptime_secs: None,
+                    started_at: None,
+                    jobs_completed: 0,
+                    jobs_failed: 0,
+                    current_job: None,
+                    job_context: None,
+                    error_message: None,
+                    job_started_at: None,
+                    last_completed_job: None,
+                    estimated_job_duration_secs: None,
+                },
+            );
+        }
+
+        let now = chrono::Utc::now();
+
+        // Runner-1 has a failed entry for run 100
+        let failed_entry = types::JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(600),
+            completed_at: now - chrono::Duration::seconds(300),
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: Some("exit 1".to_string()),
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 1,
+        };
+        {
+            let mut hist = manager.job_history.write().await;
+            hist.entry("r1".to_string()).or_default().push(failed_entry);
+        }
+
+        // Runner-2 completes a re-run of the same run_id (100) successfully
+        let rerun_entry = types::JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(60),
+            completed_at: now,
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/999".to_string()),
+            error_message: None,
+            steps: vec![],
+            latest_attempt: None,
+            job_number: 0,
+        };
+
+        // Record on runner-2 — should annotate runner-1's entry
+        manager.record_job_history("r2", rerun_entry).await;
+
+        // Check runner-1's entry got annotated
+        let hist = manager.job_history.read().await;
+        let r1_entries = hist.get("r1").unwrap();
+        assert_eq!(r1_entries.len(), 1);
+        let la = r1_entries[0].latest_attempt.as_ref().unwrap();
+        assert!(la.succeeded);
+        assert_eq!(la.runner_name, "runner-2");
+
+        // Check runner-2's entry was recorded
+        let r2_entries = hist.get("r2").unwrap();
+        assert_eq!(r2_entries.len(), 1);
+        assert_eq!(r2_entries[0].job_number, 1);
+    }
+
+    #[tokio::test]
+    async fn test_backfill_job_numbers_on_load() {
+        let manager = create_test_manager();
+        let history_dir = manager.config.history_dir();
+        std::fs::create_dir_all(&history_dir).unwrap();
+
+        // Write a history file with job_number: 0 (old format)
+        let entries = vec![
+            types::JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: chrono::Utc::now(),
+                completed_at: chrono::Utc::now(),
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
+            },
+            types::JobHistoryEntry {
+                job_name: "test".to_string(),
+                started_at: chrono::Utc::now(),
+                completed_at: chrono::Utc::now(),
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+                latest_attempt: None,
+                job_number: 0,
+            },
+        ];
+        history::save(&history_dir, "backfill-runner", &entries).unwrap();
+
+        // Create the runner so load_from_disk finds it
+        let runners_path = manager.config.runners_json_path();
+        if let Some(parent) = runners_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let persisted = serde_json::json!([{
+            "id": "backfill-runner",
+            "name": "test-runner",
+            "repo_owner": "o",
+            "repo_name": "r",
+            "labels": [],
+            "mode": "app",
+            "work_dir": "/tmp/backfill",
+            "was_running": false
+        }]);
+        std::fs::write(&runners_path, persisted.to_string()).unwrap();
+
+        manager.load_from_disk().await.unwrap();
+
+        // Verify backfill happened
+        let hist = manager.job_history.read().await;
+        let entries = hist.get("backfill-runner").unwrap();
+        assert_eq!(entries[0].job_number, 1);
+        assert_eq!(entries[1].job_number, 2);
+
+        // Verify it was persisted to disk
+        let on_disk = history::load_all(&history_dir).unwrap();
+        let disk_entries = on_disk.get("backfill-runner").unwrap();
+        assert_eq!(disk_entries[0].job_number, 1);
+        assert_eq!(disk_entries[1].job_number, 2);
     }
 }

@@ -316,9 +316,11 @@ impl DaemonClient {
         Ok(())
     }
 
-    pub async fn shutdown(&self) -> Result<()> {
-        self.request("POST", "/daemon/shutdown", None).await?;
-        Ok(())
+    /// Returns the number of active runners being stopped during shutdown.
+    pub async fn shutdown(&self) -> Result<usize> {
+        let body = self.request("POST", "/daemon/shutdown", None).await?;
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+        Ok(json["active_runners"].as_u64().unwrap_or(0) as usize)
     }
 
     pub async fn auth_status(&self) -> Result<AuthStatus> {
