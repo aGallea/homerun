@@ -303,7 +303,6 @@ export function RunnerDetail() {
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [stepsHeight, setStepsHeight] = useState(300);
   const [stepsCollapsed, setStepsCollapsed] = useState(false);
-  const [_historyHeight, setHistoryHeight] = useState(200);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1309,9 +1308,6 @@ export function RunnerDetail() {
                   );
                 })}
               </div>
-            )}
-            {!historyCollapsed && (
-              <ResizeHandle onMouseDown={makeResizeHandler(setHistoryHeight, 150, 800)} />
             )}
           </div>
         )}
