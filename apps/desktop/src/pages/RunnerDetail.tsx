@@ -303,7 +303,7 @@ export function RunnerDetail() {
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [stepsHeight, setStepsHeight] = useState(300);
   const [stepsCollapsed, setStepsCollapsed] = useState(false);
-  const [historyHeight, setHistoryHeight] = useState(200);
+  const [_historyHeight, setHistoryHeight] = useState(200);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -824,9 +824,9 @@ export function RunnerDetail() {
               display: "flex",
               flexDirection: "column",
               position: "relative",
-              height: historyCollapsed ? "auto" : historyHeight,
+              minHeight: historyCollapsed ? undefined : 150,
               maxHeight: historyCollapsed ? undefined : "calc(100vh - 300px)",
-              flex: "none",
+              flex: historyCollapsed ? "none" : "1 1 auto",
             }}
           >
             <div
