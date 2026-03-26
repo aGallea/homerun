@@ -2558,15 +2558,72 @@ mod tests {
             .unwrap();
 
         assert_eq!(runner.config.name, "my-runner");
-        // "macOS" is in the default list so should not be duplicated
-        let count = runner
-            .config
-            .labels
-            .iter()
-            .filter(|l| l.as_str() == "macOS")
-            .count();
-        assert_eq!(count, 1, "macOS label should not be duplicated");
+        // User-provided labels are used as-is, no defaults merged
+        assert_eq!(runner.config.labels.len(), 2);
         assert!(runner.config.labels.contains(&"gpu".to_string()));
+        assert!(runner.config.labels.contains(&"macOS".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_empty_labels_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                Some(vec![]),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Empty labels should fall back to platform defaults
+        assert!(runner.config.labels.contains(&"self-hosted".to_string()));
+        assert!(runner.config.labels.contains(&"macOS".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_none_labels_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create("owner/repo", None, None, None, None)
+            .await
+            .unwrap();
+
+        // None labels should fall back to platform defaults
+        assert!(runner.config.labels.contains(&"self-hosted".to_string()));
+        assert!(runner.config.labels.contains(&"macOS".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_runner_with_single_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.ensure_dirs().unwrap();
+        let manager = RunnerManager::new(config);
+
+        let runner = manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                Some(vec!["self-hosted".to_string()]),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Only the user-provided label, no defaults added
+        assert_eq!(runner.config.labels, vec!["self-hosted".to_string()]);
     }
 
     #[tokio::test]

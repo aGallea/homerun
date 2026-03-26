@@ -120,4 +120,29 @@ mod tests {
             assert_eq!(response.status(), StatusCode::ACCEPTED);
         }
     }
+
+    #[tokio::test]
+    async fn test_shutdown_returns_active_runners_count() {
+        if crate::launchd::is_daemon_installed() {
+            return; // Skip — shutdown blocked by launchd
+        }
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/daemon/shutdown")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // No runners in test state, so active_runners should be 0
+        assert_eq!(json["active_runners"], 0);
+    }
 }
