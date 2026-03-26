@@ -950,28 +950,6 @@ export function RunnerDetail() {
                             flexShrink: 0,
                           }}
                         />
-                        {entry.latest_attempt && (
-                          <span
-                            style={{
-                              fontSize: 9,
-                              fontWeight: 600,
-                              padding: "1px 5px",
-                              borderRadius: 3,
-                              background: entry.latest_attempt.succeeded
-                                ? "rgba(34, 197, 94, 0.15)"
-                                : "rgba(239, 68, 68, 0.15)",
-                              color: entry.latest_attempt.succeeded
-                                ? "var(--accent-green)"
-                                : "var(--accent-red)",
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                            title={`Re-run attempt ${entry.latest_attempt.attempt} on ${entry.latest_attempt.runner_name}: ${entry.latest_attempt.succeeded ? "succeeded" : "failed"}`}
-                          >
-                            Re-run: {entry.latest_attempt.succeeded ? "\u2713" : "\u2717"}{" "}
-                            {entry.latest_attempt.runner_name}
-                          </span>
-                        )}
                         {hasSteps && (
                           <span
                             style={{
@@ -985,6 +963,29 @@ export function RunnerDetail() {
                           </span>
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
+                          {entry.latest_attempt && (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: 10,
+                                fontWeight: 600,
+                                padding: "1px 6px",
+                                borderRadius: 3,
+                                marginBottom: 2,
+                                background: entry.latest_attempt.succeeded
+                                  ? "rgba(34, 197, 94, 0.15)"
+                                  : "rgba(239, 68, 68, 0.15)",
+                                color: entry.latest_attempt.succeeded
+                                  ? "var(--accent-green)"
+                                  : "var(--accent-red)",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={`Re-run on ${entry.latest_attempt.runner_name}: ${entry.latest_attempt.succeeded ? "succeeded" : "failed"}`}
+                            >
+                              Re-run: {entry.latest_attempt.succeeded ? "\u2713" : "\u2717"}{" "}
+                              {entry.latest_attempt.runner_name}
+                            </span>
+                          )}
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span
                               style={{
