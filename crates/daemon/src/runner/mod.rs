@@ -850,6 +850,7 @@ impl RunnerManager {
                                             error_message: error_message.clone(),
                                             steps,
                                             latest_attempt: None,
+                                            job_number: 0,
                                         };
 
                                         r.last_completed_job = Some(types::CompletedJob {
@@ -1586,6 +1587,7 @@ impl RunnerManager {
                                         error_message: error_message.clone(),
                                         steps: steps_data,
                                         latest_attempt: None,
+                                        job_number: 0,
                                     };
 
                                     r.last_completed_job = Some(types::CompletedJob {
@@ -2769,6 +2771,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             }],
         );
         let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
@@ -2915,6 +2918,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             }],
         );
         // Runners map — both runners share group-a
@@ -2995,6 +2999,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             }],
         );
         // sibling runner-1 history: 500s
@@ -3011,6 +3016,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             }],
         );
         let mut runners = HashMap::new();
@@ -3125,6 +3131,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             }],
         );
         let mut runners = HashMap::new();

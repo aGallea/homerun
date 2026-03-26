@@ -60,6 +60,7 @@ export interface JobHistoryEntry {
   error_message?: string | null;
   steps: StepInfo[];
   latest_attempt?: RunAttempt | null;
+  job_number: number;
 }
 
 export interface RunnerInfo {

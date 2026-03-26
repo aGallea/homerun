@@ -949,6 +949,20 @@ export function RunnerDetail() {
                             flexShrink: 0,
                           }}
                         />
+                        {entry.job_number > 0 && (
+                          <span
+                            className="font-mono"
+                            style={{
+                              fontSize: 10,
+                              color: "var(--text-secondary)",
+                              opacity: 0.5,
+                              flexShrink: 0,
+                              minWidth: 20,
+                            }}
+                          >
+                            #{entry.job_number}
+                          </span>
+                        )}
                         {hasSteps && (
                           <span
                             style={{

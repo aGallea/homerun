@@ -80,6 +80,8 @@ pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry, runner
         }) {
             let old = &entries[pos];
             let mut entry = entry;
+            // Keep the original job_number on re-run replacement
+            entry.job_number = old.job_number;
             // Preserve the previous attempt's info so the UI can show re-run context
             entry.latest_attempt = Some(crate::runner::types::RunAttempt {
                 attempt: 0,
@@ -93,6 +95,10 @@ pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry, runner
         }
     }
 
+    // Assign next job_number (max existing + 1, or 1 if empty)
+    let next_number = entries.iter().map(|e| e.job_number).max().unwrap_or(0) + 1;
+    let mut entry = entry;
+    entry.job_number = next_number;
     entries.push(entry);
     if entries.len() > MAX_HISTORY_PER_RUNNER {
         entries.remove(0);
@@ -142,6 +148,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         }
     }
 
@@ -243,6 +250,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         }];
         assert_eq!(median_duration_secs(&entries, "build"), None);
     }
@@ -261,6 +269,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         }];
         assert_eq!(median_duration_secs(&entries, "build"), Some(300));
     }
@@ -279,6 +288,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         };
         let entries = vec![make(100), make(200), make(300)];
         assert_eq!(median_duration_secs(&entries, "test"), Some(200));
@@ -298,6 +308,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         };
         let entries = vec![make(100), make(200), make(300), make(400)];
         // median of [100, 200, 300, 400] = (200 + 300) / 2 = 250
@@ -318,6 +329,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         };
         let entries = vec![make("build", 100), make("test", 500), make("build", 300)];
         assert_eq!(median_duration_secs(&entries, "build"), Some(200));
@@ -339,6 +351,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             },
             JobHistoryEntry {
                 job_name: "build".to_string(),
@@ -351,6 +364,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             },
             JobHistoryEntry {
                 job_name: "build".to_string(),
@@ -363,6 +377,7 @@ mod tests {
                 error_message: None,
                 steps: vec![],
                 latest_attempt: None,
+                job_number: 0,
             },
         ];
         assert_eq!(median_duration_secs(&entries, "build"), Some(200));
@@ -399,6 +414,7 @@ mod tests {
                 },
             ],
             latest_attempt: None,
+            job_number: 0,
         };
 
         save(&history_dir, "runner-steps", std::slice::from_ref(&entry)).unwrap();
@@ -457,6 +473,7 @@ mod tests {
             error_message: Some("Process completed with exit code 1.".to_string()),
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         }];
 
         // Re-run: same run_id (100), same job_name, different job_id (999)
@@ -471,6 +488,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         };
 
         append(&mut entries, rerun_entry, "test-runner");
@@ -503,6 +521,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         }];
 
         // Different run_id (999), same job_name
@@ -517,6 +536,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         };
 
         append(&mut entries, new_entry, "test-runner");
@@ -541,6 +561,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         }];
 
         // Same run_id (100), different job_name
@@ -555,6 +576,7 @@ mod tests {
             error_message: None,
             steps: vec![],
             latest_attempt: None,
+            job_number: 0,
         };
 
         append(&mut entries, new_entry, "test-runner");
@@ -597,6 +619,7 @@ mod tests {
                 completed_at: now,
                 run_url: Some("https://github.com/o/r/actions/runs/100/job/500".to_string()),
             }),
+            job_number: 0,
         };
 
         let json = serde_json::to_string(&entry).unwrap();

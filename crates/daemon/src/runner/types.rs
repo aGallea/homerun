@@ -36,6 +36,9 @@ pub struct JobHistoryEntry {
     pub steps: Vec<StepInfo>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub latest_attempt: Option<RunAttempt>,
+    /// Stable sequential number assigned when the job is recorded. Survives deletions.
+    #[serde(default)]
+    pub job_number: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
