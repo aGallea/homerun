@@ -402,6 +402,17 @@ export function RunnerDetail() {
           </Link>
           <span className="breadcrumb-sep">›</span>
           <span className="breadcrumb-current">{config.name}</span>
+          <span
+            title={config.id}
+            style={{
+              fontSize: 11,
+              color: "var(--text-secondary)",
+              marginLeft: 8,
+              opacity: 0.7,
+            }}
+          >
+            ID: {config.id.slice(0, 8)}
+          </span>
         </div>
         <div className="flex items-center gap-16">
           <StatusPill state={state} currentJob={current_job} />
