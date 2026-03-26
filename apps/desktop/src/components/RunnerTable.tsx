@@ -285,11 +285,8 @@ function LastJobSummary({ runner }: { runner: RunnerInfo }) {
   const icon = job.succeeded ? "\u2713" : "\u2717";
   const iconColor = job.succeeded ? "var(--accent-green)" : "var(--accent-red)";
 
-  const branchDisplay = job.branch
-    ? job.branch.length > 20
-      ? job.branch.slice(0, 20) + "\u2026"
-      : job.branch
-    : null;
+  const nameDisplay =
+    job.job_name.length > 20 ? job.job_name.slice(0, 20) + "\u2026" : job.job_name;
 
   return (
     <div
@@ -302,13 +299,10 @@ function LastJobSummary({ runner }: { runner: RunnerInfo }) {
         whiteSpace: "nowrap",
         overflow: "hidden",
       }}
-      title={`Last job: ${job.job_name}${job.branch ? ` (${job.branch})` : ""} — ${job.succeeded ? "succeeded" : "failed"} in ${formatDuration(job.duration_secs)}`}
+      title={`Last job: ${job.job_name} — ${job.succeeded ? "succeeded" : "failed"} in ${formatDuration(job.duration_secs)}`}
     >
       <span style={{ color: iconColor, fontWeight: 700, flexShrink: 0 }}>{icon}</span>
-      {branchDisplay && (
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{branchDisplay}</span>
-      )}
-      {job.pr_number != null && <span style={{ flexShrink: 0 }}>#{job.pr_number}</span>}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{nameDisplay}</span>
       <span style={{ flexShrink: 0, opacity: 0.5 }}>&middot;</span>
       <span style={{ flexShrink: 0 }}>{formatDuration(job.duration_secs)}</span>
     </div>
