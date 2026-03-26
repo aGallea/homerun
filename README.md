@@ -72,16 +72,31 @@ The `.dmg` bundles the `homerund` daemon inside the app. Releases are automated 
 
 > _Coming soon — see [#18](https://github.com/aGallea/homerun/issues/18)._
 
+### Build from Source
+
+```sh
+git clone https://github.com/aGallea/homerun.git
+cd homerun
+
+# Build the daemon and TUI
+cargo build --release -p homerund -p homerun
+
+# Binaries are in target/release/
+ls target/release/homerund target/release/homerun
+```
+
+To build the desktop app as well, see [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev setup.
+
 ### Run
 
 ```sh
-# Start the daemon
+# Start the daemon (must be running before using the TUI or desktop app)
 homerund
 
-# Launch the TUI
+# Launch the interactive TUI
 homerun
 
-# Or use CLI mode
+# Or use CLI mode (plain text output, no interactive UI — useful for scripts)
 homerun --no-tui list
 ```
 
@@ -91,30 +106,28 @@ homerun --no-tui list
 
 ## CLI Usage
 
+The `--no-tui` flag disables the interactive terminal UI and prints plain text output instead. This is useful for scripting, automation, and quick status checks.
+
 ```sh
-# List all runners
+# List all runners with status, mode, and CPU usage
 homerun --no-tui list
 
-# Add 4 runners for a repo
-homerun --no-tui add my-runner --count 4 --labels ci,e2e --mode service
-
-# Check status
+# Show overall status (daemon, auth, runner counts, system metrics)
 homerun --no-tui status
 
-# Remove a runner
-homerun --no-tui remove my-runner-2
-
-# Scan workspace for repos using self-hosted runners
+# Scan a local workspace for repos using self-hosted runners
 homerun --no-tui scan ~/workspace
 
-# Scan GitHub repos remotely
+# Scan your GitHub repos remotely (requires authentication)
 homerun --no-tui scan --remote
 
-# Login via GitHub Device Flow (no PAT needed)
-homerun --no-tui login
+# Combine local and remote scanning
+homerun --no-tui scan ~/workspace --remote
 
-# Or login with a Personal Access Token
-homerun --no-tui login --token <PAT>
+# Manage the daemon
+homerun --no-tui daemon start
+homerun --no-tui daemon stop
+homerun --no-tui daemon restart
 ```
 
 ## Tech Stack
