@@ -125,6 +125,7 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         }
     }
 
@@ -221,6 +222,7 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         }];
         assert_eq!(median_duration_secs(&entries, "build"), None);
     }
@@ -238,6 +240,7 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         }];
         assert_eq!(median_duration_secs(&entries, "build"), Some(300));
     }
@@ -255,6 +258,7 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         };
         let entries = vec![make(100), make(200), make(300)];
         assert_eq!(median_duration_secs(&entries, "test"), Some(200));
@@ -273,6 +277,7 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         };
         let entries = vec![make(100), make(200), make(300), make(400)];
         // median of [100, 200, 300, 400] = (200 + 300) / 2 = 250
@@ -292,6 +297,7 @@ mod tests {
             run_url: None,
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         };
         let entries = vec![make("build", 100), make("test", 500), make("build", 300)];
         assert_eq!(median_duration_secs(&entries, "build"), Some(200));
@@ -312,6 +318,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             },
             JobHistoryEntry {
                 job_name: "build".to_string(),
@@ -323,6 +330,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             },
             JobHistoryEntry {
                 job_name: "build".to_string(),
@@ -334,6 +342,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             },
         ];
         assert_eq!(median_duration_secs(&entries, "build"), Some(200));
@@ -369,6 +378,7 @@ mod tests {
                     completed_at: None,
                 },
             ],
+            latest_attempt: None,
         };
 
         save(&history_dir, "runner-steps", std::slice::from_ref(&entry)).unwrap();
@@ -426,6 +436,7 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
             error_message: Some("Process completed with exit code 1.".to_string()),
             steps: vec![],
+            latest_attempt: None,
         }];
 
         // Re-run: same run_id (100), same job_name, different job_id (999)
@@ -439,6 +450,7 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/999".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         };
 
         append(&mut entries, rerun_entry);
@@ -466,6 +478,7 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         }];
 
         // Different run_id (999), same job_name
@@ -479,6 +492,7 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/999/job/888".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         };
 
         append(&mut entries, new_entry);
@@ -502,6 +516,7 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/200".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         }];
 
         // Same run_id (100), different job_name
@@ -515,6 +530,7 @@ mod tests {
             run_url: Some("https://github.com/owner/repo/actions/runs/100/job/300".to_string()),
             error_message: None,
             steps: vec![],
+            latest_attempt: None,
         };
 
         append(&mut entries, new_entry);

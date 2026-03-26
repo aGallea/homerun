@@ -34,6 +34,8 @@ pub struct JobHistoryEntry {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub error_message: Option<String>,
     pub steps: Vec<StepInfo>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub latest_attempt: Option<RunAttempt>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,21 @@ pub struct CompletedJob {
     pub run_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub latest_attempt: Option<RunAttempt>,
+}
+
+/// One attempt of a workflow run. Building block for re-run tracking.
+/// Phase A: stored as `Option<RunAttempt>` on history entries.
+/// Phase B (#92): will expand to `Vec<RunAttempt>` for full timeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunAttempt {
+    pub attempt: u32,
+    pub succeeded: bool,
+    pub runner_name: String,
+    pub completed_at: chrono::DateTime<chrono::Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

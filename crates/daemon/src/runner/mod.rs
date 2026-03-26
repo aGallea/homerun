@@ -413,6 +413,7 @@ impl RunnerManager {
                                 pr_number: last.pr_number,
                                 run_url: last.run_url.clone(),
                                 error_message: None,
+                                latest_attempt: None,
                             });
                         }
                     }
@@ -750,6 +751,7 @@ impl RunnerManager {
                                             }),
                                             error_message: error_message.clone(),
                                             steps,
+                                            latest_attempt: None,
                                         };
 
                                         r.last_completed_job = Some(types::CompletedJob {
@@ -761,6 +763,7 @@ impl RunnerManager {
                                             pr_number: entry.pr_number,
                                             run_url: entry.run_url.clone(),
                                             error_message: error_message.clone(),
+                                            latest_attempt: None,
                                         });
 
                                         if succeeded {
@@ -1484,6 +1487,7 @@ impl RunnerManager {
                                         }),
                                         error_message: error_message.clone(),
                                         steps: steps_data,
+                                        latest_attempt: None,
                                     };
 
                                     r.last_completed_job = Some(types::CompletedJob {
@@ -1495,6 +1499,7 @@ impl RunnerManager {
                                         pr_number: entry.pr_number,
                                         run_url: entry.run_url.clone(),
                                         error_message: error_message.clone(),
+                                        latest_attempt: None,
                                     });
 
                                     if succeeded {
@@ -2597,6 +2602,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             }],
         );
         let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
@@ -2742,6 +2748,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             }],
         );
         // Runners map — both runners share group-a
@@ -2821,6 +2828,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             }],
         );
         // sibling runner-1 history: 500s
@@ -2836,6 +2844,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             }],
         );
         let mut runners = HashMap::new();
@@ -2949,6 +2958,7 @@ mod tests {
                 run_url: None,
                 error_message: None,
                 steps: vec![],
+                latest_attempt: None,
             }],
         );
         let mut runners = HashMap::new();
