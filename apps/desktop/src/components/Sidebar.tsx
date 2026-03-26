@@ -91,11 +91,9 @@ export function Sidebar({ collapsed, runners }: { collapsed: boolean; runners: R
           src="/icon.png"
           alt="HomeRun"
           style={{
-            width: 48,
-            height: 48,
-            borderRadius: 12,
-            transform: "scale(1.35)",
-            transformOrigin: "center",
+            width: 64,
+            height: 64,
+            borderRadius: 16,
           }}
         />
         {!collapsed && <span className="sidebar-title">HomeRun</span>}
