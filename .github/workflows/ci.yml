@@ -33,7 +33,7 @@ jobs:
         run: cd apps/desktop && npm ci
 
       - name: Run pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+        run: python3 -m pre_commit run --all-files --show-diff-on-failure
         env:
           SKIP: cargo-test,cargo-clippy
 
