@@ -215,6 +215,23 @@ impl RunnerManager {
         });
     }
 
+    /// Spawn a background task that periodically checks recent failed job history entries
+    /// for re-runs by polling the GitHub API and annotating history with `RunAttempt` data.
+    pub fn start_rerun_poller(&self) {
+        let _runners = self.runners.clone();
+        let _auth_token = self.auth_token.clone();
+        let _job_history = self.job_history.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                // Phase A stub: re-run detection will be implemented in #92.
+                // The poller infrastructure is wired up here so server.rs can call it
+                // and future phases can fill in the logic without changing call sites.
+            }
+        });
+    }
+
     async fn next_runner_number(&self, repo_name: &str) -> u32 {
         // Find existing numbers for this repo to pick the next available one
         let runners = self.runners.read().await;

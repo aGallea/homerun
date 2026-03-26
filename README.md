@@ -48,6 +48,8 @@ Runners are native child processes of the daemon — not Docker containers. Each
 
 For the full architecture deep-dive (runner lifecycle, state machine, process management, auth flow), see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+New to self-hosted runners? See [How Self-Hosted Runners Work](docs/SELF_HOSTED_RUNNERS.md) for a primer on runner communication, permissions, security considerations, and what HomeRun automates.
+
 ## Quick Start
 
 ### Install (DMG)

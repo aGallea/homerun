@@ -60,6 +60,11 @@ fn extract_run_id(run_url: &str) -> Option<u64> {
     parts.get(runs_idx + 1)?.parse().ok()
 }
 
+/// Public version of run-ID extraction for use by the re-run poller.
+pub fn extract_run_id_from_url(run_url: &str) -> Option<u64> {
+    extract_run_id(run_url)
+}
+
 /// Append a history entry, keeping the list capped at MAX_HISTORY_PER_RUNNER.
 ///
 /// When a workflow run is re-run, the new attempt shares the same `run_id` but
