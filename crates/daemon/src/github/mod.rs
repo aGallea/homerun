@@ -350,6 +350,84 @@ impl GitHubClient {
         Ok(())
     }
 
+    /// Check the latest attempt of a workflow run for a matching job.
+    ///
+    /// Used by the re-run poller to detect when a previously-failed run has been
+    /// re-run and the outcome changed.  Returns the job's current conclusion and
+    /// timestamps if found.
+    pub async fn get_latest_job_for_run(
+        &self,
+        owner: &str,
+        repo: &str,
+        run_id: u64,
+        runner_name: &str,
+        job_name: &str,
+    ) -> Result<Option<types::LatestJobStatus>> {
+        #[derive(Deserialize)]
+        struct RunJob {
+            id: u64,
+            name: String,
+            runner_name: Option<String>,
+            status: String,
+            conclusion: Option<String>,
+            started_at: Option<String>,
+            completed_at: Option<String>,
+            #[serde(default)]
+            run_attempt: Option<u32>,
+        }
+
+        #[derive(Deserialize)]
+        struct JobsResponse {
+            jobs: Vec<RunJob>,
+        }
+
+        let jobs_route = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/jobs");
+        let jobs: JobsResponse = match self.octocrab.get(&jobs_route, None::<&()>).await {
+            Ok(j) => j,
+            Err(_) => return Ok(None),
+        };
+
+        // Match by runner_name first, then fall back to job name
+        let matched = jobs.jobs.iter().find(|j| {
+            if let Some(rn) = j.runner_name.as_deref() {
+                rn == runner_name
+            } else {
+                j.name == job_name
+            }
+        });
+
+        let Some(job) = matched else {
+            return Ok(None);
+        };
+
+        // Only return if the job is completed
+        if job.status != "completed" {
+            return Ok(None);
+        }
+
+        let succeeded = job.conclusion.as_deref() == Some("success");
+
+        let started_at = job
+            .started_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+        let completed_at = job
+            .completed_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        Ok(Some(types::LatestJobStatus {
+            job_id: job.id,
+            succeeded,
+            started_at,
+            completed_at,
+            run_attempt: job.run_attempt.unwrap_or(1),
+            runner_name: job.runner_name.clone(),
+        }))
+    }
+
     /// Fetch the raw log content for a specific job from GitHub Actions.
     ///
     /// The GitHub API endpoint returns a 302 redirect to blob storage serving
