@@ -1020,16 +1020,13 @@ export function RunnerDetail() {
                             <span>{new Date(entry.completed_at).toLocaleTimeString()}</span>
                             {!entry.succeeded && entry.error_message && (
                               <span
-                                style={{
-                                  color: "var(--accent-red)",
-                                  opacity: 0.8,
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
+                                style={{ color: "var(--accent-red)", opacity: 0.8 }}
                                 title={entry.error_message}
                               >
-                                · {entry.error_message}
+                                ·{" "}
+                                {entry.error_message.length > 80
+                                  ? entry.error_message.slice(0, 80) + "\u2026"
+                                  : entry.error_message}
                               </span>
                             )}
                           </div>
