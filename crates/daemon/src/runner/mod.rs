@@ -494,7 +494,24 @@ impl RunnerManager {
 
         // Load job history from disk
         match history::load_all(&self.config.history_dir()) {
-            Ok(hist) => {
+            Ok(mut hist) => {
+                // Backfill job_number for entries created before the field existed
+                for (runner_id, entries) in hist.iter_mut() {
+                    let needs_backfill = entries.iter().any(|e| e.job_number == 0);
+                    if needs_backfill {
+                        for (idx, entry) in entries.iter_mut().enumerate() {
+                            if entry.job_number == 0 {
+                                entry.job_number = (idx + 1) as u32;
+                            }
+                        }
+                        if let Err(e) =
+                            history::save(&self.config.history_dir(), runner_id, entries)
+                        {
+                            tracing::warn!("Failed to backfill job_number for {runner_id}: {e}");
+                        }
+                    }
+                }
+
                 // Populate last_completed_job for each runner from most recent history entry
                 let mut runners = self.runners.write().await;
                 for (runner_id, entries) in &hist {
