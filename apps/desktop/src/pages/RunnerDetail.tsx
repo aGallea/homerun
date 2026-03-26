@@ -971,7 +971,7 @@ export function RunnerDetail() {
                                 fontWeight: 600,
                                 padding: "1px 6px",
                                 borderRadius: 3,
-                                marginBottom: 2,
+                                lineHeight: "16px",
                                 background: entry.latest_attempt.succeeded
                                   ? "rgba(34, 197, 94, 0.15)"
                                   : "rgba(239, 68, 68, 0.15)",
@@ -1007,7 +1007,7 @@ export function RunnerDetail() {
                               gap: 6,
                               fontSize: 11,
                               color: "var(--text-secondary)",
-                              marginTop: 2,
+                              marginTop: entry.latest_attempt ? 0 : 2,
                             }}
                           >
                             {entry.branch && <span>{entry.branch}</span>}
