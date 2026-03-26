@@ -14,8 +14,26 @@ fn home_dir_str() -> Result<String> {
     Ok(home.display().to_string())
 }
 
+fn resolve_shell_path() -> String {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    if let Ok(output) = std::process::Command::new(&shell)
+        .args(["-l", "-c", "echo $PATH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return path;
+        }
+    }
+    // Fallback to a sensible default
+    "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_string()
+}
+
 fn build_plist(daemon_path: &Path) -> Result<String> {
     let home = home_dir_str()?;
+    let path = resolve_shell_path();
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,7 +48,7 @@ fn build_plist(daemon_path: &Path) -> Result<String> {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>{path}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -266,7 +284,7 @@ mod tests {
         let plist = build_plist(&daemon_path).unwrap();
         assert!(plist.contains("<key>EnvironmentVariables</key>"));
         assert!(plist.contains("<key>PATH</key>"));
-        assert!(plist.contains("/usr/local/bin"));
-        assert!(plist.contains("/opt/homebrew/bin"));
+        // Should contain at least the basic system paths
+        assert!(plist.contains("/usr/bin"));
     }
 }
