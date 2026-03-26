@@ -1019,7 +1019,16 @@ export function RunnerDetail() {
                             {(entry.branch || entry.pr_number != null) && <span>·</span>}
                             <span>{new Date(entry.completed_at).toLocaleTimeString()}</span>
                             {!entry.succeeded && entry.error_message && (
-                              <span style={{ color: "var(--accent-red)", opacity: 0.8 }}>
+                              <span
+                                style={{
+                                  color: "var(--accent-red)",
+                                  opacity: 0.8,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                                title={entry.error_message}
+                              >
                                 · {entry.error_message}
                               </span>
                             )}
