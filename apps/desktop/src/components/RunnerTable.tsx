@@ -268,6 +268,53 @@ function MiniProgressBar({
   );
 }
 
+function formatDuration(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  if (m < 60) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+}
+
+function LastJobSummary({ runner }: { runner: RunnerInfo }) {
+  const job = runner.last_completed_job;
+  if (!job) return null;
+
+  const icon = job.succeeded ? "\u2713" : "\u2717";
+  const iconColor = job.succeeded ? "var(--accent-green)" : "var(--accent-red)";
+
+  const branchDisplay = job.branch
+    ? job.branch.length > 20
+      ? job.branch.slice(0, 20) + "\u2026"
+      : job.branch
+    : null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: 11,
+        color: "var(--text-secondary)",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
+      title={`Last job: ${job.job_name}${job.branch ? ` (${job.branch})` : ""} — ${job.succeeded ? "succeeded" : "failed"} in ${formatDuration(job.duration_secs)}`}
+    >
+      <span style={{ color: iconColor, fontWeight: 700, flexShrink: 0 }}>{icon}</span>
+      {branchDisplay && (
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{branchDisplay}</span>
+      )}
+      {job.pr_number != null && <span style={{ flexShrink: 0 }}>#{job.pr_number}</span>}
+      <span style={{ flexShrink: 0, opacity: 0.5 }}>&middot;</span>
+      <span style={{ flexShrink: 0 }}>{formatDuration(job.duration_secs)}</span>
+    </div>
+  );
+}
+
 function RunnerRow({
   runner,
   cpuValue,
@@ -347,13 +394,15 @@ function RunnerRow({
         </div>
         <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
           {runner.state === "busy" &&
-            runner.estimated_job_duration_secs != null &&
-            runner.job_started_at && (
-              <MiniProgressBar
-                estimatedDurationSecs={runner.estimated_job_duration_secs}
-                jobStartedAt={runner.job_started_at}
-              />
-            )}
+          runner.estimated_job_duration_secs != null &&
+          runner.job_started_at ? (
+            <MiniProgressBar
+              estimatedDurationSecs={runner.estimated_job_duration_secs}
+              jobStartedAt={runner.job_started_at}
+            />
+          ) : (
+            runner.state !== "busy" && <LastJobSummary runner={runner} />
+          )}
           <CpuValue value={cpuValue} />
           <RunnerActions
             runner={runner}
