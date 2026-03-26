@@ -9,6 +9,17 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.5.2](https://github.com/aGallea/homerun/compare/v0.5.1...v0.5.2) (2026-03-26)
+
+
+### Bug Fixes
+
+* auto-uninstall launchd service when stopping daemon from app ([91d7cba](https://github.com/aGallea/homerun/commit/91d7cba467bd7a8d1b49b6df982055de107e92a0))
+* **ci:** use python3 -m pre_commit to avoid PATH issues ([e1f7ca5](https://github.com/aGallea/homerun/commit/e1f7ca55078f13ab0c510de7806916f882bfe05e))
+* improve desktop app UX and daemon reliability ([8338601](https://github.com/aGallea/homerun/commit/8338601e2ab3a12d345c32ccd8df7599c6ed8bb5))
+* resolve user's shell PATH for runner processes ([b5a7e44](https://github.com/aGallea/homerun/commit/b5a7e440558cb5c5d2dabbba69e119c8caf198e8))
+* resolve user's shell PATH in launchd plist ([1764c31](https://github.com/aGallea/homerun/commit/1764c313b1d8b52f77bb9e1b0bce5a6c2b712344))
+
 ## [0.5.1](https://github.com/aGallea/homerun/compare/v0.5.0...v0.5.1) (2026-03-25)
 
 
