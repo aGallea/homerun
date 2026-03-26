@@ -29,6 +29,14 @@ export interface StepInfo {
   completed_at: string | null;
 }
 
+export interface RunAttempt {
+  attempt: number;
+  succeeded: boolean;
+  runner_name: string;
+  completed_at: string;
+  run_url?: string | null;
+}
+
 export interface CompletedJob {
   job_name: string;
   succeeded: boolean;
@@ -38,6 +46,7 @@ export interface CompletedJob {
   pr_number?: number | null;
   run_url?: string | null;
   error_message?: string | null;
+  latest_attempt?: RunAttempt | null;
 }
 
 export interface JobHistoryEntry {
@@ -50,6 +59,7 @@ export interface JobHistoryEntry {
   run_url?: string | null;
   error_message?: string | null;
   steps: StepInfo[];
+  latest_attempt?: RunAttempt | null;
 }
 
 export interface RunnerInfo {

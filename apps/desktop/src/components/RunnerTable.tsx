@@ -299,12 +299,36 @@ function LastJobSummary({ runner }: { runner: RunnerInfo }) {
         whiteSpace: "nowrap",
         overflow: "hidden",
       }}
-      title={`Last job: ${job.job_name} — ${job.succeeded ? "succeeded" : "failed"} in ${formatDuration(job.duration_secs)}`}
+      title={`Last job: ${job.job_name} — ${job.succeeded ? "succeeded" : "failed"} in ${formatDuration(job.duration_secs)}${job.latest_attempt ? ` (re-run ${job.latest_attempt.succeeded ? "succeeded" : "failed"} on ${job.latest_attempt.runner_name})` : ""}`}
     >
       <span style={{ color: iconColor, fontWeight: 700, flexShrink: 0 }}>{icon}</span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{nameDisplay}</span>
-      <span style={{ flexShrink: 0, opacity: 0.5 }}>&middot;</span>
-      <span style={{ flexShrink: 0 }}>{formatDuration(job.duration_secs)}</span>
+      {job.latest_attempt && (
+        <>
+          <span style={{ flexShrink: 0, opacity: 0.5 }}>&middot;</span>
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              padding: "0px 4px",
+              borderRadius: 3,
+              background: job.latest_attempt.succeeded
+                ? "rgba(34, 197, 94, 0.15)"
+                : "rgba(239, 68, 68, 0.15)",
+              color: job.latest_attempt.succeeded ? "var(--accent-green)" : "var(--accent-red)",
+              flexShrink: 0,
+            }}
+          >
+            Re-run: {job.latest_attempt.succeeded ? "\u2713" : "\u2717"}
+          </span>
+        </>
+      )}
+      {!job.latest_attempt && (
+        <>
+          <span style={{ flexShrink: 0, opacity: 0.5 }}>&middot;</span>
+          <span style={{ flexShrink: 0 }}>{formatDuration(job.duration_secs)}</span>
+        </>
+      )}
     </div>
   );
 }

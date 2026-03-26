@@ -557,4 +557,49 @@ mod tests {
         // Without run_url we can't detect re-runs, so always append
         assert_eq!(entries.len(), 2);
     }
+
+    #[test]
+    fn test_latest_attempt_serialization_roundtrip() {
+        let now = Utc::now();
+        let entry = JobHistoryEntry {
+            job_name: "build".to_string(),
+            started_at: now - chrono::Duration::seconds(300),
+            completed_at: now,
+            succeeded: false,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: Some("https://github.com/o/r/actions/runs/100/job/200".to_string()),
+            error_message: Some("exit code 1".to_string()),
+            steps: vec![],
+            latest_attempt: Some(crate::runner::types::RunAttempt {
+                attempt: 2,
+                succeeded: true,
+                runner_name: "runner-2".to_string(),
+                completed_at: now,
+                run_url: Some("https://github.com/o/r/actions/runs/100/job/500".to_string()),
+            }),
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: JobHistoryEntry = serde_json::from_str(&json).unwrap();
+        assert!(back.latest_attempt.is_some());
+        let attempt = back.latest_attempt.unwrap();
+        assert_eq!(attempt.attempt, 2);
+        assert!(attempt.succeeded);
+        assert_eq!(attempt.runner_name, "runner-2");
+    }
+
+    #[test]
+    fn test_latest_attempt_none_by_default_in_old_json() {
+        let json = r#"{
+            "job_name": "build",
+            "started_at": "2026-03-24T10:00:00Z",
+            "completed_at": "2026-03-24T10:05:00Z",
+            "succeeded": false,
+            "run_url": "https://github.com/o/r/actions/runs/100/job/200",
+            "steps": []
+        }"#;
+        let entry: JobHistoryEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.latest_attempt.is_none());
+    }
 }
