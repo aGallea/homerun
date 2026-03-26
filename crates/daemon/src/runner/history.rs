@@ -70,13 +70,24 @@ pub fn extract_run_id_from_url(run_url: &str) -> Option<u64> {
 /// When a workflow run is re-run, the new attempt shares the same `run_id` but
 /// gets a different `job_id`. If an existing entry matches on both `run_id`
 /// (extracted from `run_url`) and `job_name`, it is replaced with the new entry
-/// so that history reflects the latest result for each run.
-pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry) {
+/// so that history reflects the latest result for each run. The replaced entry's
+/// info is preserved in `latest_attempt` so the UI can show re-run context.
+pub fn append(entries: &mut Vec<JobHistoryEntry>, entry: JobHistoryEntry, runner_name: &str) {
     if let Some(new_run_id) = entry.run_url.as_deref().and_then(extract_run_id) {
         if let Some(pos) = entries.iter().position(|e| {
             e.job_name == entry.job_name
                 && e.run_url.as_deref().and_then(extract_run_id) == Some(new_run_id)
         }) {
+            let old = &entries[pos];
+            let mut entry = entry;
+            // Preserve the previous attempt's info so the UI can show re-run context
+            entry.latest_attempt = Some(crate::runner::types::RunAttempt {
+                attempt: 0,
+                succeeded: old.succeeded,
+                runner_name: runner_name.to_string(),
+                completed_at: old.completed_at,
+                run_url: old.run_url.clone(),
+            });
             entries[pos] = entry;
             return;
         }
@@ -199,7 +210,11 @@ mod tests {
         let mut entries: Vec<JobHistoryEntry> = Vec::new();
 
         for i in 0..110 {
-            append(&mut entries, make_entry(&format!("job-{}", i)));
+            append(
+                &mut entries,
+                make_entry(&format!("job-{}", i)),
+                "test-runner",
+            );
         }
 
         assert_eq!(entries.len(), MAX_HISTORY_PER_RUNNER);
@@ -458,7 +473,7 @@ mod tests {
             latest_attempt: None,
         };
 
-        append(&mut entries, rerun_entry);
+        append(&mut entries, rerun_entry, "test-runner");
 
         // Should replace, not append
         assert_eq!(entries.len(), 1);
@@ -468,6 +483,10 @@ mod tests {
             Some("https://github.com/owner/repo/actions/runs/100/job/999")
         );
         assert!(entries[0].error_message.is_none());
+        // Should preserve the old entry's info in latest_attempt
+        let prev = entries[0].latest_attempt.as_ref().unwrap();
+        assert!(!prev.succeeded);
+        assert_eq!(prev.runner_name, "test-runner");
     }
 
     #[test]
@@ -500,7 +519,7 @@ mod tests {
             latest_attempt: None,
         };
 
-        append(&mut entries, new_entry);
+        append(&mut entries, new_entry, "test-runner");
 
         // Should append, not replace
         assert_eq!(entries.len(), 2);
@@ -538,7 +557,7 @@ mod tests {
             latest_attempt: None,
         };
 
-        append(&mut entries, new_entry);
+        append(&mut entries, new_entry, "test-runner");
 
         // Should append — different jobs from the same run are separate entries
         assert_eq!(entries.len(), 2);
@@ -552,7 +571,7 @@ mod tests {
         let mut new_entry = make_entry("build");
         new_entry.run_url = None;
 
-        append(&mut entries, new_entry);
+        append(&mut entries, new_entry, "test-runner");
 
         // Without run_url we can't detect re-runs, so always append
         assert_eq!(entries.len(), 2);

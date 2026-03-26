@@ -1618,9 +1618,15 @@ impl RunnerManager {
 
                             // Record history via cloned Arcs
                             if let Some(entry) = history_entry {
+                                let self_name = {
+                                    let map = runners.read().await;
+                                    map.get(&rid)
+                                        .map(|r| r.config.name.clone())
+                                        .unwrap_or_default()
+                                };
                                 let mut hist = job_history_arc.write().await;
                                 let entries = hist.entry(rid.clone()).or_default();
-                                history::append(entries, entry.clone());
+                                history::append(entries, entry.clone(), &self_name);
                                 if let Err(e) = history::save(&history_dir, &rid, entries) {
                                     tracing::warn!("Failed to save job history for {}: {}", rid, e);
                                 }
@@ -1904,9 +1910,15 @@ impl RunnerManager {
     /// Record a completed job in history, then annotate other runners' entries
     /// for the same workflow run with `latest_attempt`.
     pub async fn record_job_history(&self, runner_id: &str, entry: types::JobHistoryEntry) {
+        let runner_name = {
+            let map = self.runners.read().await;
+            map.get(runner_id)
+                .map(|r| r.config.name.clone())
+                .unwrap_or_default()
+        };
         let mut hist = self.job_history.write().await;
         let entries = hist.entry(runner_id.to_string()).or_default();
-        history::append(entries, entry.clone());
+        history::append(entries, entry.clone(), &runner_name);
         if let Err(e) = history::save(&self.config.history_dir(), runner_id, entries) {
             tracing::warn!("Failed to save job history for {}: {}", runner_id, e);
         }
