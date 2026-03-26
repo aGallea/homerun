@@ -283,12 +283,33 @@ impl RunnerManager {
     fn with_job_estimate(
         mut info: RunnerInfo,
         history: &HashMap<String, Vec<types::JobHistoryEntry>>,
+        runners: &HashMap<String, RunnerInfo>,
     ) -> RunnerInfo {
         if info.state == RunnerState::Busy {
             if let Some(ref job_name) = info.current_job {
+                // Try own history first
                 if let Some(entries) = history.get(&info.config.id) {
                     info.estimated_job_duration_secs =
                         history::median_duration_secs(entries, job_name);
+                }
+                // Fall back to group history if own history had no match
+                if info.estimated_job_duration_secs.is_none() {
+                    if let Some(ref group_id) = info.config.group_id {
+                        let group_entries: Vec<types::JobHistoryEntry> = runners
+                            .values()
+                            .filter(|r| {
+                                r.config.id != info.config.id
+                                    && r.config.group_id.as_ref() == Some(group_id)
+                            })
+                            .filter_map(|r| history.get(&r.config.id))
+                            .flatten()
+                            .cloned()
+                            .collect();
+                        if !group_entries.is_empty() {
+                            info.estimated_job_duration_secs =
+                                history::median_duration_secs(&group_entries, job_name);
+                        }
+                    }
                 }
             }
         }
@@ -882,19 +903,14 @@ impl RunnerManager {
     }
 
     pub async fn list_by_group(&self, group_id: &str) -> Vec<RunnerInfo> {
-        let infos: Vec<RunnerInfo> = self
-            .runners
-            .read()
-            .await
+        let runners_guard = self.runners.read().await;
+        let history = self.job_history.read().await;
+        runners_guard
             .values()
             .filter(|r| r.config.group_id.as_deref() == Some(group_id))
             .cloned()
             .map(Self::with_computed_uptime)
-            .collect();
-        let history = self.job_history.read().await;
-        infos
-            .into_iter()
-            .map(|info| Self::with_job_estimate(info, &history))
+            .map(|info| Self::with_job_estimate(info, &history, &runners_guard))
             .collect()
     }
 
@@ -1001,18 +1017,13 @@ impl RunnerManager {
     }
 
     pub async fn list(&self) -> Vec<RunnerInfo> {
-        let infos: Vec<RunnerInfo> = self
-            .runners
-            .read()
-            .await
+        let runners_guard = self.runners.read().await;
+        let history = self.job_history.read().await;
+        runners_guard
             .values()
             .cloned()
             .map(Self::with_computed_uptime)
-            .collect();
-        let history = self.job_history.read().await;
-        infos
-            .into_iter()
-            .map(|info| Self::with_job_estimate(info, &history))
+            .map(|info| Self::with_job_estimate(info, &history, &runners_guard))
             .collect()
     }
 
@@ -1025,20 +1036,13 @@ impl RunnerManager {
     }
 
     pub async fn get(&self, id: &str) -> Option<RunnerInfo> {
-        let info = self
-            .runners
-            .read()
-            .await
+        let runners_guard = self.runners.read().await;
+        let history = self.job_history.read().await;
+        runners_guard
             .get(id)
             .cloned()
-            .map(Self::with_computed_uptime);
-        match info {
-            Some(info) => {
-                let history = self.job_history.read().await;
-                Some(Self::with_job_estimate(info, &history))
-            }
-            None => None,
-        }
+            .map(Self::with_computed_uptime)
+            .map(|info| Self::with_job_estimate(info, &history, &runners_guard))
     }
 
     /// Get the current step progress for a running job on the given runner.
@@ -2595,7 +2599,7 @@ mod tests {
                 steps: vec![],
             }],
         );
-        let result = RunnerManager::with_job_estimate(info, &history);
+        let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
         assert_eq!(result.estimated_job_duration_secs, Some(200));
     }
 
@@ -2627,7 +2631,7 @@ mod tests {
             estimated_job_duration_secs: None,
         };
         let history = HashMap::new();
-        let result = RunnerManager::with_job_estimate(info, &history);
+        let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
         assert_eq!(result.estimated_job_duration_secs, None);
     }
 
@@ -2659,7 +2663,7 @@ mod tests {
             estimated_job_duration_secs: None,
         };
         let history = HashMap::new();
-        let result = RunnerManager::with_job_estimate(info, &history);
+        let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
         assert_eq!(result.estimated_job_duration_secs, None);
     }
 
@@ -2691,7 +2695,293 @@ mod tests {
             estimated_job_duration_secs: None,
         };
         let history = HashMap::new();
-        let result = RunnerManager::with_job_estimate(info, &history);
+        let result = RunnerManager::with_job_estimate(info, &history, &HashMap::new());
+        assert_eq!(result.estimated_job_duration_secs, None);
+    }
+
+    #[test]
+    fn test_with_job_estimate_group_fallback_when_no_own_history() {
+        use crate::runner::types::{JobHistoryEntry, RunnerConfig, RunnerMode};
+        let now = chrono::Utc::now();
+        // Runner-2 is busy, has no own history, but is in a group with runner-1
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-2".to_string(),
+                name: "n2".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: Some("group-a".to_string()),
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: Some(now),
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        // Sibling runner-1 has history for "build"
+        let mut history = HashMap::new();
+        history.insert(
+            "runner-1".to_string(),
+            vec![JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(300),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+            }],
+        );
+        // Runners map — both runners share group-a
+        let mut runners = HashMap::new();
+        runners.insert(
+            "runner-1".to_string(),
+            RunnerInfo {
+                config: RunnerConfig {
+                    id: "runner-1".to_string(),
+                    name: "n1".to_string(),
+                    repo_owner: "o".to_string(),
+                    repo_name: "r".to_string(),
+                    labels: vec![],
+                    mode: RunnerMode::App,
+                    work_dir: std::path::PathBuf::from("/tmp"),
+                    group_id: Some("group-a".to_string()),
+                },
+                state: RunnerState::Online,
+                pid: None,
+                uptime_secs: None,
+                started_at: None,
+                jobs_completed: 1,
+                jobs_failed: 0,
+                current_job: None,
+                job_context: None,
+                error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
+                estimated_job_duration_secs: None,
+            },
+        );
+        runners.insert("runner-2".to_string(), info.clone());
+
+        let result = RunnerManager::with_job_estimate(info, &history, &runners);
+        assert_eq!(result.estimated_job_duration_secs, Some(300));
+    }
+
+    #[test]
+    fn test_with_job_estimate_own_history_takes_priority_over_group() {
+        use crate::runner::types::{JobHistoryEntry, RunnerConfig, RunnerMode};
+        let now = chrono::Utc::now();
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-2".to_string(),
+                name: "n2".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: Some("group-a".to_string()),
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 1,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: Some(now),
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let mut history = HashMap::new();
+        // runner-2 own history: 100s
+        history.insert(
+            "runner-2".to_string(),
+            vec![JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(100),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+            }],
+        );
+        // sibling runner-1 history: 500s
+        history.insert(
+            "runner-1".to_string(),
+            vec![JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(500),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+            }],
+        );
+        let mut runners = HashMap::new();
+        runners.insert(
+            "runner-1".to_string(),
+            RunnerInfo {
+                config: RunnerConfig {
+                    id: "runner-1".to_string(),
+                    name: "n1".to_string(),
+                    repo_owner: "o".to_string(),
+                    repo_name: "r".to_string(),
+                    labels: vec![],
+                    mode: RunnerMode::App,
+                    work_dir: std::path::PathBuf::from("/tmp"),
+                    group_id: Some("group-a".to_string()),
+                },
+                state: RunnerState::Online,
+                pid: None,
+                uptime_secs: None,
+                started_at: None,
+                jobs_completed: 1,
+                jobs_failed: 0,
+                current_job: None,
+                job_context: None,
+                error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
+                estimated_job_duration_secs: None,
+            },
+        );
+        runners.insert("runner-2".to_string(), info.clone());
+
+        let result = RunnerManager::with_job_estimate(info, &history, &runners);
+        // Should use own history (100s), NOT group (500s)
+        assert_eq!(result.estimated_job_duration_secs, Some(100));
+    }
+
+    #[test]
+    fn test_with_job_estimate_no_group_no_own_history_returns_none() {
+        use crate::runner::types::{RunnerConfig, RunnerMode};
+        let now = chrono::Utc::now();
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-1".to_string(),
+                name: "n".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: None, // no group
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("build".to_string()),
+            job_context: None,
+            error_message: None,
+            job_started_at: Some(now),
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        let history = HashMap::new();
+        let runners = HashMap::new();
+        let result = RunnerManager::with_job_estimate(info, &history, &runners);
+        assert_eq!(result.estimated_job_duration_secs, None);
+    }
+
+    #[test]
+    fn test_with_job_estimate_group_sibling_no_matching_job_returns_none() {
+        use crate::runner::types::{JobHistoryEntry, RunnerConfig, RunnerMode};
+        let now = chrono::Utc::now();
+        let info = RunnerInfo {
+            config: RunnerConfig {
+                id: "runner-2".to_string(),
+                name: "n2".to_string(),
+                repo_owner: "o".to_string(),
+                repo_name: "r".to_string(),
+                labels: vec![],
+                mode: RunnerMode::App,
+                work_dir: std::path::PathBuf::from("/tmp"),
+                group_id: Some("group-a".to_string()),
+            },
+            state: RunnerState::Busy,
+            pid: None,
+            uptime_secs: None,
+            started_at: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: Some("deploy".to_string()), // looking for "deploy"
+            job_context: None,
+            error_message: None,
+            job_started_at: Some(now),
+            last_completed_job: None,
+            estimated_job_duration_secs: None,
+        };
+        // sibling has history for "build", not "deploy"
+        let mut history = HashMap::new();
+        history.insert(
+            "runner-1".to_string(),
+            vec![JobHistoryEntry {
+                job_name: "build".to_string(),
+                started_at: now - chrono::Duration::seconds(300),
+                completed_at: now,
+                succeeded: true,
+                branch: None,
+                pr_number: None,
+                run_url: None,
+                error_message: None,
+                steps: vec![],
+            }],
+        );
+        let mut runners = HashMap::new();
+        runners.insert(
+            "runner-1".to_string(),
+            RunnerInfo {
+                config: RunnerConfig {
+                    id: "runner-1".to_string(),
+                    name: "n1".to_string(),
+                    repo_owner: "o".to_string(),
+                    repo_name: "r".to_string(),
+                    labels: vec![],
+                    mode: RunnerMode::App,
+                    work_dir: std::path::PathBuf::from("/tmp"),
+                    group_id: Some("group-a".to_string()),
+                },
+                state: RunnerState::Online,
+                pid: None,
+                uptime_secs: None,
+                started_at: None,
+                jobs_completed: 1,
+                jobs_failed: 0,
+                current_job: None,
+                job_context: None,
+                error_message: None,
+                job_started_at: None,
+                last_completed_job: None,
+                estimated_job_duration_secs: None,
+            },
+        );
+        runners.insert("runner-2".to_string(), info.clone());
+
+        let result = RunnerManager::with_job_estimate(info, &history, &runners);
         assert_eq!(result.estimated_job_duration_secs, None);
     }
 

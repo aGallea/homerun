@@ -4,13 +4,25 @@ import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
 import { useRunners } from "../hooks/useRunners";
 
+const SIDEBAR_COLLAPSE_WIDTH = 900;
+
 export function Layout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.innerWidth < SIDEBAR_COLLAPSE_WIDTH,
+  );
   const [daemonConnected, setDaemonConnected] = useState(true);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [starting, setStarting] = useState(false);
   const wasDisconnectedRef = useRef(false);
   const runnersHook = useRunners();
+
+  useEffect(() => {
+    const onResize = () => {
+      setSidebarCollapsed(window.innerWidth < SIDEBAR_COLLAPSE_WIDTH);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
