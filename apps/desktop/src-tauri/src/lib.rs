@@ -2,6 +2,8 @@ mod client;
 mod commands;
 
 use client::DaemonClient;
+use tauri::menu::{AboutMetadata, MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::Emitter;
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -14,10 +16,119 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             client: Mutex::new(client),
         })
         .setup(|app| {
+            // -- Build menu --
+            let check_updates = MenuItem::with_id(
+                app,
+                "check_updates",
+                "Check for Updates...",
+                true,
+                None::<&str>,
+            )?;
+            let settings = MenuItem::with_id(
+                app,
+                "settings",
+                "Settings...",
+                true,
+                Some("CmdOrCtrl+,"),
+            )?;
+
+            let about_metadata = AboutMetadata {
+                name: Some("HomeRun".into()),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+                copyright: Some("© 2026 HomeRun contributors".into()),
+                credits: Some("Manage GitHub Actions self-hosted runners".into()),
+                ..Default::default()
+            };
+
+            let app_submenu = SubmenuBuilder::new(app, "HomeRun")
+                .about(Some(about_metadata))
+                .item(&check_updates)
+                .separator()
+                .item(&settings)
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator()
+                .quit()
+                .build()?;
+
+            let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+
+            let window_submenu = SubmenuBuilder::new(app, "Window")
+                .minimize()
+                .separator()
+                .close_window()
+                .build()?;
+
+            let github_item = MenuItem::with_id(
+                app,
+                "open_github",
+                "HomeRun on GitHub",
+                true,
+                None::<&str>,
+            )?;
+            let report_issue = MenuItem::with_id(
+                app,
+                "report_issue",
+                "Report an Issue...",
+                true,
+                None::<&str>,
+            )?;
+
+            let help_submenu = SubmenuBuilder::new(app, "Help")
+                .item(&github_item)
+                .item(&report_issue)
+                .build()?;
+
+            let menu = MenuBuilder::new(app)
+                .item(&app_submenu)
+                .item(&edit_submenu)
+                .item(&window_submenu)
+                .item(&help_submenu)
+                .build()?;
+
+            app.set_menu(menu)?;
+
+            // -- Handle custom menu events --
+            app.on_menu_event(move |app_handle, event| {
+                use tauri_plugin_opener::OpenerExt;
+                match event.id().as_ref() {
+                    "check_updates" => {
+                        let _ = app_handle.opener().open_url(
+                            "https://github.com/aGallea/homerun/releases",
+                            None::<&str>,
+                        );
+                    }
+                    "settings" => {
+                        let _ = app_handle.emit("navigate", "/settings");
+                    }
+                    "open_github" => {
+                        let _ = app_handle.opener().open_url(
+                            "https://github.com/aGallea/homerun",
+                            None::<&str>,
+                        );
+                    }
+                    "report_issue" => {
+                        let _ = app_handle.opener().open_url(
+                            "https://github.com/aGallea/homerun/issues/new/choose",
+                            None::<&str>,
+                        );
+                    }
+                    _ => {}
+                }
+            });
+
+            // -- Spawn daemon sidecar if not running --
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let client = crate::client::DaemonClient::default_socket();

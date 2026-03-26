@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
+import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
 import { useRunners } from "../hooks/useRunners";
@@ -7,6 +8,7 @@ import { useRunners } from "../hooks/useRunners";
 const SIDEBAR_COLLAPSE_WIDTH = 900;
 
 export function Layout() {
+  const navigate = useNavigate();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => window.innerWidth < SIDEBAR_COLLAPSE_WIDTH,
   );
@@ -15,6 +17,15 @@ export function Layout() {
   const [starting, setStarting] = useState(false);
   const wasDisconnectedRef = useRef(false);
   const runnersHook = useRunners();
+
+  useEffect(() => {
+    const unlisten = listen<string>("navigate", (event) => {
+      navigate(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const onResize = () => {
