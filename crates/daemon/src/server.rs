@@ -269,9 +269,6 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
     // Start background poller for job context (branch/PR info)
     state.runner_manager.start_job_context_poller();
 
-    // Start background poller to detect re-runs of previously-failed workflow runs
-    state.runner_manager.start_rerun_poller();
-
     let app = create_router(state);
 
     let server = axum::serve(listener, app);

@@ -215,174 +215,102 @@ impl RunnerManager {
         });
     }
 
-    /// Spawn a background task that periodically checks recent history entries
-    /// against the GitHub API. When a workflow run has been re-run and the
-    /// latest attempt's job has a different outcome, the entry is annotated
-    /// with `latest_attempt` so the UI can show the current state.
-    pub fn start_rerun_poller(&self) {
-        let runners = self.runners.clone();
-        let auth_token = self.auth_token.clone();
-        let job_history = self.job_history.clone();
-        let history_dir = self.config.history_dir();
-        let event_tx = self.event_tx.clone();
+    /// After recording a job completion, check all OTHER runners' history for
+    /// entries with the same `run_id`. If found, annotate them with
+    /// `latest_attempt` so the UI shows the re-run result.
+    async fn annotate_cross_runner_reruns(
+        &self,
+        source_runner_id: &str,
+        entry: &types::JobHistoryEntry,
+    ) {
+        let run_id = match entry
+            .run_url
+            .as_deref()
+            .and_then(history::extract_run_id_from_url)
+        {
+            Some(id) => id,
+            None => return,
+        };
 
-        tokio::spawn(async move {
-            // Wait a bit on startup before first poll
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-            loop {
-                interval.tick().await;
+        let source_runner_name = {
+            let map = self.runners.read().await;
+            match map.get(source_runner_id) {
+                Some(r) => r.config.name.clone(),
+                None => return,
+            }
+        };
 
-                let token = {
-                    let t = auth_token.read().await;
-                    t.clone()
-                };
-                let Some(token) = token else {
+        let attempt = types::RunAttempt {
+            attempt: 0, // not available from local data; displayed as "re-run"
+            succeeded: entry.succeeded,
+            runner_name: source_runner_name,
+            completed_at: entry.completed_at,
+            run_url: entry.run_url.clone(),
+        };
+
+        // Phase 1: annotate history entries and collect affected runner IDs
+        let mut annotated_runners: Vec<String> = Vec::new();
+        {
+            let mut hist = self.job_history.write().await;
+            for (other_id, other_entries) in hist.iter_mut() {
+                if other_id == source_runner_id {
                     continue;
-                };
-                let Ok(gh) = GitHubClient::new(Some(token)) else {
-                    continue;
-                };
-
-                // Collect the most recent entry per runner that has a run_url
-                // and doesn't already have a latest_attempt annotation.
-                let to_check: Vec<(
-                    String, // runner_id
-                    String, // runner_name
-                    String, // owner
-                    String, // repo
-                    String, // job_name
-                    String, // run_url
-                    bool,   // entry succeeded
-                )> = {
-                    let map = runners.read().await;
-                    let hist = job_history.read().await;
-                    map.values()
-                        .filter_map(|r| {
-                            let entries = hist.get(&r.config.id)?;
-                            let entry = entries
-                                .iter()
-                                .rev()
-                                .find(|e| e.run_url.is_some() && e.latest_attempt.is_none())?;
-                            Some((
-                                r.config.id.clone(),
-                                r.config.name.clone(),
-                                r.config.repo_owner.clone(),
-                                r.config.repo_name.clone(),
-                                entry.job_name.clone(),
-                                entry.run_url.clone().unwrap(),
-                                entry.succeeded,
-                            ))
-                        })
-                        .collect()
-                };
-
-                for (runner_id, runner_name, owner, repo, job_name, run_url, entry_succeeded) in
-                    to_check
-                {
-                    let run_id = match history::extract_run_id_from_url(&run_url) {
-                        Some(id) => id,
-                        None => continue,
-                    };
-
-                    let status = match gh
-                        .get_latest_job_for_run(&owner, &repo, run_id, &runner_name, &job_name)
-                        .await
+                }
+                let mut changed = false;
+                for e in other_entries.iter_mut() {
+                    if e.job_name == entry.job_name
+                        && e.run_url
+                            .as_deref()
+                            .and_then(history::extract_run_id_from_url)
+                            == Some(run_id)
                     {
-                        Ok(Some(s)) => s,
-                        Ok(None) => continue,
-                        Err(e) => {
-                            tracing::debug!(
-                                runner = %runner_id,
-                                run_id,
-                                "Rerun poll error: {e}"
-                            );
-                            continue;
-                        }
-                    };
-
-                    // Skip if the latest attempt matches this entry's own result
-                    if status.succeeded == entry_succeeded
-                        && status.runner_name.as_deref() == Some(&runner_name)
-                    {
-                        continue;
+                        e.latest_attempt = Some(attempt.clone());
+                        changed = true;
                     }
-
-                    let attempt = types::RunAttempt {
-                        attempt: status.run_attempt,
-                        succeeded: status.succeeded,
-                        runner_name: status
-                            .runner_name
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        completed_at: status.completed_at.unwrap_or_else(chrono::Utc::now),
-                        run_url: Some(format!(
-                            "https://github.com/{owner}/{repo}/actions/runs/{run_id}/job/{}",
-                            status.job_id
-                        )),
-                    };
-
-                    // Annotate the history entry
+                }
+                if changed {
+                    if let Err(e) =
+                        history::save(&self.config.history_dir(), other_id, other_entries)
                     {
-                        let mut hist = job_history.write().await;
-                        if let Some(entries) = hist.get_mut(&runner_id) {
-                            if let Some(entry) = entries.iter_mut().rev().find(|e| {
-                                e.job_name == job_name
-                                    && e.run_url
-                                        .as_deref()
-                                        .and_then(history::extract_run_id_from_url)
-                                        == Some(run_id)
-                            }) {
-                                entry.latest_attempt = Some(attempt.clone());
-                            }
-                            if let Err(e) = history::save(&history_dir, &runner_id, entries) {
-                                tracing::warn!("Failed to save rerun history for {runner_id}: {e}");
-                            }
-                        }
+                        tracing::warn!("Failed to save rerun annotation for {other_id}: {e}");
                     }
-
-                    // Update last_completed_job if this entry is the most recent
-                    {
-                        let hist = job_history.read().await;
-                        let is_latest = hist
-                            .get(&runner_id)
-                            .and_then(|entries| entries.last())
-                            .is_some_and(|last| {
-                                last.job_name == job_name
-                                    && last
-                                        .run_url
-                                        .as_deref()
-                                        .and_then(history::extract_run_id_from_url)
-                                        == Some(run_id)
-                            });
-
-                        if is_latest {
-                            let mut map = runners.write().await;
-                            if let Some(r) = map.get_mut(&runner_id) {
-                                if let Some(ref mut lc) = r.last_completed_job {
-                                    lc.latest_attempt = Some(attempt.clone());
-                                }
-                            }
-                        }
-                    }
-
-                    tracing::info!(
-                        runner = %runner_id,
-                        run_id,
-                        job = %job_name,
-                        attempt = status.run_attempt,
-                        succeeded = status.succeeded,
-                        "Re-run detected: annotated history entry"
-                    );
-                    let _ = event_tx.send(RunnerEvent {
-                        runner_id: runner_id.clone(),
-                        event_type: "state_changed".to_string(),
-                        data: serde_json::json!({"rerun_updated": true}),
-                        timestamp: chrono::Utc::now(),
-                    });
+                    annotated_runners.push(other_id.clone());
                 }
             }
-        });
+        }
+
+        // Phase 2: update last_completed_job and emit events for affected runners
+        if !annotated_runners.is_empty() {
+            let mut runners = self.runners.write().await;
+            for other_id in &annotated_runners {
+                if let Some(r) = runners.get_mut(other_id) {
+                    if let Some(ref mut lc) = r.last_completed_job {
+                        if lc
+                            .run_url
+                            .as_deref()
+                            .and_then(history::extract_run_id_from_url)
+                            == Some(run_id)
+                        {
+                            lc.latest_attempt = Some(attempt.clone());
+                        }
+                    }
+                }
+                tracing::info!(
+                    source = %source_runner_id,
+                    target = %other_id,
+                    run_id,
+                    job = %entry.job_name,
+                    succeeded = entry.succeeded,
+                    "Annotated cross-runner re-run"
+                );
+                let _ = self.event_tx.send(RunnerEvent {
+                    runner_id: other_id.clone(),
+                    event_type: "state_changed".to_string(),
+                    data: serde_json::json!({"rerun_updated": true}),
+                    timestamp: chrono::Utc::now(),
+                });
+            }
+        }
     }
 
     async fn next_runner_number(&self, repo_name: &str) -> u32 {
@@ -1692,9 +1620,62 @@ impl RunnerManager {
                             if let Some(entry) = history_entry {
                                 let mut hist = job_history_arc.write().await;
                                 let entries = hist.entry(rid.clone()).or_default();
-                                history::append(entries, entry);
+                                history::append(entries, entry.clone());
                                 if let Err(e) = history::save(&history_dir, &rid, entries) {
                                     tracing::warn!("Failed to save job history for {}: {}", rid, e);
+                                }
+
+                                // Annotate other runners' history entries for the same run_id
+                                if let Some(run_id) = entry
+                                    .run_url
+                                    .as_deref()
+                                    .and_then(history::extract_run_id_from_url)
+                                {
+                                    let runner_name = {
+                                        let map = runners.read().await;
+                                        map.get(&rid).map(|r| r.config.name.clone())
+                                    };
+                                    if let Some(runner_name) = runner_name {
+                                        let attempt = types::RunAttempt {
+                                            attempt: 0,
+                                            succeeded: entry.succeeded,
+                                            runner_name,
+                                            completed_at: entry.completed_at,
+                                            run_url: entry.run_url.clone(),
+                                        };
+                                        for (other_id, other_entries) in hist.iter_mut() {
+                                            if *other_id == rid {
+                                                continue;
+                                            }
+                                            let mut changed = false;
+                                            for e in other_entries.iter_mut() {
+                                                if e.job_name == entry.job_name
+                                                    && e.run_url
+                                                        .as_deref()
+                                                        .and_then(history::extract_run_id_from_url)
+                                                        == Some(run_id)
+                                                {
+                                                    e.latest_attempt = Some(attempt.clone());
+                                                    changed = true;
+                                                }
+                                            }
+                                            if changed {
+                                                if let Err(e) = history::save(
+                                                    &history_dir,
+                                                    other_id,
+                                                    other_entries,
+                                                ) {
+                                                    tracing::warn!("Failed to save rerun annotation for {other_id}: {e}");
+                                                }
+                                                let _ = event_tx_stdout.send(RunnerEvent {
+                                                    runner_id: other_id.clone(),
+                                                    event_type: "state_changed".to_string(),
+                                                    data: serde_json::json!({"rerun_updated": true}),
+                                                    timestamp: chrono::Utc::now(),
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -1920,14 +1901,17 @@ impl RunnerManager {
         });
     }
 
-    /// Record a completed job in history.
+    /// Record a completed job in history, then annotate other runners' entries
+    /// for the same workflow run with `latest_attempt`.
     pub async fn record_job_history(&self, runner_id: &str, entry: types::JobHistoryEntry) {
         let mut hist = self.job_history.write().await;
         let entries = hist.entry(runner_id.to_string()).or_default();
-        history::append(entries, entry);
+        history::append(entries, entry.clone());
         if let Err(e) = history::save(&self.config.history_dir(), runner_id, entries) {
             tracing::warn!("Failed to save job history for {}: {}", runner_id, e);
         }
+        drop(hist);
+        self.annotate_cross_runner_reruns(runner_id, &entry).await;
     }
 
     /// Get job history for a runner (newest first).
