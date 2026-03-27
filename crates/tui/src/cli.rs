@@ -72,32 +72,64 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
     }
 }
 
+fn colored(text: &str, color_code: &str) -> String {
+    if atty_stdout() {
+        format!("\x1b[{color_code}m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
+fn atty_stdout() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+}
+
+fn color_for_state(state: &str) -> &'static str {
+    match state {
+        "online" => "32",                   // green
+        "busy" => "33",                     // yellow
+        "offline" => "90",                  // gray
+        "error" => "31",                    // red
+        "creating" | "registering" => "36", // cyan
+        "stopping" | "deleting" => "35",    // magenta
+        _ => "0",                           // default
+    }
+}
+
 async fn cmd_list(client: &DaemonClient) -> Result<()> {
     let runners = client.list_runners().await?;
     let metrics = client.get_metrics().await.ok();
 
-    // Column widths
-    let name_w = 20;
-    let repo_w = 22;
-    let status_w = 8;
-    let mode_w = 9;
+    if runners.is_empty() {
+        println!("No runners configured.");
+        return Ok(());
+    }
+
+    // Calculate column widths dynamically
+    let name_w = runners
+        .iter()
+        .map(|r| r.config.name.len())
+        .max()
+        .unwrap_or(4)
+        .max(4); // "NAME"
+    let repo_w = runners
+        .iter()
+        .map(|r| r.config.repo_owner.len() + 1 + r.config.repo_name.len())
+        .max()
+        .unwrap_or(4)
+        .max(4); // "REPO"
+    let status_w = 8; // "STATUS" + padding
+    let mode_w = 9; // "MODE" + padding
 
     println!(
         "{:<name_w$} {:<repo_w$} {:<status_w$} {:<mode_w$} CPU",
-        "NAME",
-        "REPO",
-        "STATUS",
-        "MODE",
-        name_w = name_w,
-        repo_w = repo_w,
-        status_w = status_w,
-        mode_w = mode_w,
+        "NAME", "REPO", "STATUS", "MODE",
     );
 
     for runner in &runners {
         let repo = format!("{}/{}", runner.config.repo_owner, runner.config.repo_name);
 
-        // Look up per-runner CPU if available
         let cpu_str = metrics
             .as_ref()
             .and_then(|m| {
@@ -108,17 +140,12 @@ async fn cmd_list(client: &DaemonClient) -> Result<()> {
             })
             .unwrap_or_else(|| "-".to_string());
 
+        let padded_state = format!("{:<status_w$}", runner.state);
+        let colored_state = colored(&padded_state, color_for_state(&runner.state));
+
         println!(
-            "{:<name_w$} {:<repo_w$} {:<status_w$} {:<mode_w$} {}",
-            runner.config.name,
-            repo,
-            runner.state,
-            runner.config.mode,
-            cpu_str,
-            name_w = name_w,
-            repo_w = repo_w,
-            status_w = status_w,
-            mode_w = mode_w,
+            "{:<name_w$} {:<repo_w$} {} {:<mode_w$} {}",
+            runner.config.name, repo, colored_state, runner.config.mode, cpu_str,
         );
     }
 
@@ -140,10 +167,24 @@ async fn cmd_status(client: &DaemonClient) -> Result<()> {
         .map(|u| u.login.as_str())
         .unwrap_or("(not authenticated)");
 
-    println!("HomeRun Status");
-    println!("  Daemon: running");
-    println!("  User: {user}");
-    println!("  Runners: {online} online, {busy} busy, {offline} offline");
+    let version = env!("CARGO_PKG_VERSION");
+    println!("HomeRun Status (v{version})");
+    println!("  Daemon: {}", colored("running", "32"));
+
+    let user_display = if auth.authenticated {
+        colored(user, "32") // green
+    } else {
+        colored(user, "31") // red
+    };
+    println!("  User: {user_display}");
+
+    let total = runners.len();
+    println!(
+        "  Runners: {total} total ({} online, {} busy, {} offline)",
+        colored(&online.to_string(), "32"),
+        colored(&busy.to_string(), "33"),
+        colored(&offline.to_string(), "90"),
+    );
 
     if let Some(m) = &metrics {
         let mem_used_gb = m.system.memory_used_bytes as f64 / 1_073_741_824.0;
