@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useRunners } from "../hooks/useRunners";
+import { useTrayIcon } from "../hooks/useTrayIcon";
 import { api } from "../api/commands";
 import type { RunnerInfo } from "../api/types";
 
@@ -48,6 +49,7 @@ export function MiniView() {
 
   const counts = countByState(runners);
   const daemonOk = error === null;
+  useTrayIcon(runners, daemonOk);
 
   // Save position on window move (debounced)
   useEffect(() => {

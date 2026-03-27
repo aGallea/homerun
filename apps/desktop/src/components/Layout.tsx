@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
 import { useRunners } from "../hooks/useRunners";
+import { useTrayIcon } from "../hooks/useTrayIcon";
 
 const SIDEBAR_COLLAPSE_WIDTH = 900;
 
@@ -13,10 +14,33 @@ export function Layout() {
     () => window.innerWidth < SIDEBAR_COLLAPSE_WIDTH,
   );
   const [daemonConnected, setDaemonConnected] = useState(true);
-  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [dotCount, setDotCount] = useState(0);
   const [starting, setStarting] = useState(false);
   const wasDisconnectedRef = useRef(false);
   const runnersHook = useRunners();
+  useTrayIcon(runnersHook.runners, daemonConnected);
+
+  const handleStartDaemon = useCallback(async () => {
+    setStarting(true);
+    try {
+      await api.startDaemon();
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          if (await api.healthCheck()) {
+            setDaemonConnected(true);
+            break;
+          }
+        } catch {
+          /* keep polling */
+        }
+      }
+    } catch (err) {
+      console.error("Failed to start daemon:", err);
+    } finally {
+      setStarting(false);
+    }
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<string>("navigate", (event) => {
@@ -36,24 +60,29 @@ export function Layout() {
   }, []);
 
   useEffect(() => {
+    if (!daemonConnected) {
+      const timer = setInterval(() => setDotCount((n) => (n + 1) % 4), 1500);
+      return () => clearInterval(timer);
+    }
+    setDotCount(0);
+  }, [daemonConnected]);
+
+  useEffect(() => {
     let cancelled = false;
     async function check() {
       try {
         const ok = await api.healthCheck();
         if (!cancelled) {
           if (ok) {
-            setRetryAttempt(0);
             wasDisconnectedRef.current = false;
           } else {
             wasDisconnectedRef.current = true;
-            setRetryAttempt((n) => n + 1);
           }
           setDaemonConnected(ok);
         }
       } catch {
         if (!cancelled) {
           wasDisconnectedRef.current = true;
-          setRetryAttempt((n) => n + 1);
           setDaemonConnected(false);
         }
       }
@@ -92,29 +121,18 @@ export function Layout() {
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <span>Unable to connect to the HomeRun daemon.</span>
-              <span style={{ fontSize: 12, opacity: 0.7 }}>
-                Retrying... (attempt {retryAttempt})
-              </span>
+              <span style={{ fontSize: 12, opacity: 0.7 }}>Retrying{".".repeat(dotCount)}</span>
             </div>
             <button
               className="btn btn-primary btn-sm"
               disabled={starting}
-              onClick={async () => {
-                setStarting(true);
-                try {
-                  await api.startDaemon();
-                } catch (err) {
-                  console.error("Failed to start daemon:", err);
-                } finally {
-                  setStarting(false);
-                }
-              }}
+              onClick={handleStartDaemon}
             >
               {starting ? "Starting..." : "Start daemon"}
             </button>
           </div>
         )}
-        <Outlet context={runnersHook} />
+        <Outlet context={{ ...runnersHook, daemonStarting: starting, handleStartDaemon }} />
       </main>
     </div>
   );
