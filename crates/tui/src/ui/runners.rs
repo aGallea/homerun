@@ -742,4 +742,138 @@ mod tests {
             "should show add runner hint"
         );
     }
+
+    #[test]
+    fn test_renders_progress_panel_with_steps() {
+        use crate::client::StepInfo;
+
+        let mut app = App::new();
+        let mut runner = make_runner("busy-runner", "busy");
+        runner.current_job = Some("build".to_string());
+        runner.job_started_at = Some(chrono::Utc::now().to_rfc3339());
+        runner.estimated_job_duration_secs = Some(300);
+        app.runners = vec![runner];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        app.selected_runner_steps = Some(crate::client::StepsResponse {
+            job_name: "build".to_string(),
+            steps: vec![
+                StepInfo {
+                    number: 1,
+                    name: "Checkout".to_string(),
+                    status: "succeeded".to_string(),
+                    started_at: Some("2026-03-27T10:00:00Z".to_string()),
+                    completed_at: Some("2026-03-27T10:00:03Z".to_string()),
+                },
+                StepInfo {
+                    number: 2,
+                    name: "Build".to_string(),
+                    status: "running".to_string(),
+                    started_at: Some("2026-03-27T10:00:03Z".to_string()),
+                    completed_at: None,
+                },
+                StepInfo {
+                    number: 3,
+                    name: "Test".to_string(),
+                    status: "pending".to_string(),
+                    started_at: None,
+                    completed_at: None,
+                },
+            ],
+            steps_discovered: 3,
+        });
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Progress"), "should show Progress panel");
+        assert!(content.contains("Checkout"), "should show step name");
+        assert!(content.contains("Build"), "should show running step");
+    }
+
+    #[test]
+    fn test_renders_all_three_panels() {
+        use crate::client::StepInfo;
+
+        let mut app = App::new();
+        let mut runner = make_runner("full-runner", "busy");
+        runner.current_job = Some("deploy".to_string());
+        runner.job_started_at = Some(chrono::Utc::now().to_rfc3339());
+        runner.estimated_job_duration_secs = Some(120);
+        app.runners = vec![runner];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        app.selected_runner_steps = Some(crate::client::StepsResponse {
+            job_name: "deploy".to_string(),
+            steps: vec![StepInfo {
+                number: 1,
+                name: "Deploy step".to_string(),
+                status: "running".to_string(),
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                completed_at: None,
+            }],
+            steps_discovered: 1,
+        });
+        app.selected_runner_history = vec![JobHistoryEntry {
+            job_name: "previous-job".to_string(),
+            started_at: "2026-03-27T09:00:00Z".to_string(),
+            completed_at: "2026-03-27T09:05:00Z".to_string(),
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: Some(10),
+            run_url: None,
+            duration_secs: 300,
+            job_number: 1,
+        }];
+
+        let backend = TestBackend::new(100, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Detail"), "should show Detail panel");
+        assert!(content.contains("Progress"), "should show Progress panel");
+        assert!(content.contains("History"), "should show History panel");
+        assert!(
+            content.contains("previous-job"),
+            "should show history entry"
+        );
+    }
+
+    #[test]
+    fn test_renders_progress_bar_without_steps() {
+        let mut app = App::new();
+        let mut runner = make_runner("bar-runner", "busy");
+        runner.current_job = Some("test".to_string());
+        runner.job_started_at = Some(chrono::Utc::now().to_rfc3339());
+        runner.estimated_job_duration_secs = Some(60);
+        app.runners = vec![runner];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        // No steps, but has estimated duration
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Progress"),
+            "should show Progress panel even without steps"
+        );
+    }
 }
