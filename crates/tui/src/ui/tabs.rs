@@ -1,31 +1,30 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Tabs};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::{App, Tab};
 
 pub fn draw_tabs(f: &mut Frame, app: &App, area: Rect) {
-    let titles: Vec<Line> = Tab::all()
-        .iter()
-        .enumerate()
-        .map(|(i, tab)| {
-            Line::from(Span::styled(
-                format!(" [{}] {} ", i + 1, tab.title()),
-                Style::default().fg(Color::White),
-            ))
-        })
-        .collect();
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::raw(" "));
 
-    let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(" HomeRun "))
-        .select(app.active_tab.index())
-        .highlight_style(
+    for (i, tab) in Tab::all().iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  │  ", Style::default().fg(Color::DarkGray)));
+        }
+
+        let style = if *tab == app.active_tab {
             Style::default()
                 .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
 
-    f.render_widget(tabs, area);
+        spans.push(Span::styled(format!(" {} ", tab.title()), style));
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
