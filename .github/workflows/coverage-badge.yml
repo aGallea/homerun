@@ -14,6 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install Node dependencies
+        run: cd apps/desktop && npm ci
+
+      - name: Run React tests with coverage
+        run: cd apps/desktop && npm run test:coverage
+
       - name: Install cargo-llvm-cov
         run: |
           source "$HOME/.cargo/env" 2>/dev/null || true
