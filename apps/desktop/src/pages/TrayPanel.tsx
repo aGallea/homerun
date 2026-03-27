@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRunners } from "../hooks/useRunners";
 import { useTrayIcon } from "../hooks/useTrayIcon";
 import { api } from "../api/commands";
 import { jobProgress, formatJobElapsed } from "../utils/runnerHelpers";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
 const stateColors: Record<string, string> = {
   online: "var(--accent-green)",
@@ -21,12 +22,27 @@ function stateLabel(state: string): string {
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
+const TRAY_PANEL_WIDTH = 300;
+
 export function TrayPanel() {
   const { runners, error } = useRunners();
   const daemonOk = error === null;
   const [daemonStopping, setDaemonStopping] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useTrayIcon(runners, daemonOk);
+
+  const resizeToFit = useCallback(() => {
+    if (!containerRef.current) return;
+    const height = containerRef.current.offsetHeight;
+    getCurrentWindow()
+      .setSize(new LogicalSize(TRAY_PANEL_WIDTH, height))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    resizeToFit();
+  }, [runners.length, resizeToFit]);
 
   const counts = { online: 0, busy: 0, offline: 0 };
   for (const r of runners) {
@@ -41,7 +57,7 @@ export function TrayPanel() {
   });
 
   return (
-    <div className="tray-panel">
+    <div className="tray-panel" ref={containerRef}>
       <div className="tray-header">
         <div className="tray-header-left">
           <span
