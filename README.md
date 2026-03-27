@@ -15,13 +15,13 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
 - **Batch runner creation** — spin up multiple runners for the same repo in one step with live progress
 - **Unified dashboard** — monitor all runners across all repos in one place
 - **Live log streaming** — tail runner output in real time from the runner detail view
-- **Job tracking** — see current job name, busy state, and completed/failed job counters per runner
+- **Job tracking** — current job progress with step-by-step status, estimated completion, and full job history per runner
 - **Real-time metrics** — CPU/RAM per runner via live WebSocket updates
 - **Two run modes** — app-managed (daemon child) or background service (launchd)
 - **Auto-restart** — crashed runners recover automatically (up to 3 attempts)
 - **Smart repo discovery** — scan local workspace directories or your GitHub account for repos that use self-hosted runners
-- **Terminal UI** — full keyboard-driven TUI with the same capabilities as the GUI
-- **CLI mode** — scriptable `homerun --no-tui` commands for automation
+- **Terminal UI** — k9s-inspired TUI with info header, context-sensitive keybindings (F1-F4 tabs), repo search, and in-app login via Device Flow
+- **CLI mode** — scriptable `homerun --no-tui` commands with colored output for automation
 - **macOS native** — Keychain token storage, launchd auto-start, native notifications
 - **Pre-commit hooks** — enforces `cargo fmt`, `cargo clippy`, conventional commits, and Prettier on every commit
 

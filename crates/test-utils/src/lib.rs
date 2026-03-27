@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use homerun::client::{
-    AuthStatus, DeviceFlowResponse, GitHubUser, JobHistoryEntry, MetricsResponse, RepoInfo,
-    RunnerInfo, StepsResponse,
+    AuthStatus, DeviceFlowResponse, DiscoveredRepo, GitHubUser, JobHistoryEntry, MetricsResponse,
+    RepoInfo, RunnerInfo, StepsResponse,
 };
 
 pub struct MockState {
@@ -19,6 +19,8 @@ pub struct MockState {
     pub steps: HashMap<String, StepsResponse>,
     pub device_flow_response: Option<DeviceFlowResponse>,
     pub device_flow_authorized: bool,
+    pub scan_local_results: Vec<DiscoveredRepo>,
+    pub scan_remote_results: Vec<DiscoveredRepo>,
 }
 
 impl Default for MockState {
@@ -35,6 +37,8 @@ impl Default for MockState {
             steps: HashMap::new(),
             device_flow_response: None,
             device_flow_authorized: false,
+            scan_local_results: Vec::new(),
+            scan_remote_results: Vec::new(),
         }
     }
 }
@@ -103,6 +107,16 @@ impl MockDaemonBuilder {
 
     pub fn with_device_flow(mut self, response: DeviceFlowResponse) -> Self {
         self.state.device_flow_response = Some(response);
+        self
+    }
+
+    pub fn with_scan_local_results(mut self, repos: Vec<DiscoveredRepo>) -> Self {
+        self.state.scan_local_results = repos;
+        self
+    }
+
+    pub fn with_scan_remote_results(mut self, repos: Vec<DiscoveredRepo>) -> Self {
+        self.state.scan_remote_results = repos;
         self
     }
 

@@ -25,6 +25,8 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/runners/{id}/steps", get(get_steps))
         .route("/repos", get(list_repos))
         .route("/metrics", get(get_metrics))
+        .route("/scan/local", post(scan_local))
+        .route("/scan/remote", post(scan_remote))
         .with_state(state)
 }
 
@@ -193,6 +195,19 @@ async fn get_metrics(
 ) -> Result<Json<homerun::client::MetricsResponse>, StatusCode> {
     let s = state.read().await;
     s.metrics.clone().map(Json).ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn scan_local(
+    State(state): State<SharedState>,
+    Json(_body): Json<serde_json::Value>,
+) -> Json<Vec<homerun::client::DiscoveredRepo>> {
+    Json(state.read().await.scan_local_results.clone())
+}
+
+async fn scan_remote(
+    State(state): State<SharedState>,
+) -> Json<Vec<homerun::client::DiscoveredRepo>> {
+    Json(state.read().await.scan_remote_results.clone())
 }
 
 fn uuid_simple() -> String {
