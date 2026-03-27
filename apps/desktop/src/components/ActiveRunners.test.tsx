@@ -2,31 +2,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ActiveRunners } from "./ActiveRunners";
-import type { RunnerInfo } from "../api/types";
+import { makeRunner } from "../test/factories";
 
 const FIXED_NOW = new Date("2026-03-25T12:00:00Z").getTime();
-
-function makeRunner(overrides: Partial<RunnerInfo> & { name: string }): RunnerInfo {
-  return {
-    config: {
-      id: overrides.name,
-      name: overrides.name,
-      repo_owner: "org",
-      repo_name: "repo",
-      labels: [],
-      mode: "service",
-      work_dir: "/tmp",
-    },
-    state: overrides.state ?? "online",
-    pid: 1234,
-    uptime_secs: 100,
-    jobs_completed: 0,
-    jobs_failed: 0,
-    current_job: overrides.current_job ?? null,
-    job_started_at: overrides.job_started_at ?? null,
-    ...overrides,
-  };
-}
 
 function renderWithRouter(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
