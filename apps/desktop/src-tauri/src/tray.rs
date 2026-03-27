@@ -13,6 +13,9 @@ pub fn init(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .icon(icon)
         .tooltip("HomeRun")
         .on_tray_icon_event(|tray, event| {
+            // Feed tray position to positioner plugin (required before using TrayBottomCenter)
+            tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
