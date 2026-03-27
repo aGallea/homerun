@@ -39,6 +39,7 @@ pub fn toggle_mini_window(app: &AppHandle) -> Result<(), String> {
         .title("HomeRun Mini")
         .inner_size(MINI_WIDTH, MINI_HEIGHT)
         .decorations(false)
+        .transparent(true)
         .always_on_top(true)
         .resizable(false)
         .skip_taskbar(true);
@@ -96,6 +97,7 @@ pub fn toggle_tray_panel_window(app: &AppHandle) {
         .title("HomeRun Tray")
         .inner_size(TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT)
         .decorations(false)
+        .transparent(true)
         .always_on_top(true)
         .resizable(false)
         .skip_taskbar(true)
