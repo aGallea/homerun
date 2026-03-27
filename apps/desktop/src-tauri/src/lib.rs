@@ -199,6 +199,11 @@ pub fn run() {
             commands::clear_runner_history,
             commands::delete_history_entry,
             commands::update_tray_icon,
+            commands::toggle_mini_window,
+            commands::show_main_window,
+            commands::save_mini_position,
+            commands::get_mini_position,
+            commands::quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
