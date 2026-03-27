@@ -67,8 +67,17 @@ pub fn run() {
                 .select_all()
                 .build()?;
 
+            let toggle_mini = MenuItem::with_id(
+                app,
+                "toggle_mini",
+                "Toggle Mini View",
+                true,
+                Some("CmdOrCtrl+Shift+M"),
+            )?;
+
             let window_submenu = SubmenuBuilder::new(app, "Window")
                 .minimize()
+                .item(&toggle_mini)
                 .separator()
                 .close_window()
                 .build()?;
@@ -111,6 +120,9 @@ pub fn run() {
                             "https://github.com/aGallea/homerun/releases",
                             None::<&str>,
                         );
+                    }
+                    "toggle_mini" => {
+                        let _ = crate::window::toggle_mini_window(app_handle);
                     }
                     "settings" => {
                         let _ = app_handle.emit("navigate", "/settings");
