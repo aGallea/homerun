@@ -278,18 +278,22 @@ fn draw_progress_panel(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect
 
     // Steps — show from bottom so the running/latest step is always visible
     if let Some(ref steps_resp) = app.selected_runner_steps {
-        // Calculate how many lines we have left in the panel
         // Panel inner height = area.height - 2 (borders) - lines already used
         let available = (area.height as usize).saturating_sub(2 + lines.len());
         let steps = &steps_resp.steps;
         let skip = steps.len().saturating_sub(available);
 
-        if skip > 0 {
+        // Reserve 1 line for the "more steps above" indicator
+        let skip = if skip > 0 {
+            let skip = steps.len().saturating_sub(available.saturating_sub(1));
             lines.push(Line::from(Span::styled(
                 format!(" ... {skip} more steps above"),
                 Style::default().fg(Color::DarkGray),
             )));
-        }
+            skip
+        } else {
+            0
+        };
 
         for step in steps.iter().skip(skip) {
             let (icon, color) = match step.status.as_str() {
