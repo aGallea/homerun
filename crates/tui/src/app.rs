@@ -263,7 +263,7 @@ impl App {
     }
 
     /// Handle a key event. Returns an optional Action requiring a daemon call.
-    pub fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<Action> {
+    pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
         // Help overlay captures all keys except ? and Esc
         if self.show_help {
             match code {
@@ -296,6 +296,35 @@ impl App {
                 _ => {}
             }
             return None;
+        }
+
+        // Ctrl+1-4 for tab switching — always works regardless of active tab
+        if modifiers.contains(KeyModifiers::CONTROL) {
+            match code {
+                KeyCode::Char('1') => {
+                    self.active_tab = Tab::Runners;
+                    return None;
+                }
+                KeyCode::Char('2') => {
+                    self.active_tab = Tab::Repos;
+                    if self.repos.is_empty() {
+                        return Some(Action::RefreshRepos);
+                    }
+                    return None;
+                }
+                KeyCode::Char('3') => {
+                    self.active_tab = Tab::Monitoring;
+                    return None;
+                }
+                KeyCode::Char('4') => {
+                    self.active_tab = Tab::Daemon;
+                    if self.daemon_logs.is_empty() {
+                        return Some(Action::RefreshDaemonLogs);
+                    }
+                    return None;
+                }
+                _ => {}
+            }
         }
 
         // Daemon tab key handling (before global keys to intercept 1-5 for log levels)
@@ -359,30 +388,6 @@ impl App {
             KeyCode::Char('?') => {
                 self.show_help = true;
                 None
-            }
-            KeyCode::Char('1') => {
-                self.active_tab = Tab::Runners;
-                None
-            }
-            KeyCode::Char('2') => {
-                self.active_tab = Tab::Repos;
-                if self.repos.is_empty() {
-                    Some(Action::RefreshRepos)
-                } else {
-                    None
-                }
-            }
-            KeyCode::Char('3') => {
-                self.active_tab = Tab::Monitoring;
-                None
-            }
-            KeyCode::Char('4') => {
-                self.active_tab = Tab::Daemon;
-                if self.daemon_logs.is_empty() {
-                    Some(Action::RefreshDaemonLogs)
-                } else {
-                    None
-                }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 match self.active_tab {
@@ -596,12 +601,35 @@ mod tests {
     #[test]
     fn test_handle_key_tab_switch() {
         let mut app = App::new();
-        app.handle_key(KeyCode::Char('2'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('2'), KeyModifiers::CONTROL);
         assert_eq!(app.active_tab, Tab::Repos);
-        app.handle_key(KeyCode::Char('3'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('3'), KeyModifiers::CONTROL);
         assert_eq!(app.active_tab, Tab::Monitoring);
-        app.handle_key(KeyCode::Char('1'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('1'), KeyModifiers::CONTROL);
         assert_eq!(app.active_tab, Tab::Runners);
+        app.handle_key(KeyCode::Char('4'), KeyModifiers::CONTROL);
+        assert_eq!(app.active_tab, Tab::Daemon);
+    }
+
+    #[test]
+    fn test_ctrl_tab_switch_from_daemon_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+        app.handle_key(KeyCode::Char('1'), KeyModifiers::CONTROL);
+        assert_eq!(app.active_tab, Tab::Runners);
+    }
+
+    #[test]
+    fn test_daemon_tab_number_keys_set_log_level() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+        let action = app.handle_key(KeyCode::Char('1'), KeyModifiers::NONE);
+        assert_eq!(app.daemon_log_level, "TRACE");
+        assert_eq!(action, Some(Action::RefreshDaemonLogs));
+
+        let action = app.handle_key(KeyCode::Char('5'), KeyModifiers::NONE);
+        assert_eq!(app.daemon_log_level, "ERROR");
+        assert_eq!(action, Some(Action::RefreshDaemonLogs));
     }
 
     #[test]
