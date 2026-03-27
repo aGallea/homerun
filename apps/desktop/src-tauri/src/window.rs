@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_positioner::{Position, WindowExt};
+use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 const MINI_LABEL: &str = "mini";
 const TRAY_PANEL_LABEL: &str = "tray-panel";
@@ -79,15 +78,17 @@ pub fn show_main_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Toggle the tray dropdown panel. Creates it on first call.
-pub fn toggle_tray_panel_window(app: &AppHandle) {
+/// Toggle the tray dropdown panel. Position it below the tray icon.
+/// `tray_x` and `tray_y` are the physical pixel coordinates of the
+/// bottom-left of the tray icon (from the click event).
+pub fn toggle_tray_panel_window(app: &AppHandle, tray_x: i32, tray_y: i32) {
     if let Some(win) = app.get_webview_window(TRAY_PANEL_LABEL) {
         if win.is_visible().unwrap_or(false) {
             let _ = win.hide();
         } else {
+            let _ = position_below_tray(&win, tray_x, tray_y);
             let _ = win.show();
             let _ = win.set_focus();
-            let _ = win.move_window(Position::TrayBottomCenter);
         }
         return;
     }
@@ -102,10 +103,11 @@ pub fn toggle_tray_panel_window(app: &AppHandle) {
         .resizable(false)
         .skip_taskbar(true)
         .focused(true)
-        .visible(true);
+        .visible(false); // start hidden, position first
 
     if let Ok(win) = builder.build() {
-        let _ = win.move_window(Position::TrayBottomCenter);
+        let _ = position_below_tray(&win, tray_x, tray_y);
+        let _ = win.show();
 
         // Hide on blur
         let app_handle = app.clone();
@@ -117,6 +119,19 @@ pub fn toggle_tray_panel_window(app: &AppHandle) {
             }
         });
     }
+}
+
+/// Position the tray panel centered below the tray icon.
+fn position_below_tray(
+    win: &tauri::WebviewWindow,
+    tray_x: i32,
+    tray_y: i32,
+) -> Result<(), tauri::Error> {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let panel_width = (TRAY_PANEL_WIDTH * scale) as i32;
+    let x = tray_x - panel_width / 2;
+    win.set_position(PhysicalPosition::new(x, tray_y))?;
+    Ok(())
 }
 
 /// Save mini window position to local app data.
@@ -136,10 +151,7 @@ pub fn load_mini_position(app: &AppHandle) -> Option<MiniPosition> {
 }
 
 fn mini_position_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("mini_position.json"))
 }

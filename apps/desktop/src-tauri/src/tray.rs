@@ -13,17 +13,21 @@ pub fn init(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .icon(icon)
         .tooltip("HomeRun")
         .on_tray_icon_event(|tray, event| {
-            // Feed tray position to positioner plugin (required before using TrayBottomCenter)
-            tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
-
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                rect,
                 ..
             } = event
             {
+                let pos = rect.position.to_physical::<i32>(1.0);
+                let size = rect.size.to_physical::<u32>(1.0);
                 let app = tray.app_handle();
-                crate::window::toggle_tray_panel_window(app);
+                crate::window::toggle_tray_panel_window(
+                    app,
+                    pos.x,
+                    pos.y + size.height as i32,
+                );
             }
         })
         .build(app)?;
