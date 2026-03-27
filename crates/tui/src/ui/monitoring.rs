@@ -9,18 +9,19 @@ use crate::app::App;
 pub fn draw_monitoring(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
+
+    let gauge_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[0]);
 
     match &app.metrics {
         Some(metrics) => {
-            draw_cpu_gauge(f, &metrics.system, chunks[0]);
-            draw_memory_gauge(f, &metrics.system, chunks[1]);
-            draw_runner_metrics(f, app, chunks[2]);
+            draw_cpu_gauge(f, &metrics.system, gauge_row[0]);
+            draw_memory_gauge(f, &metrics.system, gauge_row[1]);
+            draw_runner_metrics(f, app, chunks[1]);
         }
         None => {
             let msg = Paragraph::new(" Loading metrics...")
