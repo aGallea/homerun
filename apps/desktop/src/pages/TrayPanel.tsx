@@ -42,7 +42,7 @@ export function TrayPanel() {
 
   useEffect(() => {
     resizeToFit();
-  }, [runners.length, resizeToFit]);
+  }, [runners, resizeToFit]);
 
   const counts = { online: 0, busy: 0, offline: 0 };
   for (const r of runners) {

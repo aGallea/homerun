@@ -51,7 +51,7 @@ export function MiniView() {
   // Resize window when content changes
   useEffect(() => {
     resizeToFit();
-  }, [busy.length, runners.length, resizeToFit]);
+  }, [runners, resizeToFit]);
 
   // Save position on window move (debounced)
   useEffect(() => {
