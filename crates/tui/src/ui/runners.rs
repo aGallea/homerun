@@ -242,27 +242,7 @@ fn draw_runner_panels(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect)
 fn draw_progress_panel(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
-    // Step progress
-    if let Some(ref steps_resp) = app.selected_runner_steps {
-        for step in &steps_resp.steps {
-            let (icon, color) = match step.status.as_str() {
-                "succeeded" => ("\u{2713}", Color::Green),
-                "failed" => ("\u{2715}", Color::Red),
-                "running" => ("\u{27F3}", Color::Yellow),
-                "skipped" => ("\u{2298}", Color::DarkGray),
-                _ => ("\u{25CB}", Color::DarkGray),
-            };
-            let duration_str = format_step_duration(step);
-            lines.push(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(format!("{icon} "), Style::default().fg(color)),
-                Span::styled(step.name.clone(), Style::default().fg(color)),
-                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
-            ]));
-        }
-    }
-
-    // Progress bar
+    // Progress bar first (always visible at top)
     if let (Some(ref started_str), Some(estimate)) =
         (&runner.job_started_at, runner.estimated_job_duration_secs)
     {
@@ -283,7 +263,6 @@ fn draw_progress_panel(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect
                 } else {
                     Color::Green
                 };
-                lines.push(Line::from(""));
                 lines.push(Line::from(vec![
                     Span::raw(" "),
                     Span::styled(bar, Style::default().fg(color)),
@@ -292,7 +271,41 @@ fn draw_progress_panel(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect
                         Style::default().fg(Color::DarkGray),
                     ),
                 ]));
+                lines.push(Line::from(""));
             }
+        }
+    }
+
+    // Steps — show from bottom so the running/latest step is always visible
+    if let Some(ref steps_resp) = app.selected_runner_steps {
+        // Calculate how many lines we have left in the panel
+        // Panel inner height = area.height - 2 (borders) - lines already used
+        let available = (area.height as usize).saturating_sub(2 + lines.len());
+        let steps = &steps_resp.steps;
+        let skip = steps.len().saturating_sub(available);
+
+        if skip > 0 {
+            lines.push(Line::from(Span::styled(
+                format!(" ... {skip} more steps above"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        for step in steps.iter().skip(skip) {
+            let (icon, color) = match step.status.as_str() {
+                "succeeded" => ("\u{2713}", Color::Green),
+                "failed" => ("\u{2715}", Color::Red),
+                "running" => ("\u{27F3}", Color::Yellow),
+                "skipped" => ("\u{2298}", Color::DarkGray),
+                _ => ("\u{25CB}", Color::DarkGray),
+            };
+            let duration_str = format_step_duration(step);
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(format!("{icon} "), Style::default().fg(color)),
+                Span::styled(step.name.clone(), Style::default().fg(color)),
+                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
+            ]));
         }
     }
 
