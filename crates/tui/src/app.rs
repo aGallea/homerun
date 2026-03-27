@@ -262,6 +262,69 @@ impl App {
         }
     }
 
+    /// Returns context-sensitive key hints for the active tab.
+    /// Each row is a Vec of (key, description) pairs laid out as columns.
+    pub fn key_hints(&self) -> Vec<Vec<(&'static str, &'static str)>> {
+        let tab_col = [
+            ("C-1", "Runners"),
+            ("C-2", "Repos"),
+            ("C-3", "Monitoring"),
+            ("C-4", "Daemon"),
+        ];
+
+        let (action_col, extra_col, util_col) = match self.active_tab {
+            Tab::Runners => (
+                vec![
+                    ("s", "Start/Stop"),
+                    ("r", "Restart"),
+                    ("d", "Delete"),
+                    ("+", "Scale Up"),
+                ],
+                vec![
+                    ("a", "Add Runner"),
+                    ("l", "Logs"),
+                    ("e", "Edit Labels"),
+                    ("-", "Scale Down"),
+                ],
+                vec![("?", "Help"), ("q", "Quit")],
+            ),
+            Tab::Repos => (
+                vec![("a", "Add Runner")],
+                vec![],
+                vec![("?", "Help"), ("q", "Quit")],
+            ),
+            Tab::Monitoring => (vec![], vec![], vec![("?", "Help"), ("q", "Quit")]),
+            Tab::Daemon => (
+                vec![
+                    ("s", "Start Daemon"),
+                    ("x", "Stop Daemon"),
+                    ("r", "Restart"),
+                ],
+                vec![("1..5", "Log Level"), ("/", "Search"), ("f", "Follow")],
+                vec![("?", "Help"), ("q", "Quit")],
+            ),
+        };
+
+        let mut rows: Vec<Vec<(&'static str, &'static str)>> = Vec::with_capacity(tab_col.len());
+
+        for (i, &tab_hint) in tab_col.iter().enumerate() {
+            let mut row = Vec::new();
+            row.push(tab_hint);
+            if let Some(hint) = action_col.get(i) {
+                row.push(*hint);
+            }
+            if let Some(hint) = extra_col.get(i) {
+                row.push(*hint);
+            }
+            if let Some(hint) = util_col.get(i) {
+                row.push(*hint);
+            }
+            rows.push(row);
+        }
+
+        rows
+    }
+
     /// Handle a key event. Returns an optional Action requiring a daemon call.
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
         // Help overlay captures all keys except ? and Esc
@@ -708,5 +771,37 @@ mod tests {
                 group_id: None
             }
         ));
+    }
+
+    #[test]
+    fn test_key_hints_runners_tab() {
+        let app = App::new(); // default tab is Runners
+        let hints = app.key_hints();
+        // Should have 4 rows (one per tab nav entry)
+        assert_eq!(hints.len(), 4);
+        // First row should have tab nav + action keys
+        assert!(hints[0].iter().any(|(k, _)| k == &"C-1"));
+        assert!(hints[0].iter().any(|(k, _)| k == &"s"));
+    }
+
+    #[test]
+    fn test_key_hints_daemon_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+        let hints = app.key_hints();
+        assert_eq!(hints.len(), 4);
+        // Should have daemon-specific keys
+        assert!(hints[0].iter().any(|(k, _)| k == &"1..5"));
+        assert!(hints[1].iter().any(|(k, _)| k == &"x"));
+    }
+
+    #[test]
+    fn test_key_hints_monitoring_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Monitoring;
+        let hints = app.key_hints();
+        assert_eq!(hints.len(), 4);
+        // Monitoring has fewer keys — only tab nav + help/quit
+        assert_eq!(hints[0].len(), 2); // C-1 + ? (no action/extra columns)
     }
 }
