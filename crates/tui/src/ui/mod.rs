@@ -1,4 +1,5 @@
 pub mod daemon;
+pub mod header;
 pub mod monitoring;
 pub mod repos;
 pub mod runners;
