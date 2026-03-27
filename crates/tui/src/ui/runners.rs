@@ -517,6 +517,45 @@ fn format_step_duration(step: &StepInfo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::{JobHistoryEntry, RunnerConfig};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::path::PathBuf;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn make_runner(name: &str, state: &str) -> RunnerInfo {
+        RunnerInfo {
+            config: RunnerConfig {
+                id: format!("id-{name}"),
+                name: name.to_string(),
+                repo_owner: "owner".to_string(),
+                repo_name: "repo".to_string(),
+                labels: vec!["self-hosted".to_string()],
+                mode: "app".to_string(),
+                work_dir: PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: state.to_string(),
+            pid: None,
+            uptime_secs: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            job_started_at: None,
+            estimated_job_duration_secs: None,
+        }
+    }
 
     #[test]
     fn test_format_duration() {
@@ -537,5 +576,170 @@ mod tests {
         assert_eq!(state_color("online"), Color::Green);
         assert_eq!(state_color("error"), Color::Red);
         assert_eq!(state_color("busy"), Color::Yellow);
+    }
+
+    #[test]
+    fn test_renders_runner_list_with_names() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_runner("alpha-runner", "online"),
+            make_runner("beta-runner", "busy"),
+        ];
+        app.rebuild_display_items();
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("alpha-runner"),
+            "should render first runner name"
+        );
+        assert!(
+            content.contains("beta-runner"),
+            "should render second runner name"
+        );
+    }
+
+    #[test]
+    fn test_renders_no_runner_selected_when_empty() {
+        let app = App::new();
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("No runner selected"),
+            "should show 'No runner selected' when no runners exist"
+        );
+    }
+
+    #[test]
+    fn test_renders_runner_detail_when_selected() {
+        let mut app = App::new();
+        app.runners = vec![make_runner("my-runner", "online")];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("my-runner"),
+            "should show runner name in detail"
+        );
+        assert!(
+            content.contains("online"),
+            "should show runner state in detail"
+        );
+        assert!(content.contains("owner/repo"), "should show repo in detail");
+    }
+
+    #[test]
+    fn test_renders_group_detail_when_group_selected() {
+        let mut app = App::new();
+        let mut r1 = make_runner("group-runner-1", "online");
+        r1.config.group_id = Some("grp-1".to_string());
+        let mut r2 = make_runner("group-runner-2", "busy");
+        r2.config.group_id = Some("grp-1".to_string());
+        app.runners = vec![r1, r2];
+        app.rebuild_display_items();
+        // First display item should be the group row
+        app.selected_display_index = 0;
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Group"),
+            "should show Group panel when a group row is selected"
+        );
+        assert!(
+            content.contains("group-runner"),
+            "should show group name prefix"
+        );
+    }
+
+    #[test]
+    fn test_renders_history_panel() {
+        let mut app = App::new();
+        app.runners = vec![make_runner("hist-runner", "online")];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        app.selected_runner_history = vec![JobHistoryEntry {
+            job_name: "build-and-test".to_string(),
+            started_at: "2026-03-27T10:00:00Z".to_string(),
+            completed_at: "2026-03-27T10:05:00Z".to_string(),
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: None,
+            duration_secs: 300,
+            job_number: 1,
+        }];
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("History"),
+            "should show History panel when history exists"
+        );
+        assert!(
+            content.contains("build-and-test"),
+            "should show job name in history"
+        );
+    }
+
+    #[test]
+    fn test_renders_empty_detail_no_runners() {
+        let app = App::new();
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("No runner selected"),
+            "should show empty detail message"
+        );
+        assert!(
+            content.contains("add a new runner"),
+            "should show add runner hint"
+        );
     }
 }

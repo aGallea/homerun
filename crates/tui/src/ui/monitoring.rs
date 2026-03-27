@@ -116,11 +116,79 @@ fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::{MetricsResponse, SystemMetrics};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
 
     #[test]
     fn test_gauge_color_thresholds() {
         assert_eq!(gauge_color(0.5), Color::Green);
         assert_eq!(gauge_color(0.8), Color::Yellow);
         assert_eq!(gauge_color(0.95), Color::Red);
+    }
+
+    #[test]
+    fn test_renders_loading_when_no_metrics() {
+        let app = App::new();
+        assert!(app.metrics.is_none());
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_monitoring(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Loading metrics"),
+            "should show loading message when metrics is None"
+        );
+    }
+
+    #[test]
+    fn test_renders_cpu_and_memory_gauges_when_metrics_exist() {
+        let mut app = App::new();
+        app.metrics = Some(MetricsResponse {
+            system: SystemMetrics {
+                cpu_percent: 42.5,
+                memory_used_bytes: 8 * 1024 * 1024 * 1024,
+                memory_total_bytes: 16 * 1024 * 1024 * 1024,
+                disk_used_bytes: 100_000_000_000,
+                disk_total_bytes: 500_000_000_000,
+            },
+            runners: vec![],
+            daemon: None,
+        });
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_monitoring(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("CPU"),
+            "should show CPU gauge when metrics exist"
+        );
+        assert!(
+            content.contains("Memory"),
+            "should show Memory gauge when metrics exist"
+        );
     }
 }

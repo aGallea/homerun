@@ -137,3 +137,114 @@ fn draw_repo_detail(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(paragraph, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{AuthStatus, GitHubUser, RepoInfo};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn make_repo(name: &str) -> RepoInfo {
+        RepoInfo {
+            id: 1,
+            full_name: format!("owner/{name}"),
+            name: name.to_string(),
+            owner: "owner".to_string(),
+            private: false,
+            html_url: format!("https://github.com/owner/{name}"),
+            is_org: false,
+        }
+    }
+
+    #[test]
+    fn test_renders_not_authenticated_when_unauthenticated() {
+        let app = App::new();
+        // auth_status is None by default
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_repos(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Not authenticated"),
+            "should show 'Not authenticated' when auth_status is None"
+        );
+    }
+
+    #[test]
+    fn test_renders_repo_list_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(GitHubUser {
+                login: "testuser".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        app.repos = vec![make_repo("my-project"), make_repo("another-repo")];
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_repos(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("owner/my-project"),
+            "should show first repo name"
+        );
+        assert!(
+            content.contains("owner/another-repo"),
+            "should show second repo name"
+        );
+    }
+
+    #[test]
+    fn test_renders_search_bar_when_searching() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(GitHubUser {
+                login: "testuser".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        app.repos = vec![make_repo("my-project")];
+        app.repo_searching = true;
+        app.repo_search = "my".to_string();
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_repos(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Search:"),
+            "should show search bar when repo_searching is true"
+        );
+    }
+}

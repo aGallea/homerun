@@ -165,3 +165,130 @@ fn draw_login_popup(f: &mut Frame, login_state: &crate::app::LoginState) {
         popup_area,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::LoginState;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    #[test]
+    fn test_full_draw_renders_homerun_title() {
+        let app = App::new();
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &app);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("HomeRun"),
+            "should render the HomeRun title in the outer border"
+        );
+    }
+
+    #[test]
+    fn test_draw_renders_tab_names() {
+        let app = App::new();
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &app);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Runners"), "should render Runners tab");
+        assert!(content.contains("Repos"), "should render Repos tab");
+        assert!(
+            content.contains("Monitoring"),
+            "should render Monitoring tab"
+        );
+        assert!(content.contains("Daemon"), "should render Daemon tab");
+    }
+
+    #[test]
+    fn test_draw_renders_header_info() {
+        let app = App::new();
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &app);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("User:"),
+            "should render User label in header"
+        );
+        assert!(
+            content.contains("Daemon:"),
+            "should render Daemon label in header"
+        );
+    }
+
+    #[test]
+    fn test_help_popup_renders_when_show_help() {
+        let mut app = App::new();
+        app.show_help = true;
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &app);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Help"), "should render Help popup title");
+        assert!(
+            content.contains("Keybindings"),
+            "should render keybindings content in help popup"
+        );
+    }
+
+    #[test]
+    fn test_login_popup_renders_when_login_state_polling() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "DEVCODE".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &app);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Login"), "should render Login popup title");
+        assert!(
+            content.contains("ABCD-1234"),
+            "should render user code in login popup"
+        );
+    }
+}

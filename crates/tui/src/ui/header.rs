@@ -135,3 +135,214 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(Paragraph::new(lines), area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Tab;
+    use crate::client::{AuthStatus, GitHubUser, RunnerConfig, RunnerInfo};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::path::PathBuf;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn make_runner(name: &str, state: &str) -> RunnerInfo {
+        RunnerInfo {
+            config: RunnerConfig {
+                id: format!("id-{name}"),
+                name: name.to_string(),
+                repo_owner: "owner".to_string(),
+                repo_name: "repo".to_string(),
+                labels: vec!["self-hosted".to_string()],
+                mode: "app".to_string(),
+                work_dir: PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: state.to_string(),
+            pid: None,
+            uptime_secs: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            job_started_at: None,
+            estimated_job_duration_secs: None,
+        }
+    }
+
+    #[test]
+    fn test_renders_not_logged_in_when_auth_none() {
+        let app = App::new();
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Not logged in"),
+            "should show 'Not logged in' when auth_status is None"
+        );
+    }
+
+    #[test]
+    fn test_renders_username_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(GitHubUser {
+                login: "testuser".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("testuser"),
+            "should show the username when authenticated"
+        );
+    }
+
+    #[test]
+    fn test_renders_connected_when_daemon_connected() {
+        let mut app = App::new();
+        app.daemon_connected = true;
+
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Connected"),
+            "should show 'Connected' when daemon is connected"
+        );
+    }
+
+    #[test]
+    fn test_renders_disconnected_when_daemon_not_connected() {
+        let mut app = App::new();
+        app.daemon_connected = false;
+
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Disconnected"),
+            "should show 'Disconnected' when daemon is not connected"
+        );
+    }
+
+    #[test]
+    fn test_renders_runner_summary_counts() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_runner("r1", "online"),
+            make_runner("r2", "online"),
+            make_runner("r3", "busy"),
+            make_runner("r4", "offline"),
+        ];
+
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("4 total"),
+            "should show total runner count"
+        );
+        assert!(
+            content.contains("2 online"),
+            "should show online runner count"
+        );
+        assert!(content.contains("1 busy"), "should show busy runner count");
+        assert!(
+            content.contains("1 offline"),
+            "should show offline runner count"
+        );
+    }
+
+    #[test]
+    fn test_renders_key_hints_runners_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Runners;
+
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Start/Stop"),
+            "Runners tab should show Start/Stop hint"
+        );
+        assert!(
+            content.contains("Add Runner"),
+            "Runners tab should show Add Runner hint"
+        );
+    }
+
+    #[test]
+    fn test_renders_key_hints_daemon_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+
+        let backend = TestBackend::new(120, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_header(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Start Daemon"),
+            "Daemon tab should show Start Daemon hint"
+        );
+        assert!(
+            content.contains("Log Level"),
+            "Daemon tab should show Log Level hint"
+        );
+    }
+}
