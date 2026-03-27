@@ -3,33 +3,17 @@ import { useRunners } from "../hooks/useRunners";
 import { useTrayIcon } from "../hooks/useTrayIcon";
 import { api } from "../api/commands";
 import type { RunnerInfo } from "../api/types";
-
-function formatElapsed(jobStartedAt: string | null | undefined): string {
-  if (!jobStartedAt) return "";
-  const started = new Date(jobStartedAt).getTime();
-  if (isNaN(started)) return "";
-  const secs = Math.floor((Date.now() - started) / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const rem = secs % 60;
-  return `${mins}m ${rem.toString().padStart(2, "0")}s`;
-}
-
-function jobProgress(
-  jobStartedAt: string | null | undefined,
-  estimatedDuration: number | null | undefined,
-): number | null {
-  if (!jobStartedAt || !estimatedDuration || estimatedDuration <= 0) return null;
-  const started = new Date(jobStartedAt).getTime();
-  if (isNaN(started)) return null;
-  const elapsed = (Date.now() - started) / 1000;
-  return Math.min(elapsed / estimatedDuration, 1);
-}
+import { jobProgress, formatJobElapsed } from "../utils/runnerHelpers";
 
 function countByState(runners: RunnerInfo[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const r of runners) {
-    const key = r.state === "busy" ? "busy" : r.state === "offline" ? "offline" : "online";
+    const key =
+      r.state === "busy"
+        ? "busy"
+        : r.state === "offline" || r.state === "error"
+          ? "offline"
+          : "online";
     counts[key] = (counts[key] || 0) + 1;
   }
   return counts;
@@ -98,7 +82,7 @@ export function MiniView() {
           <div key={runner.config.id} className="mini-runner-card">
             <div className="mini-runner-top">
               <span className="mini-runner-name">{runner.config.name}</span>
-              <span className="mini-runner-time">{formatElapsed(runner.job_started_at)}</span>
+              <span className="mini-runner-time">{formatJobElapsed(runner.job_started_at)}</span>
             </div>
             <div className="mini-runner-job">{runner.current_job ?? "Starting..."}</div>
             {pct != null && (

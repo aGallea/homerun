@@ -1,28 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useRunners } from "../hooks/useRunners";
+import { useTrayIcon } from "../hooks/useTrayIcon";
 import { api } from "../api/commands";
-import type { RunnerInfo } from "../api/types";
-
-function formatElapsed(jobStartedAt: string | null | undefined): string {
-  if (!jobStartedAt) return "";
-  const started = new Date(jobStartedAt).getTime();
-  if (isNaN(started)) return "";
-  const secs = Math.floor((Date.now() - started) / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const rem = secs % 60;
-  return `${mins}m ${rem.toString().padStart(2, "0")}s`;
-}
-
-function jobProgress(
-  jobStartedAt: string | null | undefined,
-  estimatedDuration: number | null | undefined,
-): number | null {
-  if (!jobStartedAt || !estimatedDuration || estimatedDuration <= 0) return null;
-  const started = new Date(jobStartedAt).getTime();
-  if (isNaN(started)) return null;
-  const elapsed = (Date.now() - started) / 1000;
-  return Math.min(elapsed / estimatedDuration, 1);
-}
+import { jobProgress, formatJobElapsed } from "../utils/runnerHelpers";
 
 const stateColors: Record<string, string> = {
   online: "var(--accent-green)",
@@ -35,33 +15,18 @@ const stateColors: Record<string, string> = {
   deleting: "var(--accent-red)",
 };
 
-function stateLabel(r: RunnerInfo): string {
-  if (r.state === "busy") return "";
-  if (r.state === "online") return "Idle";
-  return r.state.charAt(0).toUpperCase() + r.state.slice(1);
+function stateLabel(state: string): string {
+  if (state === "busy") return "";
+  if (state === "online") return "Idle";
+  return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
 export function TrayPanel() {
-  const [runners, setRunners] = useState<RunnerInfo[]>([]);
-  const [daemonOk, setDaemonOk] = useState(true);
+  const { runners, error } = useRunners();
+  const daemonOk = error === null;
   const [daemonStopping, setDaemonStopping] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listRunners();
-      setRunners(data);
-      setDaemonOk(true);
-    } catch {
-      setRunners([]);
-      setDaemonOk(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 2000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  useTrayIcon(runners, daemonOk);
 
   const counts = { online: 0, busy: 0, offline: 0 };
   for (const r of runners) {
@@ -120,11 +85,13 @@ export function TrayPanel() {
                     {runner.config.name}
                   </span>
                   {runner.state === "busy" && (
-                    <span className="tray-runner-time">{formatElapsed(runner.job_started_at)}</span>
+                    <span className="tray-runner-time">
+                      {formatJobElapsed(runner.job_started_at)}
+                    </span>
                   )}
                   {runner.state !== "busy" && (
                     <span className="tray-runner-state" style={{ color: dotColor }}>
-                      {stateLabel(runner)}
+                      {stateLabel(runner.state)}
                     </span>
                   )}
                 </div>
@@ -154,12 +121,10 @@ export function TrayPanel() {
 
       <div className="tray-actions">
         <button className="tray-action" onClick={() => api.toggleMiniWindow()}>
-          <span>Toggle Mini View</span>
-          <span className="tray-shortcut">⌘⇧M</span>
+          Toggle Mini View
         </button>
         <button className="tray-action" onClick={() => api.showMainWindow()}>
-          <span>Open HomeRun</span>
-          <span className="tray-shortcut">⌘⇧H</span>
+          Open HomeRun
         </button>
         <button
           className="tray-action danger"
@@ -176,15 +141,13 @@ export function TrayPanel() {
               /* ignore */
             } finally {
               setDaemonStopping(false);
-              refresh();
             }
           }}
         >
           {daemonOk ? "Stop Daemon" : "Start Daemon"}
         </button>
         <button className="tray-action" onClick={() => api.quitApp()}>
-          <span>Quit HomeRun</span>
-          <span className="tray-shortcut">⌘Q</span>
+          Quit HomeRun
         </button>
       </div>
     </div>

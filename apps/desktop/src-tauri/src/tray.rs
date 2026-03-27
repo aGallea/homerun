@@ -1,7 +1,7 @@
 use tauri::{
     image::Image,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle,
 };
 
 const TRAY_ID: &str = "homerun-tray";
