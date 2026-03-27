@@ -1872,3 +1872,133 @@ p {
   border-radius: 9999px;
   transition: width 0.3s ease;
 }
+
+/* ---- Mini View (always-on-top window) ---- */
+.mini-view {
+  background: rgba(13, 17, 23, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(48, 54, 61, 0.6);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-primary);
+  min-height: 60px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mini-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mini-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mini-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mini-health-dot.online {
+  background: var(--accent-green);
+}
+
+.mini-health-dot.offline {
+  background: var(--text-secondary);
+}
+
+.mini-label {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.mini-header-right {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.mini-count.online {
+  color: var(--accent-green);
+}
+
+.mini-count.busy {
+  color: var(--accent-yellow);
+}
+
+.mini-count.offline {
+  color: var(--text-secondary);
+}
+
+.mini-runner-card {
+  background: rgba(33, 38, 45, 0.7);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.mini-runner-card:last-child {
+  margin-bottom: 0;
+}
+
+.mini-runner-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.mini-runner-name {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.mini-runner-time {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.mini-runner-job {
+  font-size: 10px;
+  color: var(--accent-yellow);
+  margin-bottom: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-progress-track {
+  height: 3px;
+  background: rgba(48, 54, 61, 0.8);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-progress-bar {
+  height: 100%;
+  background: var(--accent-yellow);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+.mini-progress-bar.over {
+  background: var(--accent-red);
+}
+
+.mini-empty {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 8px 0;
+}
