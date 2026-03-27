@@ -111,7 +111,7 @@ describe("useAuth", () => {
   });
 
   it("polls getAuthStatus every 5 seconds", async () => {
-    const { result } = renderHook(() => useAuth(), { wrapper });
+    renderHook(() => useAuth(), { wrapper });
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
