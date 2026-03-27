@@ -10,9 +10,8 @@ pub fn draw_monitoring(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),
-            Constraint::Length(5),
-            Constraint::Length(5),
+            Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Min(0),
         ])
         .split(area);
@@ -21,8 +20,7 @@ pub fn draw_monitoring(f: &mut Frame, app: &App, area: Rect) {
         Some(metrics) => {
             draw_cpu_gauge(f, &metrics.system, chunks[0]);
             draw_memory_gauge(f, &metrics.system, chunks[1]);
-            draw_disk_gauge(f, &metrics.system, chunks[2]);
-            draw_runner_metrics(f, app, chunks[3]);
+            draw_runner_metrics(f, app, chunks[2]);
         }
         None => {
             let msg = Paragraph::new(" Loading metrics...")
@@ -54,23 +52,6 @@ fn draw_memory_gauge(f: &mut Frame, sys: &crate::client::SystemMetrics, area: Re
     let total = format_bytes(sys.memory_total_bytes);
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::ALL).title(" Memory "))
-        .gauge_style(Style::default().fg(color))
-        .ratio(ratio)
-        .label(format!("{used} / {total}"));
-    f.render_widget(gauge, area);
-}
-
-fn draw_disk_gauge(f: &mut Frame, sys: &crate::client::SystemMetrics, area: Rect) {
-    let ratio = if sys.disk_total_bytes > 0 {
-        (sys.disk_used_bytes as f64 / sys.disk_total_bytes as f64).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let color = gauge_color(ratio);
-    let used = format_bytes(sys.disk_used_bytes);
-    let total = format_bytes(sys.disk_total_bytes);
-    let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(" Disk "))
         .gauge_style(Style::default().fg(color))
         .ratio(ratio)
         .label(format!("{used} / {total}"));
