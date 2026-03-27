@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuild
 const MINI_LABEL: &str = "mini";
 const TRAY_PANEL_LABEL: &str = "tray-panel";
 const MINI_WIDTH: f64 = 280.0;
-const MINI_HEIGHT: f64 = 200.0;
+const MINI_HEIGHT: f64 = 80.0;
 const TRAY_PANEL_WIDTH: f64 = 300.0;
 const TRAY_PANEL_HEIGHT: f64 = 420.0;
 

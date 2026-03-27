@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useRunners } from "../hooks/useRunners";
 import { useTrayIcon } from "../hooks/useTrayIcon";
 import { api } from "../api/commands";
 import type { RunnerInfo } from "../api/types";
 import { jobProgress, formatJobElapsed } from "../utils/runnerHelpers";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
 function countByState(runners: RunnerInfo[]): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -19,9 +20,21 @@ function countByState(runners: RunnerInfo[]): Record<string, number> {
   return counts;
 }
 
+const MINI_WIDTH = 280;
+
 export function MiniView() {
   const { runners, error } = useRunners();
   const positionSaved = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Resize window to fit content
+  const resizeToFit = useCallback(() => {
+    if (!containerRef.current) return;
+    const height = containerRef.current.offsetHeight;
+    getCurrentWindow()
+      .setSize(new LogicalSize(MINI_WIDTH, height))
+      .catch(() => {});
+  }, []);
 
   const busy = runners
     .filter((r) => r.state === "busy")
@@ -34,6 +47,11 @@ export function MiniView() {
   const counts = countByState(runners);
   const daemonOk = error === null;
   useTrayIcon(runners, daemonOk);
+
+  // Resize window when content changes
+  useEffect(() => {
+    resizeToFit();
+  }, [busy.length, runners.length, resizeToFit]);
 
   // Save position on window move (debounced)
   useEffect(() => {
@@ -59,7 +77,7 @@ export function MiniView() {
   }, []);
 
   return (
-    <div className="mini-view" data-tauri-drag-region>
+    <div className="mini-view" ref={containerRef} data-tauri-drag-region>
       <div className="mini-header" data-tauri-drag-region>
         <div className="mini-header-left" data-tauri-drag-region>
           <span className={`mini-health-dot ${daemonOk ? "online" : "offline"}`} />
