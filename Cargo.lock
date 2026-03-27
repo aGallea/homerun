@@ -2637,6 +2637,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-utils"
+version = "0.5.2"
+dependencies = [
+ "axum",
+ "homerun",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
