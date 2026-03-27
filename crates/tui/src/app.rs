@@ -266,10 +266,10 @@ impl App {
     /// Each row is a Vec of (key, description) pairs laid out as columns.
     pub fn key_hints(&self) -> Vec<Vec<(&'static str, &'static str)>> {
         let tab_col = [
-            ("C-1", "Runners"),
-            ("C-2", "Repos"),
-            ("C-3", "Monitoring"),
-            ("C-4", "Daemon"),
+            ("F1", "Runners"),
+            ("F2", "Repos"),
+            ("F3", "Monitoring"),
+            ("F4", "Daemon"),
         ];
 
         let (action_col, extra_col, util_col) = match self.active_tab {
@@ -326,7 +326,7 @@ impl App {
     }
 
     /// Handle a key event. Returns an optional Action requiring a daemon call.
-    pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<Action> {
+    pub fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<Action> {
         // Help overlay captures all keys except ? and Esc
         if self.show_help {
             match code {
@@ -361,33 +361,31 @@ impl App {
             return None;
         }
 
-        // Ctrl+1-4 for tab switching — always works regardless of active tab
-        if modifiers.contains(KeyModifiers::CONTROL) {
-            match code {
-                KeyCode::Char('1') => {
-                    self.active_tab = Tab::Runners;
-                    return None;
-                }
-                KeyCode::Char('2') => {
-                    self.active_tab = Tab::Repos;
-                    if self.repos.is_empty() {
-                        return Some(Action::RefreshRepos);
-                    }
-                    return None;
-                }
-                KeyCode::Char('3') => {
-                    self.active_tab = Tab::Monitoring;
-                    return None;
-                }
-                KeyCode::Char('4') => {
-                    self.active_tab = Tab::Daemon;
-                    if self.daemon_logs.is_empty() {
-                        return Some(Action::RefreshDaemonLogs);
-                    }
-                    return None;
-                }
-                _ => {}
+        // F1-F4 for tab switching — always works regardless of active tab
+        match code {
+            KeyCode::F(1) => {
+                self.active_tab = Tab::Runners;
+                return None;
             }
+            KeyCode::F(2) => {
+                self.active_tab = Tab::Repos;
+                if self.repos.is_empty() {
+                    return Some(Action::RefreshRepos);
+                }
+                return None;
+            }
+            KeyCode::F(3) => {
+                self.active_tab = Tab::Monitoring;
+                return None;
+            }
+            KeyCode::F(4) => {
+                self.active_tab = Tab::Daemon;
+                if self.daemon_logs.is_empty() {
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                return None;
+            }
+            _ => {}
         }
 
         // Daemon tab key handling (before global keys to intercept 1-5 for log levels)
@@ -664,21 +662,21 @@ mod tests {
     #[test]
     fn test_handle_key_tab_switch() {
         let mut app = App::new();
-        app.handle_key(KeyCode::Char('2'), KeyModifiers::CONTROL);
+        app.handle_key(KeyCode::F(2), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Repos);
-        app.handle_key(KeyCode::Char('3'), KeyModifiers::CONTROL);
+        app.handle_key(KeyCode::F(3), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Monitoring);
-        app.handle_key(KeyCode::Char('1'), KeyModifiers::CONTROL);
+        app.handle_key(KeyCode::F(1), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Runners);
-        app.handle_key(KeyCode::Char('4'), KeyModifiers::CONTROL);
+        app.handle_key(KeyCode::F(4), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Daemon);
     }
 
     #[test]
-    fn test_ctrl_tab_switch_from_daemon_tab() {
+    fn test_f_key_tab_switch_from_daemon_tab() {
         let mut app = App::new();
         app.active_tab = Tab::Daemon;
-        app.handle_key(KeyCode::Char('1'), KeyModifiers::CONTROL);
+        app.handle_key(KeyCode::F(1), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Runners);
     }
 
@@ -780,7 +778,7 @@ mod tests {
         // Should have 4 rows (one per tab nav entry)
         assert_eq!(hints.len(), 4);
         // First row should have tab nav + action keys
-        assert!(hints[0].iter().any(|(k, _)| k == &"C-1"));
+        assert!(hints[0].iter().any(|(k, _)| k == &"F1"));
         assert!(hints[0].iter().any(|(k, _)| k == &"s"));
     }
 
@@ -802,6 +800,6 @@ mod tests {
         let hints = app.key_hints();
         assert_eq!(hints.len(), 4);
         // Monitoring has fewer keys — only tab nav + help/quit
-        assert_eq!(hints[0].len(), 2); // C-1 + ? (no action/extra columns)
+        assert_eq!(hints[0].len(), 2); // F1 + ? (no action/extra columns)
     }
 }

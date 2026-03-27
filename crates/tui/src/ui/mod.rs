@@ -104,7 +104,7 @@ fn draw_help_popup(f: &mut Frame) {
     let help_text = "\
   Keybindings
 
-  Ctrl+1-4   Switch tabs
+  F1-F4      Switch tabs
   Up/Down    Navigate list
   s          Start/Stop runner
   r          Restart runner
