@@ -195,21 +195,21 @@ fn draw_runner_panels(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect)
         && (app.selected_runner_steps.is_some() || runner.estimated_job_duration_secs.is_some());
     let has_history = !app.selected_runner_history.is_empty();
 
-    // Dynamic layout based on what's available
+    // Dynamic layout — use percentages so panels share space fairly
     let has_second_panel = has_progress || has_history;
     let chunks = if has_progress && has_history {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(12), // detail
-                Constraint::Min(5),     // progress
-                Constraint::Length(14), // history
+                Constraint::Percentage(30), // detail
+                Constraint::Percentage(40), // progress
+                Constraint::Percentage(30), // history
             ])
             .split(area)
     } else if has_second_panel {
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(12), Constraint::Min(5)])
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(area)
     } else {
         Layout::default()
