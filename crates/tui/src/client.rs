@@ -175,6 +175,15 @@ pub struct StepsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceFlowResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerEvent {
     pub runner_id: String,
     pub event_type: String,
@@ -309,6 +318,40 @@ impl DaemonClient {
         Ok(text)
     }
 
+    async fn raw_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+    ) -> Result<(u16, String)> {
+        let connector = UnixConnector {
+            socket_path: self.socket_path.clone(),
+        };
+        let client: Client<UnixConnector, String> =
+            Client::builder(TokioExecutor::new()).build(connector);
+
+        let uri = format!("http://localhost{path}");
+        let mut builder = Request::builder().method(method).uri(&uri);
+        if body.is_some() {
+            builder = builder.header("content-type", "application/json");
+        }
+        let req = builder.body(body.unwrap_or_default())?;
+
+        let response = client
+            .request(req)
+            .await
+            .context("Failed to connect to daemon — is homerund running?")?;
+
+        let status = response.status().as_u16();
+        let collected = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .context("Failed to read response body")?;
+        let bytes = collected.to_bytes();
+        let text = String::from_utf8_lossy(&bytes).to_string();
+
+        Ok((status, text))
+    }
+
     // --- API methods ---
 
     pub async fn health(&self) -> Result<()> {
@@ -326,6 +369,33 @@ impl DaemonClient {
     pub async fn auth_status(&self) -> Result<AuthStatus> {
         let body = self.request("GET", "/auth/status", None).await?;
         Ok(serde_json::from_str(&body)?)
+    }
+
+    pub async fn start_device_flow(&self) -> Result<DeviceFlowResponse> {
+        let body = self.request("POST", "/auth/device", None).await?;
+        Ok(serde_json::from_str(&body)?)
+    }
+
+    pub async fn poll_device_flow(
+        &self,
+        device_code: &str,
+        interval: u64,
+    ) -> Result<Option<AuthStatus>> {
+        let payload = serde_json::json!({
+            "device_code": device_code,
+            "interval": interval,
+        });
+        let (status, text) = self
+            .raw_request("POST", "/auth/device/poll", Some(payload.to_string()))
+            .await?;
+        if status == 401 {
+            Ok(None)
+        } else if (200..300).contains(&status) {
+            let auth: AuthStatus = serde_json::from_str(&text)?;
+            Ok(Some(auth))
+        } else {
+            bail!("Device flow poll failed ({status}): {text}")
+        }
     }
 
     pub async fn list_runners(&self) -> Result<Vec<RunnerInfo>> {
