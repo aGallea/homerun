@@ -17,6 +17,7 @@ import type {
   StepsResponse,
   StepLogsResponse,
   RunStatusResponse,
+  TrayIconState,
 } from "./types";
 
 export const api = {
@@ -91,4 +92,7 @@ export const api = {
   // Preferences
   getPreferences: () => invoke<Preferences>("get_preferences"),
   updatePreferences: (prefs: Preferences) => invoke<Preferences>("update_preferences", { prefs }),
+
+  // Tray
+  updateTrayIcon: (state: TrayIconState) => invoke<void>("update_tray_icon", { state }),
 };

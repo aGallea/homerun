@@ -401,3 +401,11 @@ pub async fn get_daemon_logs_recent(
         .get_daemon_logs_recent(level.as_deref(), limit, search.as_deref())
         .await
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn update_tray_icon(
+    app_handle: tauri::AppHandle,
+    state: String,
+) -> Result<(), String> {
+    crate::tray::update_icon(&app_handle, &state)
+}

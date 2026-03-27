@@ -234,3 +234,5 @@ export interface Preferences {
   notify_status_changes: boolean;
   notify_job_completions: boolean;
 }
+
+export type TrayIconState = "idle" | "active" | "error" | "offline";
