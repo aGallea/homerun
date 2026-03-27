@@ -401,3 +401,43 @@ pub async fn get_daemon_logs_recent(
         .get_daemon_logs_recent(level.as_deref(), limit, search.as_deref())
         .await
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn update_tray_icon(
+    app_handle: tauri::AppHandle,
+    state: String,
+) -> Result<(), String> {
+    crate::tray::update_icon(&app_handle, &state)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn toggle_mini_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::window::toggle_mini_window(&app_handle)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::window::show_main_window(&app_handle)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn save_mini_position(
+    app_handle: tauri::AppHandle,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    crate::window::save_mini_pos(&app_handle, x, y)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_mini_position(
+    app_handle: tauri::AppHandle,
+) -> Result<Option<(f64, f64)>, String> {
+    Ok(crate::window::load_mini_position(&app_handle).map(|p| (p.x, p.y)))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn quit_app(app_handle: tauri::AppHandle) -> Result<(), String> {
+    app_handle.exit(0);
+    Ok(())
+}

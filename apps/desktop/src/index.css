@@ -40,6 +40,19 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+/* Transparent background for standalone windows (mini, tray) */
+html:has(.mini-view),
+html:has(.mini-view) body,
+html:has(.mini-view) #root {
+  background: transparent;
+}
+
+html:has(.tray-panel),
+html:has(.tray-panel) body,
+html:has(.tray-panel) #root {
+  background: transparent;
+}
+
 a {
   color: var(--accent-blue);
   text-decoration: none;
@@ -1871,4 +1884,296 @@ p {
   height: 100%;
   border-radius: 9999px;
   transition: width 0.3s ease;
+}
+
+/* ---- Mini View (always-on-top window) ---- */
+.mini-view {
+  background: rgba(13, 17, 23, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(48, 54, 61, 0.6);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-primary);
+  min-height: 60px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mini-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mini-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mini-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mini-health-dot.online {
+  background: var(--accent-green);
+}
+
+.mini-health-dot.offline {
+  background: var(--text-secondary);
+}
+
+.mini-label {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.mini-header-right {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.mini-count.online {
+  color: var(--accent-green);
+}
+
+.mini-count.busy {
+  color: var(--accent-yellow);
+}
+
+.mini-count.offline {
+  color: var(--text-secondary);
+}
+
+.mini-runner-card {
+  background: rgba(33, 38, 45, 0.7);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.mini-runner-card:last-child {
+  margin-bottom: 0;
+}
+
+.mini-runner-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.mini-runner-name {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.mini-runner-time {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.mini-runner-job {
+  font-size: 10px;
+  color: var(--accent-yellow);
+  margin-bottom: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-progress-track {
+  height: 3px;
+  background: rgba(48, 54, 61, 0.8);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-progress-bar {
+  height: 100%;
+  background: var(--accent-yellow);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+.mini-progress-bar.over {
+  background: var(--accent-red);
+}
+
+.mini-empty {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ---- Tray Panel (dropdown from menu bar) ---- */
+.tray-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tray-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tray-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tray-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tray-title {
+  font-weight: 600;
+}
+
+.tray-daemon-status {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tray-summary {
+  padding: 8px 14px;
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.tray-muted {
+  color: var(--text-secondary);
+}
+
+.tray-runners {
+  padding: 6px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.tray-runner-row {
+  padding: 8px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.tray-runner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.tray-runner-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.tray-runner-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tray-runner-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tray-runner-time {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.tray-runner-state {
+  font-size: 11px;
+}
+
+.tray-runner-job {
+  font-size: 11px;
+  color: var(--accent-yellow);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tray-progress-track {
+  height: 2px;
+  background: var(--bg-tertiary);
+  border-radius: 1px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.tray-progress-bar {
+  height: 100%;
+  background: var(--accent-yellow);
+  border-radius: 1px;
+  transition: width 1s linear;
+}
+
+.tray-no-runners {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.tray-actions {
+  border-top: 1px solid var(--border);
+  padding: 6px 0;
+}
+
+.tray-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tray-action:hover {
+  background: var(--bg-tertiary);
+}
+
+.tray-action.danger {
+  color: var(--accent-red);
+}
+
+.tray-shortcut {
+  font-size: 10px;
+  opacity: 0.6;
 }

@@ -1,5 +1,7 @@
 mod client;
 mod commands;
+mod tray;
+mod window;
 
 use client::DaemonClient;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItem, SubmenuBuilder};
@@ -17,6 +19,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_positioner::init())
         .manage(AppState {
             client: Mutex::new(client),
         })
@@ -64,8 +67,17 @@ pub fn run() {
                 .select_all()
                 .build()?;
 
+            let toggle_mini = MenuItem::with_id(
+                app,
+                "toggle_mini",
+                "Toggle Mini View",
+                true,
+                Some("CmdOrCtrl+Shift+M"),
+            )?;
+
             let window_submenu = SubmenuBuilder::new(app, "Window")
                 .minimize()
+                .item(&toggle_mini)
                 .separator()
                 .close_window()
                 .build()?;
@@ -109,6 +121,9 @@ pub fn run() {
                             None::<&str>,
                         );
                     }
+                    "toggle_mini" => {
+                        let _ = crate::window::toggle_mini_window(app_handle);
+                    }
                     "settings" => {
                         let _ = app_handle.emit("navigate", "/settings");
                     }
@@ -149,6 +164,12 @@ pub fn run() {
                     Err(e) => eprintln!("Failed to spawn daemon: {e}"),
                 }
             });
+
+            // -- Initialize system tray --
+            if let Err(e) = tray::init(app) {
+                eprintln!("Failed to initialize tray: {e}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -189,6 +210,12 @@ pub fn run() {
             commands::rerun_workflow,
             commands::clear_runner_history,
             commands::delete_history_entry,
+            commands::update_tray_icon,
+            commands::toggle_mini_window,
+            commands::show_main_window,
+            commands::save_mini_position,
+            commands::get_mini_position,
+            commands::quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,25 +1,9 @@
 import { Link } from "react-router-dom";
 import type { RunnerInfo } from "../api/types";
 import { formatElapsed } from "../utils/formatElapsed";
+import { elapsedSeconds, jobProgress } from "../utils/runnerHelpers";
 
 const MAX_VISIBLE = 3;
-
-function elapsedSeconds(jobStartedAt: string | null | undefined): number | null {
-  if (!jobStartedAt) return null;
-  const started = new Date(jobStartedAt).getTime();
-  if (isNaN(started)) return null;
-  return Math.floor((Date.now() - started) / 1000);
-}
-
-function jobProgress(
-  jobStartedAt: string | null | undefined,
-  estimatedDuration: number | null | undefined,
-): number | null {
-  if (!jobStartedAt || !estimatedDuration || estimatedDuration <= 0) return null;
-  const elapsed = elapsedSeconds(jobStartedAt);
-  if (elapsed == null) return null;
-  return Math.min(elapsed / estimatedDuration, 1);
-}
 
 export function ActiveRunners({
   runners,
