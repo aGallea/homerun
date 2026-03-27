@@ -187,6 +187,55 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
                     }
                 }
 
+                // Append job history if available
+                if !app.selected_runner_history.is_empty() {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        " Job History:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )));
+                    // Show most recent jobs first (they come from the API in chronological order)
+                    for entry in app.selected_runner_history.iter().rev().take(10) {
+                        let icon = if entry.succeeded {
+                            "\u{2713}"
+                        } else {
+                            "\u{2717}"
+                        };
+                        let color = if entry.succeeded {
+                            Color::Green
+                        } else {
+                            Color::Red
+                        };
+                        let branch_str = entry
+                            .branch
+                            .as_deref()
+                            .map(|b| {
+                                if let Some(pr) = entry.pr_number {
+                                    format!(" ({b} PR #{pr})")
+                                } else {
+                                    format!(" ({b})")
+                                }
+                            })
+                            .unwrap_or_default();
+                        // Parse and format the timestamp to show just time
+                        let time_str = entry
+                            .started_at
+                            .parse::<chrono::DateTime<chrono::Utc>>()
+                            .map(|dt| dt.format("%H:%M").to_string())
+                            .unwrap_or_default();
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled(format!("{icon} "), Style::default().fg(color)),
+                            Span::styled(&entry.job_name, Style::default().fg(color)),
+                            Span::styled(branch_str, Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                format!("  {time_str}"),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]));
+                    }
+                }
+
                 lines
             } else {
                 vec![

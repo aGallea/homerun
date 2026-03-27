@@ -192,6 +192,19 @@ pub struct RunnerEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobHistoryEntry {
+    pub job_name: String,
+    pub started_at: String,
+    pub completed_at: String,
+    pub succeeded: bool,
+    pub branch: Option<String>,
+    pub pr_number: Option<u64>,
+    pub run_url: Option<String>,
+    #[serde(default)]
+    pub job_number: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchCreateResponse {
     pub group_id: String,
     pub runners: Vec<RunnerInfo>,
@@ -556,6 +569,13 @@ impl DaemonClient {
             .request("GET", &format!("/runners/{runner_id}/steps"), None)
             .await?;
         serde_json::from_str(&body).context("Failed to parse steps response")
+    }
+
+    pub async fn get_job_history(&self, runner_id: &str) -> Result<Vec<JobHistoryEntry>> {
+        let body = self
+            .request("GET", &format!("/runners/{runner_id}/history"), None)
+            .await?;
+        Ok(serde_json::from_str(&body)?)
     }
 
     /// Connect to the daemon's WebSocket endpoint for real-time events.

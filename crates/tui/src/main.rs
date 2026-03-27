@@ -184,6 +184,15 @@ async fn run_tui() -> Result<()> {
                     } else {
                         app.selected_runner_steps = None;
                     }
+                    // Fetch job history for selected runner
+                    if let Some(runner) = app.selected_runner() {
+                        let rid = runner.config.id.clone();
+                        if let Ok(history) = client.get_job_history(&rid).await {
+                            app.selected_runner_history = history;
+                        }
+                    } else {
+                        app.selected_runner_history.clear();
+                    }
                     // Refresh metrics every 5 ticks (~10 seconds)
                     if poll_counter.is_multiple_of(5) {
                         if let Ok(metrics) = client.get_metrics().await {
