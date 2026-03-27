@@ -297,6 +297,10 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
             }
             Ok(())
         }
+        Action::StartLogin => {
+            // TODO: Wire up device flow login (Task 4)
+            Ok(())
+        }
     };
 
     match result {

@@ -26,6 +26,7 @@ pub enum Action {
     StartDaemon,
     StopDaemon,
     RestartDaemon,
+    StartLogin,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,22 @@ impl Tab {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginState {
+    Polling {
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        interval: u64,
+    },
+    Success {
+        username: String,
+    },
+    Error {
+        message: String,
+    },
+}
+
 pub struct App {
     pub active_tab: Tab,
     pub should_quit: bool,
@@ -106,6 +123,7 @@ pub struct App {
     pub daemon_search: String,
     pub daemon_searching: bool,
     pub selected_runner_steps: Option<StepsResponse>,
+    pub login_state: Option<LoginState>,
 }
 
 impl Default for App {
@@ -138,6 +156,7 @@ impl App {
             daemon_search: String::new(),
             daemon_searching: false,
             selected_runner_steps: None,
+            login_state: None,
         }
     }
 
@@ -265,6 +284,8 @@ impl App {
     /// Returns context-sensitive key hints for the active tab.
     /// Each row is a Vec of (key, description) pairs laid out as columns.
     pub fn key_hints(&self) -> Vec<Vec<(&'static str, &'static str)>> {
+        let is_authenticated = self.auth_status.as_ref().is_some_and(|a| a.authenticated);
+
         let tab_col = [
             ("F1", "Runners"),
             ("F2", "Repos"),
@@ -286,14 +307,30 @@ impl App {
                     ("e", "Edit Labels"),
                     ("-", "Scale Down"),
                 ],
-                vec![("?", "Help"), ("q", "Quit")],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
             ),
             Tab::Repos => (
                 vec![("a", "Add Runner")],
                 vec![],
-                vec![("?", "Help"), ("q", "Quit")],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
             ),
-            Tab::Monitoring => (vec![], vec![], vec![("?", "Help"), ("q", "Quit")]),
+            Tab::Monitoring => (
+                vec![],
+                vec![],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
+            ),
             Tab::Daemon => (
                 vec![
                     ("s", "Start Daemon"),
@@ -301,7 +338,11 @@ impl App {
                     ("r", "Restart"),
                 ],
                 vec![("1..5", "Log Level"), ("/", "Search"), ("f", "Follow")],
-                vec![("?", "Help"), ("q", "Quit")],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
             ),
         };
 
@@ -332,6 +373,14 @@ impl App {
             match code {
                 KeyCode::Char('?') | KeyCode::Esc => self.show_help = false,
                 _ => {}
+            }
+            return None;
+        }
+
+        // Login popup captures all keys except Esc
+        if self.login_state.is_some() {
+            if code == KeyCode::Esc {
+                self.login_state = None;
             }
             return None;
         }
@@ -582,6 +631,14 @@ impl App {
                 }
                 None
             }
+            KeyCode::Char('L') => {
+                let is_authenticated = self.auth_status.as_ref().is_some_and(|a| a.authenticated);
+                if !is_authenticated && self.login_state.is_none() {
+                    Some(Action::StartLogin)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -799,7 +856,90 @@ mod tests {
         app.active_tab = Tab::Monitoring;
         let hints = app.key_hints();
         assert_eq!(hints.len(), 4);
-        // Monitoring has fewer keys — only tab nav + help/quit
-        assert_eq!(hints[0].len(), 2); // F1 + ? (no action/extra columns)
+        // Monitoring has fewer keys — only tab nav + util column
+        assert_eq!(hints[0].len(), 2); // F1 + L (no action/extra columns, unauthenticated)
+    }
+
+    #[test]
+    fn test_login_key_starts_login_when_unauthenticated() {
+        let mut app = App::new();
+        let action = app.handle_key(KeyCode::Char('L'), KeyModifiers::NONE);
+        assert_eq!(action, Some(Action::StartLogin));
+    }
+
+    #[test]
+    fn test_login_key_noop_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(crate::client::GitHubUser {
+                login: "octocat".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        let action = app.handle_key(KeyCode::Char('L'), KeyModifiers::NONE);
+        assert_eq!(action, None);
+    }
+
+    #[test]
+    fn test_login_key_noop_when_already_logging_in() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "test".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+        let action = app.handle_key(KeyCode::Char('L'), KeyModifiers::NONE);
+        assert_eq!(action, None);
+    }
+
+    #[test]
+    fn test_esc_cancels_login() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "test".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.login_state.is_none());
+    }
+
+    #[test]
+    fn test_login_popup_swallows_keys() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "test".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+        app.handle_key(KeyCode::Char('q'), KeyModifiers::NONE);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_key_hints_show_login_when_unauthenticated() {
+        let app = App::new();
+        let hints = app.key_hints();
+        let has_login = hints.iter().any(|row| row.iter().any(|(k, _)| *k == "L"));
+        assert!(has_login);
+    }
+
+    #[test]
+    fn test_key_hints_hide_login_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(crate::client::GitHubUser {
+                login: "octocat".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        let hints = app.key_hints();
+        let has_login = hints.iter().any(|row| row.iter().any(|(k, _)| *k == "L"));
+        assert!(!has_login);
     }
 }
