@@ -24,10 +24,46 @@ fn draw_repo_list(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let items: Vec<ListItem> = app
+    let show_search = app.repo_searching || !app.repo_search.is_empty();
+
+    let (search_area, list_area) = if show_search {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, area)
+    };
+
+    if let Some(search_area) = search_area {
+        let search_text = if app.repo_searching {
+            format!(" Search: {}▏", app.repo_search)
+        } else {
+            format!(" Search: {}", app.repo_search)
+        };
+        let search_bar = Paragraph::new(search_text).style(Style::default().fg(Color::Yellow));
+        f.render_widget(search_bar, search_area);
+    }
+
+    let filtered_repos: Vec<(usize, _)> = app
         .repos
         .iter()
-        .map(|r| {
+        .enumerate()
+        .filter(|(_, r)| {
+            if app.repo_search.is_empty() {
+                true
+            } else {
+                r.full_name
+                    .to_lowercase()
+                    .contains(&app.repo_search.to_lowercase())
+            }
+        })
+        .collect();
+
+    let items: Vec<ListItem> = filtered_repos
+        .iter()
+        .map(|(_, r)| {
             let visibility = if r.private { "private" } else { "public" };
             let org_marker = if r.is_org { " [org]" } else { "" };
             let line = Line::from(vec![
@@ -41,12 +77,14 @@ fn draw_repo_list(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let title = if app.repo_search.is_empty() {
+        format!(" Repos ({}) ", app.repos.len())
+    } else {
+        format!(" Repos ({}/{}) ", filtered_repos.len(), app.repos.len())
+    };
+
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Repos ({}) ", app.repos.len())),
-        )
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -54,12 +92,17 @@ fn draw_repo_list(f: &mut Frame, app: &App, area: Rect) {
         )
         .highlight_symbol("▶ ");
 
+    // Map the app's selected_repo_index to the filtered list position
+    let selected_in_filtered = filtered_repos
+        .iter()
+        .position(|(i, _)| *i == app.selected_repo_index);
+
     let mut list_state = ListState::default();
-    if !app.repos.is_empty() {
-        list_state.select(Some(app.selected_repo_index));
+    if !filtered_repos.is_empty() {
+        list_state.select(Some(selected_in_filtered.unwrap_or(0)));
     }
 
-    f.render_stateful_widget(list, area, &mut list_state);
+    f.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 fn draw_repo_detail(f: &mut Frame, app: &App, area: Rect) {

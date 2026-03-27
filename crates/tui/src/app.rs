@@ -126,6 +126,8 @@ pub struct App {
     pub selected_runner_steps: Option<StepsResponse>,
     pub selected_runner_history: Vec<JobHistoryEntry>,
     pub login_state: Option<LoginState>,
+    pub repo_search: String,
+    pub repo_searching: bool,
 }
 
 impl Default for App {
@@ -160,6 +162,8 @@ impl App {
             selected_runner_steps: None,
             selected_runner_history: Vec::new(),
             login_state: None,
+            repo_search: String::new(),
+            repo_searching: false,
         }
     }
 
@@ -317,7 +321,7 @@ impl App {
                 },
             ),
             Tab::Repos => (
-                vec![("a", "Add Runner")],
+                vec![("a", "Add Runner"), ("/", "Search")],
                 vec![],
                 if is_authenticated {
                     vec![("?", "Help"), ("q", "Quit")]
@@ -384,6 +388,27 @@ impl App {
         if self.login_state.is_some() {
             if code == KeyCode::Esc {
                 self.login_state = None;
+            }
+            return None;
+        }
+
+        // Repos tab search mode captures all input
+        if self.active_tab == Tab::Repos && self.repo_searching {
+            match code {
+                KeyCode::Esc => {
+                    self.repo_searching = false;
+                    self.repo_search.clear();
+                }
+                KeyCode::Enter => {
+                    self.repo_searching = false;
+                }
+                KeyCode::Backspace => {
+                    self.repo_search.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.repo_search.push(c);
+                }
+                _ => {}
             }
             return None;
         }
@@ -631,6 +656,12 @@ impl App {
                     {
                         return Some(Action::ScaleDown(group_id));
                     }
+                }
+                None
+            }
+            KeyCode::Char('/') => {
+                if self.active_tab == Tab::Repos {
+                    self.repo_searching = true;
                 }
                 None
             }
@@ -946,5 +977,43 @@ mod tests {
         let hints = app.key_hints();
         let has_login = hints.iter().any(|row| row.iter().any(|(k, _)| *k == "L"));
         assert!(!has_login);
+    }
+
+    #[test]
+    fn test_repo_search_mode() {
+        let mut app = App::new();
+        app.active_tab = Tab::Repos;
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE);
+        assert!(app.repo_searching);
+
+        app.handle_key(KeyCode::Char('t'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('e'), KeyModifiers::NONE);
+        assert_eq!(app.repo_search, "te");
+
+        app.handle_key(KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(app.repo_search, "t");
+
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(!app.repo_searching);
+        assert!(app.repo_search.is_empty());
+    }
+
+    #[test]
+    fn test_repo_search_enter_confirms() {
+        let mut app = App::new();
+        app.active_tab = Tab::Repos;
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('t'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!app.repo_searching);
+        assert_eq!(app.repo_search, "t"); // search term preserved after Enter
+    }
+
+    #[test]
+    fn test_repo_search_slash_only_on_repos_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Runners;
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE);
+        assert!(!app.repo_searching);
     }
 }
