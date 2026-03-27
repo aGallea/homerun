@@ -206,4 +206,7 @@ export function useRunners() {
   };
 }
 
-export type RunnersContextType = ReturnType<typeof useRunners>;
+export type RunnersContextType = ReturnType<typeof useRunners> & {
+  daemonStarting: boolean;
+  handleStartDaemon: () => Promise<void>;
+};

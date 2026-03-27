@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import { useOutletContext } from "react-router-dom";
 import { useDaemonLogs } from "../hooks/useDaemonLogs";
 import { useMetrics } from "../hooks/useMetrics";
 import { api } from "../api/commands";
+import type { RunnersContextType } from "../hooks/useRunners";
 
 const LOG_LEVELS = ["ERROR", "WARN", "INFO", "DEBUG", "TRACE"];
 
@@ -52,6 +54,7 @@ function cpuColor(percent: number): string {
 }
 
 export function Daemon() {
+  const { daemonStarting, handleStartDaemon } = useOutletContext<RunnersContextType>();
   const { logs, level, setLevel, search, setSearch, follow, setFollow, loading, error } =
     useDaemonLogs();
   const { metrics } = useMetrics();
@@ -103,10 +106,10 @@ export function Daemon() {
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
         <button
           className="btn btn-primary"
-          onClick={() => handleDaemonAction("start")}
-          disabled={actionLoading !== null || !!metrics?.daemon}
+          onClick={handleStartDaemon}
+          disabled={actionLoading !== null || daemonStarting || !!metrics?.daemon}
         >
-          {actionLoading === "start" ? "Starting..." : "Start"}
+          {daemonStarting ? "Starting..." : "Start"}
         </button>
         <button
           className="btn btn-secondary"
