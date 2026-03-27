@@ -113,6 +113,10 @@ async fn run_tui() -> Result<()> {
         app.metrics = Some(metrics);
     }
 
+    // Auto-start device flow if not authenticated
+    let auto_login =
+        !app.auth_status.as_ref().is_some_and(|a| a.authenticated) && app.daemon_connected;
+
     // Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -127,6 +131,17 @@ async fn run_tui() -> Result<()> {
     // Try to connect WebSocket for real-time updates
     if let Ok(ws_read) = client.connect_events().await {
         start_ws_forwarding(event_tx, ws_read);
+    }
+
+    if auto_login {
+        if let Ok(flow) = client.start_device_flow().await {
+            app.login_state = Some(homerun::app::LoginState::Polling {
+                device_code: flow.device_code,
+                user_code: flow.user_code,
+                verification_uri: flow.verification_uri,
+                interval: flow.interval,
+            });
+        }
     }
 
     // Main loop
@@ -178,6 +193,46 @@ async fn run_tui() -> Result<()> {
                     // Refresh daemon logs when on Daemon tab
                     if app.active_tab == homerun::app::Tab::Daemon {
                         refresh_daemon_logs(&client, &mut app).await;
+                    }
+                    // Auto-dismiss success state (set on the previous tick)
+                    if let Some(homerun::app::LoginState::Success { ref username }) =
+                        app.login_state
+                    {
+                        app.status_message = Some(format!("Logged in as {username}"));
+                        app.login_state = None;
+                        // Refresh repos now that we're authenticated
+                        if let Ok(repos) = client.list_repos().await {
+                            app.repos = repos;
+                        }
+                    }
+                    // Poll device flow if login is in progress
+                    if let Some(homerun::app::LoginState::Polling {
+                        ref device_code,
+                        interval,
+                        ..
+                    }) = app.login_state
+                    {
+                        let dc = device_code.clone();
+                        match client.poll_device_flow(&dc, interval).await {
+                            Ok(Some(auth)) => {
+                                let username = auth
+                                    .user
+                                    .as_ref()
+                                    .map(|u| u.login.clone())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                app.auth_status = Some(auth);
+                                app.login_state =
+                                    Some(homerun::app::LoginState::Success { username });
+                            }
+                            Ok(None) => {
+                                // Still pending, keep polling
+                            }
+                            Err(e) => {
+                                app.login_state = Some(homerun::app::LoginState::Error {
+                                    message: e.to_string(),
+                                });
+                            }
+                        }
                     }
                 }
                 AppEvent::DaemonEvent(_json) => {
@@ -298,7 +353,21 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
             Ok(())
         }
         Action::StartLogin => {
-            // TODO: Wire up device flow login (Task 4)
+            match client.start_device_flow().await {
+                Ok(flow) => {
+                    app.login_state = Some(homerun::app::LoginState::Polling {
+                        device_code: flow.device_code,
+                        user_code: flow.user_code,
+                        verification_uri: flow.verification_uri,
+                        interval: flow.interval,
+                    });
+                }
+                Err(e) => {
+                    app.login_state = Some(homerun::app::LoginState::Error {
+                        message: e.to_string(),
+                    });
+                }
+            }
             Ok(())
         }
     };
