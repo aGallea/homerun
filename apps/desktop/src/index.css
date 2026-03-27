@@ -40,6 +40,19 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+/* Transparent background for standalone windows (mini, tray) */
+html:has(.mini-view),
+html:has(.mini-view) body,
+html:has(.mini-view) #root {
+  background: transparent;
+}
+
+html:has(.tray-panel),
+html:has(.tray-panel) body,
+html:has(.tray-panel) #root {
+  background: transparent;
+}
+
 a {
   color: var(--accent-blue);
   text-decoration: none;
