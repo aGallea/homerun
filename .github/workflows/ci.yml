@@ -97,7 +97,10 @@ jobs:
           path: react-coverage/
 
       - name: Merge coverage
-        run: cat daemon-lcov.info tui-lcov.info react-coverage/lcov.info > lcov.info
+        run: |
+          # Prefix React lcov paths with apps/desktop/ so they match repo-root-relative paths
+          sed 's|^SF:src/|SF:apps/desktop/src/|' react-coverage/lcov.info > react-lcov-fixed.info
+          cat daemon-lcov.info tui-lcov.info react-lcov-fixed.info > lcov.info
 
       - name: Coverage Report
         if: always()
