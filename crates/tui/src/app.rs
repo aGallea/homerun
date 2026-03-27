@@ -699,6 +699,8 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            job_started_at: None,
+            estimated_job_duration_secs: None,
         }
     }
 

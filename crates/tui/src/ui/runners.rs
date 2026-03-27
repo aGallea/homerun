@@ -187,6 +187,48 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
                     }
                 }
 
+                // Show job progress bar if estimated duration is available
+                if runner.state == "busy" {
+                    if let (Some(ref started_str), Some(estimate)) =
+                        (&runner.job_started_at, runner.estimated_job_duration_secs)
+                    {
+                        if estimate > 0 {
+                            if let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_str) {
+                                let elapsed = (chrono::Utc::now()
+                                    - started.with_timezone(&chrono::Utc))
+                                .num_seconds()
+                                .max(0) as u64;
+                                let pct =
+                                    ((elapsed as f64 / estimate as f64) * 100.0).min(100.0) as u16;
+                                let bar_width = 20u16;
+                                let filled = ((pct as f64 / 100.0) * bar_width as f64) as usize;
+                                let empty = bar_width as usize - filled;
+                                let bar = format!(
+                                    "{}{}",
+                                    "\u{2588}".repeat(filled),
+                                    "\u{2591}".repeat(empty)
+                                );
+                                let elapsed_m = elapsed / 60;
+                                let estimate_m = estimate / 60;
+                                let color = if pct >= 100 {
+                                    Color::Yellow
+                                } else {
+                                    Color::Green
+                                };
+                                lines.push(Line::from(""));
+                                lines.push(Line::from(vec![
+                                    Span::raw("  "),
+                                    Span::styled(bar, Style::default().fg(color)),
+                                    Span::styled(
+                                        format!(" {pct}% ({elapsed_m}m / ~{estimate_m}m)"),
+                                        Style::default().fg(Color::DarkGray),
+                                    ),
+                                ]));
+                            }
+                        }
+                    }
+                }
+
                 // Append job history if available
                 if !app.selected_runner_history.is_empty() {
                     lines.push(Line::from(""));
@@ -223,13 +265,24 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
                             .parse::<chrono::DateTime<chrono::Utc>>()
                             .map(|dt| dt.format("%H:%M").to_string())
                             .unwrap_or_default();
+                        let duration_str = if entry.duration_secs > 0 {
+                            let mins = entry.duration_secs / 60;
+                            let secs = entry.duration_secs % 60;
+                            if mins > 0 {
+                                format!(" {mins}m{secs}s")
+                            } else {
+                                format!(" {secs}s")
+                            }
+                        } else {
+                            String::new()
+                        };
                         lines.push(Line::from(vec![
                             Span::raw("  "),
                             Span::styled(format!("{icon} "), Style::default().fg(color)),
                             Span::styled(&entry.job_name, Style::default().fg(color)),
                             Span::styled(branch_str, Style::default().fg(Color::DarkGray)),
                             Span::styled(
-                                format!("  {time_str}"),
+                                format!("  {time_str}{duration_str}"),
                                 Style::default().fg(Color::DarkGray),
                             ),
                         ]));

@@ -62,6 +62,10 @@ pub struct RunnerInfo {
     pub current_job: Option<String>,
     #[serde(default)]
     pub job_context: Option<JobContext>,
+    #[serde(default)]
+    pub job_started_at: Option<String>,
+    #[serde(default)]
+    pub estimated_job_duration_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +204,8 @@ pub struct JobHistoryEntry {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub run_url: Option<String>,
+    #[serde(default)]
+    pub duration_secs: u64,
     #[serde(default)]
     pub job_number: u32,
 }
