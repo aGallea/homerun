@@ -153,149 +153,12 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
-    let content = match app.selected_display_item() {
+    match app.selected_display_item() {
         Some(DisplayItem::RunnerRow { runner_index, .. }) => {
             if let Some(runner) = app.runners.get(*runner_index) {
-                let base = format_runner_detail(runner, app);
-                let mut lines: Vec<Line> =
-                    base.lines().map(|l| Line::from(l.to_string())).collect();
-
-                // Append step progress if available for this runner
-                if runner.state == "busy" {
-                    if let Some(ref steps_resp) = app.selected_runner_steps {
-                        lines.push(Line::from(""));
-                        lines.push(Line::from(Span::styled(
-                            format!(" Job Steps: ({})", steps_resp.job_name),
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )));
-                        for step in &steps_resp.steps {
-                            let (icon, color) = match step.status.as_str() {
-                                "succeeded" => ("\u{2713}", Color::Green),
-                                "failed" => ("\u{2715}", Color::Red),
-                                "running" => ("\u{27F3}", Color::Yellow),
-                                "skipped" => ("\u{2298}", Color::DarkGray),
-                                _ => ("\u{25CB}", Color::DarkGray), // pending
-                            };
-                            let duration_str = format_step_duration(step);
-                            lines.push(Line::from(vec![
-                                Span::raw("  "),
-                                Span::styled(format!("{icon} "), Style::default().fg(color)),
-                                Span::styled(step.name.clone(), Style::default().fg(color)),
-                                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
-                            ]));
-                        }
-                    }
-                }
-
-                // Show job progress bar if estimated duration is available
-                if runner.state == "busy" {
-                    if let (Some(ref started_str), Some(estimate)) =
-                        (&runner.job_started_at, runner.estimated_job_duration_secs)
-                    {
-                        if estimate > 0 {
-                            if let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_str) {
-                                let elapsed = (chrono::Utc::now()
-                                    - started.with_timezone(&chrono::Utc))
-                                .num_seconds()
-                                .max(0) as u64;
-                                let pct =
-                                    ((elapsed as f64 / estimate as f64) * 100.0).min(100.0) as u16;
-                                let bar_width = 20u16;
-                                let filled = ((pct as f64 / 100.0) * bar_width as f64) as usize;
-                                let empty = bar_width as usize - filled;
-                                let bar = format!(
-                                    "{}{}",
-                                    "\u{2588}".repeat(filled),
-                                    "\u{2591}".repeat(empty)
-                                );
-                                let elapsed_m = elapsed / 60;
-                                let estimate_m = estimate / 60;
-                                let color = if pct >= 100 {
-                                    Color::Yellow
-                                } else {
-                                    Color::Green
-                                };
-                                lines.push(Line::from(""));
-                                lines.push(Line::from(vec![
-                                    Span::raw("  "),
-                                    Span::styled(bar, Style::default().fg(color)),
-                                    Span::styled(
-                                        format!(" {pct}% ({elapsed_m}m / ~{estimate_m}m)"),
-                                        Style::default().fg(Color::DarkGray),
-                                    ),
-                                ]));
-                            }
-                        }
-                    }
-                }
-
-                // Append job history if available
-                if !app.selected_runner_history.is_empty() {
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        " Job History:",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )));
-                    // Show most recent jobs first (they come from the API in chronological order)
-                    for entry in app.selected_runner_history.iter().rev().take(10) {
-                        let icon = if entry.succeeded {
-                            "\u{2713}"
-                        } else {
-                            "\u{2717}"
-                        };
-                        let color = if entry.succeeded {
-                            Color::Green
-                        } else {
-                            Color::Red
-                        };
-                        let branch_str = entry
-                            .branch
-                            .as_deref()
-                            .map(|b| {
-                                if let Some(pr) = entry.pr_number {
-                                    format!(" ({b} PR #{pr})")
-                                } else {
-                                    format!(" ({b})")
-                                }
-                            })
-                            .unwrap_or_default();
-                        // Parse and format the timestamp to show just time
-                        let time_str = entry
-                            .started_at
-                            .parse::<chrono::DateTime<chrono::Utc>>()
-                            .map(|dt| dt.format("%H:%M").to_string())
-                            .unwrap_or_default();
-                        let duration_str = if entry.duration_secs > 0 {
-                            let mins = entry.duration_secs / 60;
-                            let secs = entry.duration_secs % 60;
-                            if mins > 0 {
-                                format!(" {mins}m{secs}s")
-                            } else {
-                                format!(" {secs}s")
-                            }
-                        } else {
-                            String::new()
-                        };
-                        lines.push(Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled(format!("{icon} "), Style::default().fg(color)),
-                            Span::styled(&entry.job_name, Style::default().fg(color)),
-                            Span::styled(branch_str, Style::default().fg(Color::DarkGray)),
-                            Span::styled(
-                                format!("  {time_str}{duration_str}"),
-                                Style::default().fg(Color::DarkGray),
-                            ),
-                        ]));
-                    }
-                }
-
-                lines
+                draw_runner_panels(f, app, runner, area);
             } else {
-                vec![
-                    Line::from(" No runner selected."),
-                    Line::from(""),
-                    Line::from(" Press 'a' to add a new runner."),
-                ]
+                draw_empty_detail(f, area);
             }
         }
         Some(DisplayItem::GroupRow {
@@ -305,18 +168,199 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
             status_summary,
         }) => {
             let s = format_group_detail(group_id, name_prefix, *runner_count, status_summary);
-            s.lines().map(|l| Line::from(l.to_string())).collect()
+            let lines: Vec<Line> = s.lines().map(|l| Line::from(l.to_string())).collect();
+            let paragraph = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title(" Group "));
+            f.render_widget(paragraph, area);
         }
-        None => vec![
-            Line::from(" No runner selected."),
-            Line::from(""),
-            Line::from(" Press 'a' to add a new runner."),
-        ],
-    };
+        None => {
+            draw_empty_detail(f, area);
+        }
+    }
+}
 
+fn draw_empty_detail(f: &mut Frame, area: Rect) {
+    let content = vec![
+        Line::from(" No runner selected."),
+        Line::from(""),
+        Line::from(" Press 'a' to add a new runner."),
+    ];
     let paragraph =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title(" Detail "));
+    f.render_widget(paragraph, area);
+}
 
+fn draw_runner_panels(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect) {
+    let has_progress = runner.state == "busy"
+        && (app.selected_runner_steps.is_some() || runner.estimated_job_duration_secs.is_some());
+    let has_history = !app.selected_runner_history.is_empty();
+
+    // Dynamic layout based on what's available
+    let has_second_panel = has_progress || has_history;
+    let chunks = if has_progress && has_history {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(12), // detail
+                Constraint::Min(5),     // progress
+                Constraint::Length(14), // history
+            ])
+            .split(area)
+    } else if has_second_panel {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(12), Constraint::Min(5)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0)])
+            .split(area)
+    };
+
+    // Panel 1: Runner details
+    let detail_text = format_runner_detail(runner, app);
+    let detail_lines: Vec<Line> = detail_text
+        .lines()
+        .map(|l| Line::from(l.to_string()))
+        .collect();
+    let detail = Paragraph::new(detail_lines)
+        .block(Block::default().borders(Borders::ALL).title(" Detail "));
+    f.render_widget(detail, chunks[0]);
+
+    // Panel 2 & 3: Progress and/or History
+    if has_progress && has_history {
+        draw_progress_panel(f, app, runner, chunks[1]);
+        draw_history_panel(f, app, chunks[2]);
+    } else if has_progress {
+        draw_progress_panel(f, app, runner, chunks[1]);
+    } else if has_second_panel {
+        draw_history_panel(f, app, chunks[1]);
+    }
+}
+
+fn draw_progress_panel(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Step progress
+    if let Some(ref steps_resp) = app.selected_runner_steps {
+        for step in &steps_resp.steps {
+            let (icon, color) = match step.status.as_str() {
+                "succeeded" => ("\u{2713}", Color::Green),
+                "failed" => ("\u{2715}", Color::Red),
+                "running" => ("\u{27F3}", Color::Yellow),
+                "skipped" => ("\u{2298}", Color::DarkGray),
+                _ => ("\u{25CB}", Color::DarkGray),
+            };
+            let duration_str = format_step_duration(step);
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(format!("{icon} "), Style::default().fg(color)),
+                Span::styled(step.name.clone(), Style::default().fg(color)),
+                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
+    // Progress bar
+    if let (Some(ref started_str), Some(estimate)) =
+        (&runner.job_started_at, runner.estimated_job_duration_secs)
+    {
+        if estimate > 0 {
+            if let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_str) {
+                let elapsed = (chrono::Utc::now() - started.with_timezone(&chrono::Utc))
+                    .num_seconds()
+                    .max(0) as u64;
+                let pct = ((elapsed as f64 / estimate as f64) * 100.0).min(100.0) as u16;
+                let bar_width = 20u16;
+                let filled = ((pct as f64 / 100.0) * bar_width as f64) as usize;
+                let empty = bar_width as usize - filled;
+                let bar = format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty));
+                let elapsed_m = elapsed / 60;
+                let estimate_m = estimate / 60;
+                let color = if pct >= 100 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                };
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(bar, Style::default().fg(color)),
+                    Span::styled(
+                        format!(" {pct}% ({elapsed_m}m / ~{estimate_m}m)"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
+    }
+
+    let title = app
+        .selected_runner_steps
+        .as_ref()
+        .map(|s| format!(" Progress: {} ", s.job_name))
+        .unwrap_or_else(|| " Progress ".to_string());
+    let paragraph =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
+    f.render_widget(paragraph, area);
+}
+
+fn draw_history_panel(f: &mut Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    for entry in app.selected_runner_history.iter().rev().take(10) {
+        let icon = if entry.succeeded {
+            "\u{2713}"
+        } else {
+            "\u{2717}"
+        };
+        let color = if entry.succeeded {
+            Color::Green
+        } else {
+            Color::Red
+        };
+        let branch_str = entry
+            .branch
+            .as_deref()
+            .map(|b| {
+                if let Some(pr) = entry.pr_number {
+                    format!(" ({b} PR #{pr})")
+                } else {
+                    format!(" ({b})")
+                }
+            })
+            .unwrap_or_default();
+        let time_str = entry
+            .started_at
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .map(|dt| dt.format("%H:%M").to_string())
+            .unwrap_or_default();
+        let duration_str = if entry.duration_secs > 0 {
+            let mins = entry.duration_secs / 60;
+            let secs = entry.duration_secs % 60;
+            if mins > 0 {
+                format!(" {mins}m{secs}s")
+            } else {
+                format!(" {secs}s")
+            }
+        } else {
+            String::new()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
+            Span::styled(&entry.job_name, Style::default().fg(color)),
+            Span::styled(branch_str, Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("  {time_str}{duration_str}"),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
+    let paragraph =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" History "));
     f.render_widget(paragraph, area);
 }
 
