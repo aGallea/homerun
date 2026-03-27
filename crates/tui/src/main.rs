@@ -195,12 +195,16 @@ async fn run_tui() -> Result<()> {
         }
     }
 
+    // Drop the event receiver so background tasks detect the closed channel and exit
+    drop(events);
+
     // Restore terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    Ok(())
+    // Force exit — spawn_blocking tasks can keep the tokio runtime alive
+    std::process::exit(0);
 }
 
 async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
