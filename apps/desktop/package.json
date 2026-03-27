@@ -8,6 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prepare-sidecar": "cd ../.. && cargo build -p homerund && mkdir -p apps/desktop/src-tauri/binaries && cp target/debug/homerund \"apps/desktop/src-tauri/binaries/homerund-$(rustc -vV | grep host | cut -d' ' -f2)\""
   },
   "dependencies": {
@@ -24,6 +27,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
+    "@vitest/coverage-v8": "^4.1.2",
     "jsdom": "^29.0.1",
     "typescript": "^5",
     "vite": "^6",
