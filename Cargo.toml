@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/daemon", "crates/tui"]
+members = ["crates/daemon", "crates/tui", "crates/test-utils"]
 
 [workspace.package]
 version = "0.5.2"

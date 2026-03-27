@@ -153,47 +153,12 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
-    let content = match app.selected_display_item() {
+    match app.selected_display_item() {
         Some(DisplayItem::RunnerRow { runner_index, .. }) => {
             if let Some(runner) = app.runners.get(*runner_index) {
-                let base = format_runner_detail(runner, app);
-                let mut lines: Vec<Line> =
-                    base.lines().map(|l| Line::from(l.to_string())).collect();
-
-                // Append step progress if available for this runner
-                if runner.state == "busy" {
-                    if let Some(ref steps_resp) = app.selected_runner_steps {
-                        lines.push(Line::from(""));
-                        lines.push(Line::from(Span::styled(
-                            format!(" Job Steps: ({})", steps_resp.job_name),
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )));
-                        for step in &steps_resp.steps {
-                            let (icon, color) = match step.status.as_str() {
-                                "succeeded" => ("\u{2713}", Color::Green),
-                                "failed" => ("\u{2715}", Color::Red),
-                                "running" => ("\u{27F3}", Color::Yellow),
-                                "skipped" => ("\u{2298}", Color::DarkGray),
-                                _ => ("\u{25CB}", Color::DarkGray), // pending
-                            };
-                            let duration_str = format_step_duration(step);
-                            lines.push(Line::from(vec![
-                                Span::raw("  "),
-                                Span::styled(format!("{icon} "), Style::default().fg(color)),
-                                Span::styled(step.name.clone(), Style::default().fg(color)),
-                                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
-                            ]));
-                        }
-                    }
-                }
-
-                lines
+                draw_runner_panels(f, app, runner, area);
             } else {
-                vec![
-                    Line::from(" No runner selected."),
-                    Line::from(""),
-                    Line::from(" Press 'a' to add a new runner."),
-                ]
+                draw_empty_detail(f, area);
             }
         }
         Some(DisplayItem::GroupRow {
@@ -203,18 +168,216 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
             status_summary,
         }) => {
             let s = format_group_detail(group_id, name_prefix, *runner_count, status_summary);
-            s.lines().map(|l| Line::from(l.to_string())).collect()
+            let lines: Vec<Line> = s.lines().map(|l| Line::from(l.to_string())).collect();
+            let paragraph = Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title(" Group "));
+            f.render_widget(paragraph, area);
         }
-        None => vec![
-            Line::from(" No runner selected."),
-            Line::from(""),
-            Line::from(" Press 'a' to add a new runner."),
-        ],
-    };
+        None => {
+            draw_empty_detail(f, area);
+        }
+    }
+}
 
+fn draw_empty_detail(f: &mut Frame, area: Rect) {
+    let content = vec![
+        Line::from(" No runner selected."),
+        Line::from(""),
+        Line::from(" Press 'a' to add a new runner."),
+    ];
     let paragraph =
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title(" Detail "));
+    f.render_widget(paragraph, area);
+}
 
+fn draw_runner_panels(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect) {
+    let has_progress = runner.state == "busy"
+        && (app.selected_runner_steps.is_some() || runner.estimated_job_duration_secs.is_some());
+    let has_history = !app.selected_runner_history.is_empty();
+
+    // Dynamic layout — use percentages so panels share space fairly
+    let has_second_panel = has_progress || has_history;
+    let chunks = if has_progress && has_history {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(30), // detail
+                Constraint::Percentage(40), // progress
+                Constraint::Percentage(30), // history
+            ])
+            .split(area)
+    } else if has_second_panel {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0)])
+            .split(area)
+    };
+
+    // Panel 1: Runner details
+    let detail_text = format_runner_detail(runner, app);
+    let detail_lines: Vec<Line> = detail_text
+        .lines()
+        .map(|l| Line::from(l.to_string()))
+        .collect();
+    let detail = Paragraph::new(detail_lines)
+        .block(Block::default().borders(Borders::ALL).title(" Detail "));
+    f.render_widget(detail, chunks[0]);
+
+    // Panel 2 & 3: Progress and/or History
+    if has_progress && has_history {
+        draw_progress_panel(f, app, runner, chunks[1]);
+        draw_history_panel(f, app, chunks[2]);
+    } else if has_progress {
+        draw_progress_panel(f, app, runner, chunks[1]);
+    } else if has_second_panel {
+        draw_history_panel(f, app, chunks[1]);
+    }
+}
+
+fn draw_progress_panel(f: &mut Frame, app: &App, runner: &RunnerInfo, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Progress bar first (always visible at top)
+    if let (Some(ref started_str), Some(estimate)) =
+        (&runner.job_started_at, runner.estimated_job_duration_secs)
+    {
+        if estimate > 0 {
+            if let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_str) {
+                let elapsed = (chrono::Utc::now() - started.with_timezone(&chrono::Utc))
+                    .num_seconds()
+                    .max(0) as u64;
+                let pct = ((elapsed as f64 / estimate as f64) * 100.0).min(100.0) as u16;
+                let bar_width = 20u16;
+                let filled = ((pct as f64 / 100.0) * bar_width as f64) as usize;
+                let empty = bar_width as usize - filled;
+                let bar = format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty));
+                let elapsed_m = elapsed / 60;
+                let estimate_m = estimate / 60;
+                let color = if pct >= 100 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                };
+                lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(bar, Style::default().fg(color)),
+                    Span::styled(
+                        format!(" {pct}% ({elapsed_m}m / ~{estimate_m}m)"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+                lines.push(Line::from(""));
+            }
+        }
+    }
+
+    // Steps — show from bottom so the running/latest step is always visible
+    if let Some(ref steps_resp) = app.selected_runner_steps {
+        // Panel inner height = area.height - 2 (borders) - lines already used
+        let available = (area.height as usize).saturating_sub(2 + lines.len());
+        let steps = &steps_resp.steps;
+        let skip = steps.len().saturating_sub(available);
+
+        // Reserve 1 line for the "more steps above" indicator
+        let skip = if skip > 0 {
+            let skip = steps.len().saturating_sub(available.saturating_sub(1));
+            lines.push(Line::from(Span::styled(
+                format!(" ... {skip} more steps above"),
+                Style::default().fg(Color::DarkGray),
+            )));
+            skip
+        } else {
+            0
+        };
+
+        for step in steps.iter().skip(skip) {
+            let (icon, color) = match step.status.as_str() {
+                "succeeded" => ("\u{2713}", Color::Green),
+                "failed" => ("\u{2715}", Color::Red),
+                "running" => ("\u{27F3}", Color::Yellow),
+                "skipped" => ("\u{2298}", Color::DarkGray),
+                _ => ("\u{25CB}", Color::DarkGray),
+            };
+            let duration_str = format_step_duration(step);
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(format!("{icon} "), Style::default().fg(color)),
+                Span::styled(step.name.clone(), Style::default().fg(color)),
+                Span::styled(duration_str, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
+    let title = app
+        .selected_runner_steps
+        .as_ref()
+        .map(|s| format!(" Progress: {} ", s.job_name))
+        .unwrap_or_else(|| " Progress ".to_string());
+    let paragraph =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
+    f.render_widget(paragraph, area);
+}
+
+fn draw_history_panel(f: &mut Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    for entry in app.selected_runner_history.iter().rev().take(10) {
+        let icon = if entry.succeeded {
+            "\u{2713}"
+        } else {
+            "\u{2717}"
+        };
+        let color = if entry.succeeded {
+            Color::Green
+        } else {
+            Color::Red
+        };
+        let branch_str = entry
+            .branch
+            .as_deref()
+            .map(|b| {
+                if let Some(pr) = entry.pr_number {
+                    format!(" ({b} PR #{pr})")
+                } else {
+                    format!(" ({b})")
+                }
+            })
+            .unwrap_or_default();
+        let time_str = entry
+            .started_at
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .map(|dt| dt.format("%H:%M").to_string())
+            .unwrap_or_default();
+        let duration_str = if entry.duration_secs > 0 {
+            let mins = entry.duration_secs / 60;
+            let secs = entry.duration_secs % 60;
+            if mins > 0 {
+                format!(" {mins}m{secs}s")
+            } else {
+                format!(" {secs}s")
+            }
+        } else {
+            String::new()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
+            Span::styled(&entry.job_name, Style::default().fg(color)),
+            Span::styled(branch_str, Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("  {time_str}{duration_str}"),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
+    let paragraph =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" History "));
     f.render_widget(paragraph, area);
 }
 
@@ -354,6 +517,45 @@ fn format_step_duration(step: &StepInfo) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::{JobHistoryEntry, RunnerConfig};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::path::PathBuf;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn make_runner(name: &str, state: &str) -> RunnerInfo {
+        RunnerInfo {
+            config: RunnerConfig {
+                id: format!("id-{name}"),
+                name: name.to_string(),
+                repo_owner: "owner".to_string(),
+                repo_name: "repo".to_string(),
+                labels: vec!["self-hosted".to_string()],
+                mode: "app".to_string(),
+                work_dir: PathBuf::from("/tmp"),
+                group_id: None,
+            },
+            state: state.to_string(),
+            pid: None,
+            uptime_secs: None,
+            jobs_completed: 0,
+            jobs_failed: 0,
+            current_job: None,
+            job_context: None,
+            job_started_at: None,
+            estimated_job_duration_secs: None,
+        }
+    }
 
     #[test]
     fn test_format_duration() {
@@ -374,5 +576,304 @@ mod tests {
         assert_eq!(state_color("online"), Color::Green);
         assert_eq!(state_color("error"), Color::Red);
         assert_eq!(state_color("busy"), Color::Yellow);
+    }
+
+    #[test]
+    fn test_renders_runner_list_with_names() {
+        let mut app = App::new();
+        app.runners = vec![
+            make_runner("alpha-runner", "online"),
+            make_runner("beta-runner", "busy"),
+        ];
+        app.rebuild_display_items();
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("alpha-runner"),
+            "should render first runner name"
+        );
+        assert!(
+            content.contains("beta-runner"),
+            "should render second runner name"
+        );
+    }
+
+    #[test]
+    fn test_renders_no_runner_selected_when_empty() {
+        let app = App::new();
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("No runner selected"),
+            "should show 'No runner selected' when no runners exist"
+        );
+    }
+
+    #[test]
+    fn test_renders_runner_detail_when_selected() {
+        let mut app = App::new();
+        app.runners = vec![make_runner("my-runner", "online")];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("my-runner"),
+            "should show runner name in detail"
+        );
+        assert!(
+            content.contains("online"),
+            "should show runner state in detail"
+        );
+        assert!(content.contains("owner/repo"), "should show repo in detail");
+    }
+
+    #[test]
+    fn test_renders_group_detail_when_group_selected() {
+        let mut app = App::new();
+        let mut r1 = make_runner("group-runner-1", "online");
+        r1.config.group_id = Some("grp-1".to_string());
+        let mut r2 = make_runner("group-runner-2", "busy");
+        r2.config.group_id = Some("grp-1".to_string());
+        app.runners = vec![r1, r2];
+        app.rebuild_display_items();
+        // First display item should be the group row
+        app.selected_display_index = 0;
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Group"),
+            "should show Group panel when a group row is selected"
+        );
+        assert!(
+            content.contains("group-runner"),
+            "should show group name prefix"
+        );
+    }
+
+    #[test]
+    fn test_renders_history_panel() {
+        let mut app = App::new();
+        app.runners = vec![make_runner("hist-runner", "online")];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        app.selected_runner_history = vec![JobHistoryEntry {
+            job_name: "build-and-test".to_string(),
+            started_at: "2026-03-27T10:00:00Z".to_string(),
+            completed_at: "2026-03-27T10:05:00Z".to_string(),
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: None,
+            run_url: None,
+            duration_secs: 300,
+            job_number: 1,
+        }];
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("History"),
+            "should show History panel when history exists"
+        );
+        assert!(
+            content.contains("build-and-test"),
+            "should show job name in history"
+        );
+    }
+
+    #[test]
+    fn test_renders_empty_detail_no_runners() {
+        let app = App::new();
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("No runner selected"),
+            "should show empty detail message"
+        );
+        assert!(
+            content.contains("add a new runner"),
+            "should show add runner hint"
+        );
+    }
+
+    #[test]
+    fn test_renders_progress_panel_with_steps() {
+        use crate::client::StepInfo;
+
+        let mut app = App::new();
+        let mut runner = make_runner("busy-runner", "busy");
+        runner.current_job = Some("build".to_string());
+        runner.job_started_at = Some(chrono::Utc::now().to_rfc3339());
+        runner.estimated_job_duration_secs = Some(300);
+        app.runners = vec![runner];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        app.selected_runner_steps = Some(crate::client::StepsResponse {
+            job_name: "build".to_string(),
+            steps: vec![
+                StepInfo {
+                    number: 1,
+                    name: "Checkout".to_string(),
+                    status: "succeeded".to_string(),
+                    started_at: Some("2026-03-27T10:00:00Z".to_string()),
+                    completed_at: Some("2026-03-27T10:00:03Z".to_string()),
+                },
+                StepInfo {
+                    number: 2,
+                    name: "Build".to_string(),
+                    status: "running".to_string(),
+                    started_at: Some("2026-03-27T10:00:03Z".to_string()),
+                    completed_at: None,
+                },
+                StepInfo {
+                    number: 3,
+                    name: "Test".to_string(),
+                    status: "pending".to_string(),
+                    started_at: None,
+                    completed_at: None,
+                },
+            ],
+            steps_discovered: 3,
+        });
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Progress"), "should show Progress panel");
+        assert!(content.contains("Checkout"), "should show step name");
+        assert!(content.contains("Build"), "should show running step");
+    }
+
+    #[test]
+    fn test_renders_all_three_panels() {
+        use crate::client::StepInfo;
+
+        let mut app = App::new();
+        let mut runner = make_runner("full-runner", "busy");
+        runner.current_job = Some("deploy".to_string());
+        runner.job_started_at = Some(chrono::Utc::now().to_rfc3339());
+        runner.estimated_job_duration_secs = Some(120);
+        app.runners = vec![runner];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        app.selected_runner_steps = Some(crate::client::StepsResponse {
+            job_name: "deploy".to_string(),
+            steps: vec![StepInfo {
+                number: 1,
+                name: "Deploy step".to_string(),
+                status: "running".to_string(),
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                completed_at: None,
+            }],
+            steps_discovered: 1,
+        });
+        app.selected_runner_history = vec![JobHistoryEntry {
+            job_name: "previous-job".to_string(),
+            started_at: "2026-03-27T09:00:00Z".to_string(),
+            completed_at: "2026-03-27T09:05:00Z".to_string(),
+            succeeded: true,
+            branch: Some("main".to_string()),
+            pr_number: Some(10),
+            run_url: None,
+            duration_secs: 300,
+            job_number: 1,
+        }];
+
+        let backend = TestBackend::new(100, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(content.contains("Detail"), "should show Detail panel");
+        assert!(content.contains("Progress"), "should show Progress panel");
+        assert!(content.contains("History"), "should show History panel");
+        assert!(
+            content.contains("previous-job"),
+            "should show history entry"
+        );
+    }
+
+    #[test]
+    fn test_renders_progress_bar_without_steps() {
+        let mut app = App::new();
+        let mut runner = make_runner("bar-runner", "busy");
+        runner.current_job = Some("test".to_string());
+        runner.job_started_at = Some(chrono::Utc::now().to_rfc3339());
+        runner.estimated_job_duration_secs = Some(60);
+        app.runners = vec![runner];
+        app.rebuild_display_items();
+        app.selected_display_index = 0;
+        // No steps, but has estimated duration
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_runners(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Progress"),
+            "should show Progress panel even without steps"
+        );
     }
 }

@@ -24,10 +24,46 @@ fn draw_repo_list(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let items: Vec<ListItem> = app
+    let show_search = app.repo_searching || !app.repo_search.is_empty();
+
+    let (search_area, list_area) = if show_search {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, area)
+    };
+
+    if let Some(search_area) = search_area {
+        let search_text = if app.repo_searching {
+            format!(" Search: {}▏", app.repo_search)
+        } else {
+            format!(" Search: {}", app.repo_search)
+        };
+        let search_bar = Paragraph::new(search_text).style(Style::default().fg(Color::Yellow));
+        f.render_widget(search_bar, search_area);
+    }
+
+    let filtered_repos: Vec<(usize, _)> = app
         .repos
         .iter()
-        .map(|r| {
+        .enumerate()
+        .filter(|(_, r)| {
+            if app.repo_search.is_empty() {
+                true
+            } else {
+                r.full_name
+                    .to_lowercase()
+                    .contains(&app.repo_search.to_lowercase())
+            }
+        })
+        .collect();
+
+    let items: Vec<ListItem> = filtered_repos
+        .iter()
+        .map(|(_, r)| {
             let visibility = if r.private { "private" } else { "public" };
             let org_marker = if r.is_org { " [org]" } else { "" };
             let line = Line::from(vec![
@@ -41,12 +77,14 @@ fn draw_repo_list(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let title = if app.repo_search.is_empty() {
+        format!(" Repos ({}) ", app.repos.len())
+    } else {
+        format!(" Repos ({}/{}) ", filtered_repos.len(), app.repos.len())
+    };
+
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Repos ({}) ", app.repos.len())),
-        )
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -54,12 +92,17 @@ fn draw_repo_list(f: &mut Frame, app: &App, area: Rect) {
         )
         .highlight_symbol("▶ ");
 
+    // Map the app's selected_repo_index to the filtered list position
+    let selected_in_filtered = filtered_repos
+        .iter()
+        .position(|(i, _)| *i == app.selected_repo_index);
+
     let mut list_state = ListState::default();
-    if !app.repos.is_empty() {
-        list_state.select(Some(app.selected_repo_index));
+    if !filtered_repos.is_empty() {
+        list_state.select(Some(selected_in_filtered.unwrap_or(0)));
     }
 
-    f.render_stateful_widget(list, area, &mut list_state);
+    f.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 fn draw_repo_detail(f: &mut Frame, app: &App, area: Rect) {
@@ -93,4 +136,115 @@ fn draw_repo_detail(f: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(content).block(Block::default().borders(Borders::ALL).title(" Detail "));
 
     f.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{AuthStatus, GitHubUser, RepoInfo};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn make_repo(name: &str) -> RepoInfo {
+        RepoInfo {
+            id: 1,
+            full_name: format!("owner/{name}"),
+            name: name.to_string(),
+            owner: "owner".to_string(),
+            private: false,
+            html_url: format!("https://github.com/owner/{name}"),
+            is_org: false,
+        }
+    }
+
+    #[test]
+    fn test_renders_not_authenticated_when_unauthenticated() {
+        let app = App::new();
+        // auth_status is None by default
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_repos(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Not authenticated"),
+            "should show 'Not authenticated' when auth_status is None"
+        );
+    }
+
+    #[test]
+    fn test_renders_repo_list_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(GitHubUser {
+                login: "testuser".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        app.repos = vec![make_repo("my-project"), make_repo("another-repo")];
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_repos(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("owner/my-project"),
+            "should show first repo name"
+        );
+        assert!(
+            content.contains("owner/another-repo"),
+            "should show second repo name"
+        );
+    }
+
+    #[test]
+    fn test_renders_search_bar_when_searching() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(GitHubUser {
+                login: "testuser".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        app.repos = vec![make_repo("my-project")];
+        app.repo_searching = true;
+        app.repo_search = "my".to_string();
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_repos(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Search:"),
+            "should show search bar when repo_searching is true"
+        );
+    }
 }

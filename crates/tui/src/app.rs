@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::client::{
-    AuthStatus, DaemonLogEntry, MetricsResponse, RepoInfo, RunnerInfo, StepsResponse,
+    AuthStatus, DaemonLogEntry, JobHistoryEntry, MetricsResponse, RepoInfo, RunnerInfo,
+    StepsResponse,
 };
 
 /// Actions that require async daemon calls — returned from handle_key.
@@ -26,6 +27,7 @@ pub enum Action {
     StartDaemon,
     StopDaemon,
     RestartDaemon,
+    StartLogin,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +86,22 @@ impl Tab {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginState {
+    Polling {
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        interval: u64,
+    },
+    Success {
+        username: String,
+    },
+    Error {
+        message: String,
+    },
+}
+
 pub struct App {
     pub active_tab: Tab,
     pub should_quit: bool,
@@ -106,6 +124,10 @@ pub struct App {
     pub daemon_search: String,
     pub daemon_searching: bool,
     pub selected_runner_steps: Option<StepsResponse>,
+    pub selected_runner_history: Vec<JobHistoryEntry>,
+    pub login_state: Option<LoginState>,
+    pub repo_search: String,
+    pub repo_searching: bool,
 }
 
 impl Default for App {
@@ -138,6 +160,10 @@ impl App {
             daemon_search: String::new(),
             daemon_searching: false,
             selected_runner_steps: None,
+            selected_runner_history: Vec::new(),
+            login_state: None,
+            repo_search: String::new(),
+            repo_searching: false,
         }
     }
 
@@ -262,12 +288,126 @@ impl App {
         }
     }
 
+    /// Returns context-sensitive key hints for the active tab.
+    /// Each row is a Vec of (key, description) pairs laid out as columns.
+    pub fn key_hints(&self) -> Vec<Vec<(&'static str, &'static str)>> {
+        let is_authenticated = self.auth_status.as_ref().is_some_and(|a| a.authenticated);
+
+        let tab_col = [
+            ("F1", "Runners"),
+            ("F2", "Repos"),
+            ("F3", "Monitoring"),
+            ("F4", "Daemon"),
+        ];
+
+        let (action_col, extra_col, util_col) = match self.active_tab {
+            Tab::Runners => (
+                vec![
+                    ("s", "Start/Stop"),
+                    ("r", "Restart"),
+                    ("d", "Delete"),
+                    ("+", "Scale Up"),
+                ],
+                vec![
+                    ("a", "Add Runner"),
+                    ("l", "Logs"),
+                    ("e", "Edit Labels"),
+                    ("-", "Scale Down"),
+                ],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
+            ),
+            Tab::Repos => (
+                vec![("a", "Add Runner"), ("/", "Search")],
+                vec![],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
+            ),
+            Tab::Monitoring => (
+                vec![],
+                vec![],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
+            ),
+            Tab::Daemon => (
+                vec![
+                    ("s", "Start Daemon"),
+                    ("x", "Stop Daemon"),
+                    ("r", "Restart"),
+                ],
+                vec![("1..5", "Log Level"), ("/", "Search"), ("f", "Follow")],
+                if is_authenticated {
+                    vec![("?", "Help"), ("q", "Quit")]
+                } else {
+                    vec![("L", "Login"), ("?", "Help"), ("q", "Quit")]
+                },
+            ),
+        };
+
+        let mut rows: Vec<Vec<(&'static str, &'static str)>> = Vec::with_capacity(tab_col.len());
+
+        for (i, &tab_hint) in tab_col.iter().enumerate() {
+            let mut row = Vec::new();
+            row.push(tab_hint);
+            if let Some(hint) = action_col.get(i) {
+                row.push(*hint);
+            }
+            if let Some(hint) = extra_col.get(i) {
+                row.push(*hint);
+            }
+            if let Some(hint) = util_col.get(i) {
+                row.push(*hint);
+            }
+            rows.push(row);
+        }
+
+        rows
+    }
+
     /// Handle a key event. Returns an optional Action requiring a daemon call.
     pub fn handle_key(&mut self, code: KeyCode, _modifiers: KeyModifiers) -> Option<Action> {
         // Help overlay captures all keys except ? and Esc
         if self.show_help {
             match code {
                 KeyCode::Char('?') | KeyCode::Esc => self.show_help = false,
+                _ => {}
+            }
+            return None;
+        }
+
+        // Login popup captures all keys except Esc
+        if self.login_state.is_some() {
+            if code == KeyCode::Esc {
+                self.login_state = None;
+            }
+            return None;
+        }
+
+        // Repos tab search mode captures all input
+        if self.active_tab == Tab::Repos && self.repo_searching {
+            match code {
+                KeyCode::Esc => {
+                    self.repo_searching = false;
+                    self.repo_search.clear();
+                }
+                KeyCode::Enter => {
+                    self.repo_searching = false;
+                }
+                KeyCode::Backspace => {
+                    self.repo_search.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.repo_search.push(c);
+                }
                 _ => {}
             }
             return None;
@@ -296,6 +436,33 @@ impl App {
                 _ => {}
             }
             return None;
+        }
+
+        // F1-F4 for tab switching — always works regardless of active tab
+        match code {
+            KeyCode::F(1) => {
+                self.active_tab = Tab::Runners;
+                return None;
+            }
+            KeyCode::F(2) => {
+                self.active_tab = Tab::Repos;
+                if self.repos.is_empty() {
+                    return Some(Action::RefreshRepos);
+                }
+                return None;
+            }
+            KeyCode::F(3) => {
+                self.active_tab = Tab::Monitoring;
+                return None;
+            }
+            KeyCode::F(4) => {
+                self.active_tab = Tab::Daemon;
+                if self.daemon_logs.is_empty() {
+                    return Some(Action::RefreshDaemonLogs);
+                }
+                return None;
+            }
+            _ => {}
         }
 
         // Daemon tab key handling (before global keys to intercept 1-5 for log levels)
@@ -359,30 +526,6 @@ impl App {
             KeyCode::Char('?') => {
                 self.show_help = true;
                 None
-            }
-            KeyCode::Char('1') => {
-                self.active_tab = Tab::Runners;
-                None
-            }
-            KeyCode::Char('2') => {
-                self.active_tab = Tab::Repos;
-                if self.repos.is_empty() {
-                    Some(Action::RefreshRepos)
-                } else {
-                    None
-                }
-            }
-            KeyCode::Char('3') => {
-                self.active_tab = Tab::Monitoring;
-                None
-            }
-            KeyCode::Char('4') => {
-                self.active_tab = Tab::Daemon;
-                if self.daemon_logs.is_empty() {
-                    Some(Action::RefreshDaemonLogs)
-                } else {
-                    None
-                }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 match self.active_tab {
@@ -516,6 +659,20 @@ impl App {
                 }
                 None
             }
+            KeyCode::Char('/') => {
+                if self.active_tab == Tab::Repos {
+                    self.repo_searching = true;
+                }
+                None
+            }
+            KeyCode::Char('L') => {
+                let is_authenticated = self.auth_status.as_ref().is_some_and(|a| a.authenticated);
+                if !is_authenticated && self.login_state.is_none() {
+                    Some(Action::StartLogin)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -573,6 +730,8 @@ mod tests {
             jobs_failed: 0,
             current_job: None,
             job_context: None,
+            job_started_at: None,
+            estimated_job_duration_secs: None,
         }
     }
 
@@ -596,12 +755,35 @@ mod tests {
     #[test]
     fn test_handle_key_tab_switch() {
         let mut app = App::new();
-        app.handle_key(KeyCode::Char('2'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::F(2), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Repos);
-        app.handle_key(KeyCode::Char('3'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::F(3), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Monitoring);
-        app.handle_key(KeyCode::Char('1'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::F(1), KeyModifiers::NONE);
         assert_eq!(app.active_tab, Tab::Runners);
+        app.handle_key(KeyCode::F(4), KeyModifiers::NONE);
+        assert_eq!(app.active_tab, Tab::Daemon);
+    }
+
+    #[test]
+    fn test_f_key_tab_switch_from_daemon_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+        app.handle_key(KeyCode::F(1), KeyModifiers::NONE);
+        assert_eq!(app.active_tab, Tab::Runners);
+    }
+
+    #[test]
+    fn test_daemon_tab_number_keys_set_log_level() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+        let action = app.handle_key(KeyCode::Char('1'), KeyModifiers::NONE);
+        assert_eq!(app.daemon_log_level, "TRACE");
+        assert_eq!(action, Some(Action::RefreshDaemonLogs));
+
+        let action = app.handle_key(KeyCode::Char('5'), KeyModifiers::NONE);
+        assert_eq!(app.daemon_log_level, "ERROR");
+        assert_eq!(action, Some(Action::RefreshDaemonLogs));
     }
 
     #[test]
@@ -680,5 +862,158 @@ mod tests {
                 group_id: None
             }
         ));
+    }
+
+    #[test]
+    fn test_key_hints_runners_tab() {
+        let app = App::new(); // default tab is Runners
+        let hints = app.key_hints();
+        // Should have 4 rows (one per tab nav entry)
+        assert_eq!(hints.len(), 4);
+        // First row should have tab nav + action keys
+        assert!(hints[0].iter().any(|(k, _)| k == &"F1"));
+        assert!(hints[0].iter().any(|(k, _)| k == &"s"));
+    }
+
+    #[test]
+    fn test_key_hints_daemon_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Daemon;
+        let hints = app.key_hints();
+        assert_eq!(hints.len(), 4);
+        // Should have daemon-specific keys
+        assert!(hints[0].iter().any(|(k, _)| k == &"1..5"));
+        assert!(hints[1].iter().any(|(k, _)| k == &"x"));
+    }
+
+    #[test]
+    fn test_key_hints_monitoring_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Monitoring;
+        let hints = app.key_hints();
+        assert_eq!(hints.len(), 4);
+        // Monitoring has fewer keys — only tab nav + util column
+        assert_eq!(hints[0].len(), 2); // F1 + L (no action/extra columns, unauthenticated)
+    }
+
+    #[test]
+    fn test_login_key_starts_login_when_unauthenticated() {
+        let mut app = App::new();
+        let action = app.handle_key(KeyCode::Char('L'), KeyModifiers::NONE);
+        assert_eq!(action, Some(Action::StartLogin));
+    }
+
+    #[test]
+    fn test_login_key_noop_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(crate::client::GitHubUser {
+                login: "octocat".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        let action = app.handle_key(KeyCode::Char('L'), KeyModifiers::NONE);
+        assert_eq!(action, None);
+    }
+
+    #[test]
+    fn test_login_key_noop_when_already_logging_in() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "test".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+        let action = app.handle_key(KeyCode::Char('L'), KeyModifiers::NONE);
+        assert_eq!(action, None);
+    }
+
+    #[test]
+    fn test_esc_cancels_login() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "test".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.login_state.is_none());
+    }
+
+    #[test]
+    fn test_login_popup_swallows_keys() {
+        let mut app = App::new();
+        app.login_state = Some(LoginState::Polling {
+            device_code: "test".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            interval: 5,
+        });
+        app.handle_key(KeyCode::Char('q'), KeyModifiers::NONE);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_key_hints_show_login_when_unauthenticated() {
+        let app = App::new();
+        let hints = app.key_hints();
+        let has_login = hints.iter().any(|row| row.iter().any(|(k, _)| *k == "L"));
+        assert!(has_login);
+    }
+
+    #[test]
+    fn test_key_hints_hide_login_when_authenticated() {
+        let mut app = App::new();
+        app.auth_status = Some(AuthStatus {
+            authenticated: true,
+            user: Some(crate::client::GitHubUser {
+                login: "octocat".to_string(),
+                avatar_url: String::new(),
+            }),
+        });
+        let hints = app.key_hints();
+        let has_login = hints.iter().any(|row| row.iter().any(|(k, _)| *k == "L"));
+        assert!(!has_login);
+    }
+
+    #[test]
+    fn test_repo_search_mode() {
+        let mut app = App::new();
+        app.active_tab = Tab::Repos;
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE);
+        assert!(app.repo_searching);
+
+        app.handle_key(KeyCode::Char('t'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('e'), KeyModifiers::NONE);
+        assert_eq!(app.repo_search, "te");
+
+        app.handle_key(KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(app.repo_search, "t");
+
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(!app.repo_searching);
+        assert!(app.repo_search.is_empty());
+    }
+
+    #[test]
+    fn test_repo_search_enter_confirms() {
+        let mut app = App::new();
+        app.active_tab = Tab::Repos;
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Char('t'), KeyModifiers::NONE);
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!app.repo_searching);
+        assert_eq!(app.repo_search, "t"); // search term preserved after Enter
+    }
+
+    #[test]
+    fn test_repo_search_slash_only_on_repos_tab() {
+        let mut app = App::new();
+        app.active_tab = Tab::Runners;
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE);
+        assert!(!app.repo_searching);
     }
 }

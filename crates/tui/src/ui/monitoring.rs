@@ -9,20 +9,19 @@ use crate::app::App;
 pub fn draw_monitoring(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Length(5),
-            Constraint::Length(5),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
+
+    let gauge_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[0]);
 
     match &app.metrics {
         Some(metrics) => {
-            draw_cpu_gauge(f, &metrics.system, chunks[0]);
-            draw_memory_gauge(f, &metrics.system, chunks[1]);
-            draw_disk_gauge(f, &metrics.system, chunks[2]);
-            draw_runner_metrics(f, app, chunks[3]);
+            draw_cpu_gauge(f, &metrics.system, gauge_row[0]);
+            draw_memory_gauge(f, &metrics.system, gauge_row[1]);
+            draw_runner_metrics(f, app, chunks[1]);
         }
         None => {
             let msg = Paragraph::new(" Loading metrics...")
@@ -54,23 +53,6 @@ fn draw_memory_gauge(f: &mut Frame, sys: &crate::client::SystemMetrics, area: Re
     let total = format_bytes(sys.memory_total_bytes);
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::ALL).title(" Memory "))
-        .gauge_style(Style::default().fg(color))
-        .ratio(ratio)
-        .label(format!("{used} / {total}"));
-    f.render_widget(gauge, area);
-}
-
-fn draw_disk_gauge(f: &mut Frame, sys: &crate::client::SystemMetrics, area: Rect) {
-    let ratio = if sys.disk_total_bytes > 0 {
-        (sys.disk_used_bytes as f64 / sys.disk_total_bytes as f64).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let color = gauge_color(ratio);
-    let used = format_bytes(sys.disk_used_bytes);
-    let total = format_bytes(sys.disk_total_bytes);
-    let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(" Disk "))
         .gauge_style(Style::default().fg(color))
         .ratio(ratio)
         .label(format!("{used} / {total}"));
@@ -134,11 +116,79 @@ fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::{MetricsResponse, SystemMetrics};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let mut s = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                s.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
 
     #[test]
     fn test_gauge_color_thresholds() {
         assert_eq!(gauge_color(0.5), Color::Green);
         assert_eq!(gauge_color(0.8), Color::Yellow);
         assert_eq!(gauge_color(0.95), Color::Red);
+    }
+
+    #[test]
+    fn test_renders_loading_when_no_metrics() {
+        let app = App::new();
+        assert!(app.metrics.is_none());
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_monitoring(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("Loading metrics"),
+            "should show loading message when metrics is None"
+        );
+    }
+
+    #[test]
+    fn test_renders_cpu_and_memory_gauges_when_metrics_exist() {
+        let mut app = App::new();
+        app.metrics = Some(MetricsResponse {
+            system: SystemMetrics {
+                cpu_percent: 42.5,
+                memory_used_bytes: 8 * 1024 * 1024 * 1024,
+                memory_total_bytes: 16 * 1024 * 1024 * 1024,
+                disk_used_bytes: 100_000_000_000,
+                disk_total_bytes: 500_000_000_000,
+            },
+            runners: vec![],
+            daemon: None,
+        });
+
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw_monitoring(f, &app, f.area());
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let content = buffer_to_string(&buffer);
+        assert!(
+            content.contains("CPU"),
+            "should show CPU gauge when metrics exist"
+        );
+        assert!(
+            content.contains("Memory"),
+            "should show Memory gauge when metrics exist"
+        );
     }
 }
