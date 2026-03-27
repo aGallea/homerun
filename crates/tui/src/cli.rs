@@ -72,7 +72,7 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
     }
 }
 
-fn colored(text: &str, color_code: &str) -> String {
+pub fn colored(text: &str, color_code: &str) -> String {
     if atty_stdout() {
         format!("\x1b[{color_code}m{text}\x1b[0m")
     } else {
@@ -80,12 +80,12 @@ fn colored(text: &str, color_code: &str) -> String {
     }
 }
 
-fn atty_stdout() -> bool {
+pub fn atty_stdout() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
 }
 
-fn color_for_state(state: &str) -> &'static str {
+pub fn color_for_state(state: &str) -> &'static str {
     match state {
         "online" => "32",                   // green
         "busy" => "33",                     // yellow
@@ -97,7 +97,7 @@ fn color_for_state(state: &str) -> &'static str {
     }
 }
 
-async fn cmd_list(client: &DaemonClient) -> Result<()> {
+pub async fn cmd_list(client: &DaemonClient) -> Result<()> {
     let runners = client.list_runners().await?;
     let metrics = client.get_metrics().await.ok();
 
@@ -152,7 +152,7 @@ async fn cmd_list(client: &DaemonClient) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_status(client: &DaemonClient) -> Result<()> {
+pub async fn cmd_status(client: &DaemonClient) -> Result<()> {
     let auth = client.auth_status().await?;
     let runners = client.list_runners().await?;
     let metrics = client.get_metrics().await.ok();
@@ -198,7 +198,7 @@ async fn cmd_status(client: &DaemonClient) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_scan(client: &DaemonClient, path: Option<String>, remote: bool) -> Result<()> {
+pub async fn cmd_scan(client: &DaemonClient, path: Option<String>, remote: bool) -> Result<()> {
     use crate::client::DiscoveredRepo;
     use std::collections::HashMap;
 
@@ -263,6 +263,8 @@ async fn cmd_scan(client: &DaemonClient, path: Option<String>, remote: bool) -> 
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     // Format helpers tested inline — integration tests require a live daemon.
     #[test]
     fn test_memory_formatting() {
@@ -277,5 +279,25 @@ mod tests {
         let cpu: f64 = 23.4;
         let formatted = format!("{:.0}%", cpu);
         assert_eq!(formatted, "23%");
+    }
+
+    #[test]
+    fn test_color_for_state_returns_correct_codes() {
+        assert_eq!(color_for_state("online"), "32");
+        assert_eq!(color_for_state("busy"), "33");
+        assert_eq!(color_for_state("offline"), "90");
+        assert_eq!(color_for_state("error"), "31");
+        assert_eq!(color_for_state("creating"), "36");
+        assert_eq!(color_for_state("registering"), "36");
+        assert_eq!(color_for_state("stopping"), "35");
+        assert_eq!(color_for_state("deleting"), "35");
+        assert_eq!(color_for_state("unknown"), "0");
+    }
+
+    #[test]
+    fn test_colored_without_terminal() {
+        // In test context, stdout is not a terminal, so no ANSI codes
+        let result = colored("hello", "32");
+        assert_eq!(result, "hello");
     }
 }
