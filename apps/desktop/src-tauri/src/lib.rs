@@ -1,5 +1,7 @@
 mod client;
 mod commands;
+mod tray;
+mod window;
 
 use client::DaemonClient;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItem, SubmenuBuilder};
@@ -17,6 +19,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_positioner::init())
         .manage(AppState {
             client: Mutex::new(client),
         })
@@ -149,6 +152,12 @@ pub fn run() {
                     Err(e) => eprintln!("Failed to spawn daemon: {e}"),
                 }
             });
+
+            // -- Initialize system tray --
+            if let Err(e) = tray::init(app) {
+                eprintln!("Failed to initialize tray: {e}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
