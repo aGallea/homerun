@@ -80,6 +80,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.show_help {
         draw_help_popup(f);
     }
+
+    if let Some(ref login_state) = app.login_state {
+        draw_login_popup(f, login_state);
+    }
 }
 
 fn draw_horizontal_divider(f: &mut Frame, area: Rect) {
@@ -120,6 +124,43 @@ fn draw_help_popup(f: &mut Frame) {
     f.render_widget(
         Paragraph::new(help_text)
             .block(Block::default().borders(Borders::ALL).title(" Help "))
+            .style(Style::default().fg(Color::White)),
+        popup_area,
+    );
+}
+
+fn draw_login_popup(f: &mut Frame, login_state: &crate::app::LoginState) {
+    use ratatui::widgets::{Clear, Paragraph};
+
+    let area = f.area();
+    let popup_width = 50.min(area.width.saturating_sub(4));
+    let popup_height = 10.min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    let text = match login_state {
+        crate::app::LoginState::Polling {
+            user_code,
+            verification_uri,
+            ..
+        } => {
+            format!(
+                "\n  Open: {verification_uri}\n  Code: {user_code}\n\n  Waiting for authorization...\n\n  [Esc] Cancel"
+            )
+        }
+        crate::app::LoginState::Success { username } => {
+            format!("\n  Logged in as {username}!")
+        }
+        crate::app::LoginState::Error { message } => {
+            format!("\n  Login failed: {message}\n\n  [Esc] Dismiss")
+        }
+    };
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(
+        Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title(" Login "))
             .style(Style::default().fg(Color::White)),
         popup_area,
     );
