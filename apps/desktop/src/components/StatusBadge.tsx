@@ -46,7 +46,7 @@ export function StatusBadge({ state, currentJob }: { state: RunnerState; current
       ) : (
         <span className="status-dot" style={{ background: config.color }} />
       )}
-      {label}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
     </span>
   );
 }
