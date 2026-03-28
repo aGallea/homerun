@@ -147,6 +147,8 @@ pub struct DiscoveredRepo {
     pub source: String,
     pub workflow_files: Vec<String>,
     pub local_path: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub matched_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -118,6 +118,7 @@ async fn test_cmd_scan_local() {
         source: "local".to_string(),
         workflow_files: vec![".github/workflows/ci.yml".to_string()],
         local_path: Some(std::path::PathBuf::from("/tmp/hello-world")),
+        matched_labels: vec![],
     };
     let mock = MockDaemon::builder()
         .with_scan_local_results(vec![repo])
@@ -136,6 +137,7 @@ async fn test_cmd_scan_remote() {
         source: "remote".to_string(),
         workflow_files: vec![".github/workflows/deploy.yml".to_string()],
         local_path: None,
+        matched_labels: vec![],
     };
     let mock = MockDaemon::builder()
         .with_scan_remote_results(vec![repo])
@@ -152,12 +154,14 @@ async fn test_cmd_scan_local_and_remote() {
         source: "local".to_string(),
         workflow_files: vec![".github/workflows/ci.yml".to_string()],
         local_path: Some(std::path::PathBuf::from("/tmp/both-repo")),
+        matched_labels: vec![],
     };
     let remote_repo = DiscoveredRepo {
         full_name: "octocat/both-repo".to_string(),
         source: "remote".to_string(),
         workflow_files: vec![".github/workflows/deploy.yml".to_string()],
         local_path: None,
+        matched_labels: vec![],
     };
     let mock = MockDaemon::builder()
         .with_scan_local_results(vec![local_repo])
