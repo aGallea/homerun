@@ -52,6 +52,23 @@ jobs:
           cp target/${{ matrix.target }}/release/homerund \
             apps/desktop/src-tauri/binaries/homerund-${{ matrix.target }}
 
+      - name: Build homerun CLI
+        run: cargo build --release -p homerun --target ${{ matrix.target }}
+
+      - name: Package CLI binaries
+        run: |
+          mkdir -p cli-dist
+          cp target/${{ matrix.target }}/release/homerun cli-dist/
+          cp target/${{ matrix.target }}/release/homerund cli-dist/
+          tar -czf homerun-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C cli-dist .
+
+      - name: Upload CLI tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.arch }}
+          path: homerun-*.tar.gz
+          if-no-files-found: error
+
       - name: Build Tauri app
         working-directory: apps/desktop
         # Code-signing env vars omitted — unsigned builds for now.
@@ -84,5 +101,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.dmg
+          files: |
+            artifacts/*.dmg
+            artifacts/*.tar.gz
           draft: false
