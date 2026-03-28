@@ -783,9 +783,9 @@ p {
   flex-direction: column;
   justify-content: center;
   overflow: hidden;
-  min-width: 0;
   width: 260px;
-  flex-shrink: 0;
+  min-width: 100px;
+  flex-shrink: 1;
   margin-right: 12px;
 }
 
@@ -809,7 +809,10 @@ p {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin-right: 12px;
 }
 
@@ -838,6 +841,8 @@ p {
   justify-content: flex-end;
   gap: 6px;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Icon buttons for runner actions */
