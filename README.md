@@ -23,7 +23,7 @@
 
 <div align="center">
   <a href="https://github.com/aGallea/homerun/actions/workflows/ci.yml">
-    <img src="https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg" alt="CI" />
+    <img src="https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI" />
   </a>
   <img src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/aGallea/77f18f115b500bdc5d6df52f95d399b9/raw/coverage.json" alt="Coverage" />
   <a href="LICENSE">
@@ -110,8 +110,9 @@ brew tap aGallea/homerun
 # CLI tools (homerun + homerund)
 brew install homerun
 
-# Desktop app
+# Desktop app (not code-signed — remove quarantine after install)
 brew install --cask homerun
+xattr -cr /Applications/HomeRun.app
 ```
 
 ### Build from Source
