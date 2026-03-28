@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
-import type { DiscoveredRepo } from "../api/types";
+import { useState, useEffect, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
+import type { DiscoveredRepo, ScanProgressEvent } from "../api/types";
 import { api } from "../api/commands";
 
 interface ScanOptions {
@@ -7,40 +8,80 @@ interface ScanOptions {
   authenticated: boolean;
 }
 
-function mergeResults(local: DiscoveredRepo[], remote: DiscoveredRepo[]): DiscoveredRepo[] {
-  const byName = new Map<string, DiscoveredRepo>();
-
-  for (const repo of local) {
-    byName.set(repo.full_name, repo);
-  }
-
-  for (const repo of remote) {
-    const existing = byName.get(repo.full_name);
-    if (existing) {
-      existing.source = "both";
-      for (const wf of repo.workflow_files) {
-        if (!existing.workflow_files.includes(wf)) {
-          existing.workflow_files.push(wf);
-        }
-      }
-      for (const label of repo.matched_labels) {
-        if (!existing.matched_labels.includes(label)) {
-          existing.matched_labels.push(label);
-        }
-      }
-    } else {
-      byName.set(repo.full_name, repo);
-    }
-  }
-
-  return Array.from(byName.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
-}
-
 export function useScan() {
   const [discoveredRepos, setDiscoveredRepos] = useState<DiscoveredRepo[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
+  const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [progressText, setProgressText] = useState<string | null>(null);
+
+  // Load persisted results on mount
+  useEffect(() => {
+    api
+      .getScanResults()
+      .then((results) => {
+        if (results) {
+          setDiscoveredRepos(results.merged_results);
+          setLastScanAt(results.last_scan_at);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Listen for scan progress events
+  useEffect(() => {
+    let doneCount = 0;
+    let expectedDone = 0;
+
+    const unlisten = listen<string>("scan-progress", (event) => {
+      try {
+        const data: ScanProgressEvent = JSON.parse(event.payload);
+
+        switch (data.type) {
+          case "started":
+            expectedDone++;
+            break;
+          case "checking":
+            setProgressText(`Scanning ${data.repo} (${data.index}/${data.total})...`);
+            break;
+          case "found":
+            break;
+          case "done":
+            doneCount++;
+            if (doneCount >= expectedDone) {
+              api
+                .getScanResults()
+                .then((results) => {
+                  if (results) {
+                    setDiscoveredRepos(results.merged_results);
+                    setLastScanAt(results.last_scan_at);
+                  }
+                  setScanning(false);
+                  setProgressText(null);
+                })
+                .catch(() => {
+                  setScanning(false);
+                  setProgressText(null);
+                });
+            }
+            break;
+          case "cancelled":
+            doneCount++;
+            if (doneCount >= expectedDone) {
+              setScanning(false);
+              setProgressText(null);
+            }
+            break;
+        }
+      } catch {
+        // Ignore malformed events
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   const runScan = useCallback(async (options: ScanOptions) => {
     const { workspacePath, authenticated } = options;
@@ -52,45 +93,31 @@ export function useScan() {
 
     setScanning(true);
     setScanError(null);
+    setProgressText("Starting scan...");
 
     try {
-      const promises: Promise<DiscoveredRepo[]>[] = [];
-
-      if (workspacePath) {
-        promises.push(api.scanLocal(workspacePath).catch(() => []));
-      }
-      if (authenticated) {
-        promises.push(api.scanRemote().catch(() => []));
-      }
-
-      const results = await Promise.all(promises);
-
-      let local: DiscoveredRepo[] = [];
-      let remote: DiscoveredRepo[] = [];
-
-      if (workspacePath && authenticated) {
-        local = results[0];
-        remote = results[1];
-      } else if (workspacePath) {
-        local = results[0];
-      } else {
-        remote = results[0];
-      }
-
-      setDiscoveredRepos(mergeResults(local, remote));
-      setLastScanTime(new Date());
+      await api.startScan(workspacePath, authenticated);
     } catch (e) {
       setScanError(String(e));
-    } finally {
       setScanning(false);
+      setProgressText(null);
     }
   }, []);
 
   const clearResults = useCallback(() => {
     setDiscoveredRepos([]);
-    setLastScanTime(null);
+    setLastScanAt(null);
     setScanError(null);
+    setProgressText(null);
   }, []);
 
-  return { discoveredRepos, scanning, lastScanTime, scanError, runScan, clearResults };
+  return {
+    discoveredRepos,
+    scanning,
+    lastScanAt,
+    scanError,
+    progressText,
+    runScan,
+    clearResults,
+  };
 }
