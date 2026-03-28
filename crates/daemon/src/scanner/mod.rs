@@ -268,6 +268,45 @@ pub async fn scan_remote(
 }
 
 // ---------------------------------------------------------------------------
+// Merge
+// ---------------------------------------------------------------------------
+
+/// Merge local and remote scan results. Repos found in both get `source: Both`.
+pub fn merge_results(
+    local: Vec<DiscoveredRepo>,
+    remote: Vec<DiscoveredRepo>,
+) -> Vec<DiscoveredRepo> {
+    let mut by_name: HashMap<String, DiscoveredRepo> = HashMap::new();
+
+    for repo in local {
+        by_name.insert(repo.full_name.clone(), repo);
+    }
+
+    for repo in remote {
+        by_name
+            .entry(repo.full_name.clone())
+            .and_modify(|existing| {
+                existing.source = DiscoverySource::Both;
+                for wf in &repo.workflow_files {
+                    if !existing.workflow_files.contains(wf) {
+                        existing.workflow_files.push(wf.clone());
+                    }
+                }
+                for label in &repo.matched_labels {
+                    if !existing.matched_labels.contains(label) {
+                        existing.matched_labels.push(label.clone());
+                    }
+                }
+            })
+            .or_insert(repo);
+    }
+
+    let mut results: Vec<DiscoveredRepo> = by_name.into_values().collect();
+    results.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+    results
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -501,5 +540,49 @@ mod tests {
             serde_json::to_string(&DiscoverySource::Both).unwrap(),
             "\"both\""
         );
+    }
+
+    #[test]
+    fn test_merge_results_combines_sources() {
+        let local = vec![DiscoveredRepo {
+            full_name: "acme/api".to_string(),
+            source: DiscoverySource::Local,
+            workflow_files: vec!["ci.yml".to_string()],
+            matched_labels: vec!["self-hosted".to_string()],
+            local_path: Some(PathBuf::from("/workspace/api")),
+        }];
+        let remote = vec![DiscoveredRepo {
+            full_name: "acme/api".to_string(),
+            source: DiscoverySource::Remote,
+            workflow_files: vec!["ci.yml".to_string()],
+            matched_labels: vec!["self-hosted".to_string()],
+            local_path: None,
+        }];
+
+        let merged = merge_results(local, remote);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].source, DiscoverySource::Both);
+        assert!(merged[0].local_path.is_some());
+    }
+
+    #[test]
+    fn test_merge_results_keeps_unique() {
+        let local = vec![DiscoveredRepo {
+            full_name: "acme/api".to_string(),
+            source: DiscoverySource::Local,
+            workflow_files: vec!["ci.yml".to_string()],
+            matched_labels: vec!["self-hosted".to_string()],
+            local_path: None,
+        }];
+        let remote = vec![DiscoveredRepo {
+            full_name: "acme/web".to_string(),
+            source: DiscoverySource::Remote,
+            workflow_files: vec!["deploy.yml".to_string()],
+            matched_labels: vec!["gpu".to_string()],
+            local_path: None,
+        }];
+
+        let merged = merge_results(local, remote);
+        assert_eq!(merged.len(), 2);
     }
 }
