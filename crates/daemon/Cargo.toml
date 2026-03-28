@@ -30,6 +30,7 @@ futures = "0.3"
 reqwest = { version = "0.12", features = ["json"] }
 notify-rust = "4"
 libc = "0.2"
+tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]
 tempfile = "3"

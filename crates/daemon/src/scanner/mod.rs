@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::process::Command;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::github::GitHubClient;
 
 // ---------------------------------------------------------------------------
@@ -31,6 +33,35 @@ pub enum DiscoverySource {
     Local,
     Remote,
     Both,
+}
+
+/// Scan progress event emitted during scanning.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ScanProgressEvent {
+    Started {
+        scan_type: String,
+        total: usize,
+    },
+    Checking {
+        repo: String,
+        index: usize,
+        total: usize,
+    },
+    Found {
+        #[serde(flatten)]
+        repo: DiscoveredRepo,
+    },
+    Done {
+        scan_type: String,
+        total_found: usize,
+        total_checked: usize,
+    },
+    Cancelled {
+        scan_type: String,
+        checked: usize,
+        total: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +219,180 @@ async fn process_workflows_dir(
         }
     }
     entry.2.sort();
+}
+
+// ---------------------------------------------------------------------------
+// Two-phase local scan with progress
+// ---------------------------------------------------------------------------
+
+/// Phase 1: Find all repos that have a `.github/workflows/` directory, without
+/// checking workflow file contents. Returns `(full_name, repo_root, workflows_dir)` tuples.
+pub async fn discover_local_repos(workspace_dir: &Path) -> Result<Vec<(String, PathBuf, PathBuf)>> {
+    let mut repos = Vec::new();
+    discover_repos_recursive(workspace_dir, &mut repos).await?;
+    repos.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(repos)
+}
+
+async fn discover_repos_recursive(
+    dir: &Path,
+    repos: &mut Vec<(String, PathBuf, PathBuf)>,
+) -> Result<()> {
+    let mut read_dir = match fs::read_dir(dir).await {
+        Ok(rd) => rd,
+        Err(_) => return Ok(()),
+    };
+
+    while let Ok(Some(entry)) = read_dir.next_entry().await {
+        let path = entry.path();
+        let file_type = match entry.file_type().await {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if name_str.starts_with('.') && name_str != ".github" {
+            continue;
+        }
+
+        if name_str == ".github" {
+            let workflows_dir = path.join("workflows");
+            if workflows_dir.is_dir() {
+                if let Some(repo_root) = path.parent() {
+                    let full_name = git_remote_full_name(repo_root).await.unwrap_or_else(|| {
+                        repo_root
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    });
+                    repos.push((full_name, repo_root.to_path_buf(), workflows_dir));
+                }
+            }
+            continue;
+        }
+
+        Box::pin(discover_repos_recursive(&path, repos)).await?;
+    }
+    Ok(())
+}
+
+/// Phase 2 helper: Check a single repo's workflow files for matching labels.
+async fn check_workflows_dir(
+    workflows_dir: &Path,
+    repo_root: &Path,
+    labels: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let mut rd = match fs::read_dir(workflows_dir).await {
+        Ok(rd) => rd,
+        Err(_) => return (Vec::new(), Vec::new()),
+    };
+
+    let mut matching_files = Vec::new();
+    let mut matched_labels = Vec::new();
+
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext != "yml" && ext != "yaml" {
+            continue;
+        }
+
+        if let Ok(content) = fs::read_to_string(&path).await {
+            let file_matches = labels
+                .iter()
+                .any(|label| content.contains(&format!("runs-on: {}", label)));
+            if file_matches {
+                let rel = path
+                    .strip_prefix(repo_root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string();
+                matching_files.push(rel);
+                for label in labels {
+                    if content.contains(&format!("runs-on: {}", label))
+                        && !matched_labels.contains(label)
+                    {
+                        matched_labels.push(label.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    matching_files.sort();
+    matched_labels.sort();
+    (matching_files, matched_labels)
+}
+
+/// Two-phase local scan with progress events and cancellation support.
+///
+/// Phase 1 discovers all repos with `.github/workflows/` dirs, then phase 2
+/// checks each repo's workflow files for matching labels, emitting progress
+/// events throughout.
+pub async fn scan_local_with_progress<F>(
+    workspace_dir: &Path,
+    labels: &[String],
+    cancel: CancellationToken,
+    on_progress: F,
+) -> Result<Vec<DiscoveredRepo>>
+where
+    F: Fn(ScanProgressEvent) + Send,
+{
+    let repos = discover_local_repos(workspace_dir).await?;
+    let total = repos.len();
+
+    on_progress(ScanProgressEvent::Started {
+        scan_type: "local".to_string(),
+        total,
+    });
+
+    let mut results = Vec::new();
+
+    for (index, (full_name, repo_root, workflows_dir)) in repos.into_iter().enumerate() {
+        if cancel.is_cancelled() {
+            on_progress(ScanProgressEvent::Cancelled {
+                scan_type: "local".to_string(),
+                checked: index,
+                total,
+            });
+            return Ok(results);
+        }
+
+        on_progress(ScanProgressEvent::Checking {
+            repo: full_name.clone(),
+            index: index + 1,
+            total,
+        });
+
+        let (workflow_files, matched_labels) =
+            check_workflows_dir(&workflows_dir, &repo_root, labels).await;
+
+        if !workflow_files.is_empty() {
+            let repo = DiscoveredRepo {
+                full_name,
+                source: DiscoverySource::Local,
+                workflow_files,
+                matched_labels,
+                local_path: Some(repo_root),
+            };
+            on_progress(ScanProgressEvent::Found { repo: repo.clone() });
+            results.push(repo);
+        }
+    }
+
+    on_progress(ScanProgressEvent::Done {
+        scan_type: "local".to_string(),
+        total_found: results.len(),
+        total_checked: total,
+    });
+
+    results.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+    Ok(results)
 }
 
 /// Run `git config --get remote.origin.url` in `repo_root` and extract
@@ -584,5 +789,91 @@ mod tests {
 
         let merged = merge_results(local, remote);
         assert_eq!(merged.len(), 2);
+    }
+
+    // --- Two-phase scan tests ---
+
+    #[tokio::test]
+    async fn test_discover_local_repos_finds_git_repos() {
+        let tmp = TempDir::new().unwrap();
+
+        let repo1 = tmp.path().join("project-a");
+        std_fs::create_dir_all(repo1.join(".github/workflows")).unwrap();
+        init_git_remote(&repo1, "git@github.com:acme/project-a.git");
+        std_fs::write(
+            repo1.join(".github/workflows/ci.yml"),
+            "runs-on: self-hosted\n",
+        )
+        .unwrap();
+
+        let repo2 = tmp.path().join("project-b");
+        std_fs::create_dir_all(repo2.join(".github/workflows")).unwrap();
+        init_git_remote(&repo2, "git@github.com:acme/project-b.git");
+        std_fs::write(
+            repo2.join(".github/workflows/ci.yml"),
+            "runs-on: ubuntu-latest\n",
+        )
+        .unwrap();
+
+        let repos = discover_local_repos(tmp.path()).await.unwrap();
+        assert_eq!(repos.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_scan_local_with_progress_emits_events() {
+        use std::sync::{Arc, Mutex};
+
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("project");
+        std_fs::create_dir_all(&repo).unwrap();
+        init_git_remote(&repo, "git@github.com:acme/project.git");
+        create_workflow(&repo, "ci.yml", "runs-on: self-hosted\n");
+
+        let events: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+
+        let labels = vec!["self-hosted".to_string()];
+        let cancel = CancellationToken::new();
+
+        let results = scan_local_with_progress(tmp.path(), &labels, cancel, move |event| {
+            let tag = match &event {
+                ScanProgressEvent::Started { .. } => "started",
+                ScanProgressEvent::Checking { .. } => "checking",
+                ScanProgressEvent::Found { .. } => "found",
+                ScanProgressEvent::Done { .. } => "done",
+                ScanProgressEvent::Cancelled { .. } => "cancelled",
+            };
+            events_clone.lock().unwrap().push(tag.to_string());
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 1);
+        let ev = events.lock().unwrap();
+        assert_eq!(ev[0], "started");
+        assert_eq!(ev[1], "checking");
+        assert_eq!(ev[2], "found");
+        assert_eq!(ev[3], "done");
+    }
+
+    #[tokio::test]
+    async fn test_scan_local_with_progress_cancellation() {
+        let tmp = TempDir::new().unwrap();
+
+        for name in &["repo1", "repo2"] {
+            let repo = tmp.path().join(name);
+            std_fs::create_dir_all(&repo).unwrap();
+            init_git_remote(&repo, &format!("git@github.com:acme/{}.git", name));
+            create_workflow(&repo, "ci.yml", "runs-on: self-hosted\n");
+        }
+
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let labels = vec!["self-hosted".to_string()];
+        let results = scan_local_with_progress(tmp.path(), &labels, cancel, |_| {})
+            .await
+            .unwrap();
+        assert!(results.is_empty());
     }
 }
