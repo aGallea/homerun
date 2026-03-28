@@ -5,9 +5,9 @@ HomeRun is a macOS tool for managing GitHub Actions self-hosted runners. It has 
 ## Components
 
 ```
-┌──────────────┐   ┌─────────┐
-│  Tauri App   │   │   TUI   │     (thin clients)
-└──────┬───────┘   └────┬────┘
+┌──────────────┐    ┌─────────┐
+│  Tauri App   │    │   TUI   │     (thin clients)
+└──────┬───────┘    └────┬────┘
        └────────┬────────┘
                 │ Unix socket (REST + SSE + WebSocket)
        ┌────────┴────────┐
@@ -16,9 +16,9 @@ HomeRun is a macOS tool for managing GitHub Actions self-hosted runners. It has 
                 │ spawns / monitors
       ┌─────────┼─────────┐
       │         │         │
-   ┌──┴──┐  ┌──┴──┐  ┌──┴──┐
-   │Run 1│  │Run 2│  │Run N│   (GitHub Actions runner processes)
-   └─────┘  └─────┘  └─────┘
+   ┌──┴──┐   ┌──┴──┐   ┌──┴──┐
+   │Run 1│   │Run 2│   │Run N│   (GitHub Actions runner processes)
+   └─────┘   └─────┘   └─────┘
 ```
 
 - **homerund** (Rust/Axum) — background daemon on a Unix socket. Manages runner lifecycle, authenticates with GitHub, streams logs, collects metrics.

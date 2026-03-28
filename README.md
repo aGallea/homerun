@@ -1,13 +1,44 @@
-# HomeRun
+<h3 align="center">
+  <a name="readme-top"></a>
+  <img src="assets/homerun_idle.png" height="200" alt="HomeRun" />
+</h3>
 
-> One-click GitHub Actions self-hosted runners for macOS
+<h1 align="center">HomeRun</h1>
 
-[![CI](https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg)](https://github.com/aGallea/homerun/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/aGallea/77f18f115b500bdc5d6df52f95d399b9/raw/coverage.json)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/aGallea/homerun)](https://github.com/aGallea/homerun/releases/latest)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-brightgreen)](https://github.com/aGallea/homerun)
+<p align="center">
+  <strong>One-click GitHub Actions self-hosted runners for macOS</strong>
+</p>
+
+<p align="center">
+  <a href="#readme">
+    <img src="https://img.shields.io/badge/README-blue?style=for-the-badge" alt="README" />
+  </a>
+  <a href="docs/ARCHITECTURE.md">
+    <img src="https://img.shields.io/badge/ARCHITECTURE-555?style=for-the-badge" alt="Architecture" />
+  </a>
+  <a href="docs/SELF_HOSTED_RUNNERS.md">
+    <img src="https://img.shields.io/badge/SELF--HOSTED_RUNNERS-555?style=for-the-badge" alt="Self-Hosted Runners" />
+  </a>
+</p>
+
+<div align="center">
+  <a href="https://github.com/aGallea/homerun/actions/workflows/ci.yml">
+    <img src="https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg" alt="CI" />
+  </a>
+  <img src="https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/aGallea/77f18f115b500bdc5d6df52f95d399b9/raw/coverage.json" alt="Coverage" />
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
+  </a>
+  <a href="https://github.com/aGallea/homerun/releases/latest">
+    <img src="https://img.shields.io/github/v/release/aGallea/homerun" alt="Latest Release" />
+  </a>
+  <a href="https://www.rust-lang.org/">
+    <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust" />
+  </a>
+  <img src="https://img.shields.io/badge/macOS-13%2B-brightgreen" alt="macOS 13+" />
+</div>
+
+---
 
 HomeRun replaces the manual GitHub self-hosted runner setup process with a unified macOS desktop app and terminal UI. Authenticate with GitHub once, pick a repository, and launch runners with a single click. HomeRun handles download, registration, process management, log streaming, and resource monitoring — everything the official docs make you do by hand.
 
@@ -73,7 +104,15 @@ The `.dmg` bundles the `homerund` daemon inside the app. Releases are automated 
 
 ### Install (Homebrew)
 
-> _Coming soon — see [#18](https://github.com/aGallea/homerun/issues/18)._
+```sh
+brew tap aGallea/homerun
+
+# CLI tools (homerun + homerund)
+brew install homerun
+
+# Desktop app
+brew install --cask homerun
+```
 
 ### Build from Source
 
