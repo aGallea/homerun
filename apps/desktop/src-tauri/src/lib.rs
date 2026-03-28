@@ -228,6 +228,7 @@ pub fn run() {
             commands::update_tray_icon,
             commands::toggle_mini_window,
             commands::show_main_window,
+            commands::hide_all_windows,
             commands::save_mini_position,
             commands::get_mini_position,
             commands::quit_app,

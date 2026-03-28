@@ -437,6 +437,11 @@ pub async fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn hide_all_windows(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::window::hide_all_windows(&app_handle)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn save_mini_position(
     app_handle: tauri::AppHandle,
     x: f64,
