@@ -2,8 +2,11 @@
 
 > One-click GitHub Actions self-hosted runners for macOS
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg)](https://github.com/aGallea/homerun/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/aGallea/77f18f115b500bdc5d6df52f95d399b9/raw/coverage.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/aGallea/homerun)](https://github.com/aGallea/homerun/releases/latest)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-brightgreen)](https://github.com/aGallea/homerun)
 
 HomeRun replaces the manual GitHub self-hosted runner setup process with a unified macOS desktop app and terminal UI. Authenticate with GitHub once, pick a repository, and launch runners with a single click. HomeRun handles download, registration, process management, log streaming, and resource monitoring — everything the official docs make you do by hand.
@@ -150,6 +153,68 @@ homerun --no-tui daemon restart
 - macOS 13+ (Ventura or later)
 - ARM64 or Intel Mac
 - A GitHub account
+
+## FAQ / Troubleshooting
+
+<details>
+<summary><strong>Daemon won't start / "socket already exists"</strong></summary>
+
+A stale socket file may exist from a previous crash. Remove it and try again:
+
+```sh
+rm ~/.homerun/daemon.sock
+homerund
+```
+
+</details>
+
+<details>
+<summary><strong>Authentication fails / "token expired"</strong></summary>
+
+Re-authenticate by running the Device Flow login again from the TUI or desktop app. If you're using a PAT, ensure it has the `repo` and `admin:org` scopes. You can also clear the stored token from macOS Keychain:
+
+```sh
+security delete-generic-password -s "homerun" -a "github_token"
+```
+
+</details>
+
+<details>
+<summary><strong>Runner stuck in "Registering" state</strong></summary>
+
+This usually means the GitHub API registration token request failed or timed out. Check:
+
+1. Your GitHub token is valid and has the `repo` scope
+2. You have admin access to the target repository (required by GitHub to register self-hosted runners)
+3. The repository hasn't hit the [self-hosted runner limit](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-limits)
+
+Stop the runner and try creating a new one.
+
+</details>
+
+<details>
+<summary><strong>Runner exits immediately after starting</strong></summary>
+
+Check the runner logs in `~/.homerun/logs/` for details. Common causes:
+
+- Another runner is already using the same work directory
+- The runner binary is corrupted — delete `~/.homerun/cache/` to force a fresh download
+- macOS Gatekeeper is blocking the runner binary — run `xattr -cr ~/.homerun/cache/`
+
+</details>
+
+<details>
+<summary><strong>Desktop app shows "Cannot connect to daemon"</strong></summary>
+
+The daemon must be running before launching the desktop app or TUI. Start it with:
+
+```sh
+homerund
+```
+
+Or enable "Launch at login" in Settings > Startup to have it start automatically via launchd.
+
+</details>
 
 ## Contributing
 
