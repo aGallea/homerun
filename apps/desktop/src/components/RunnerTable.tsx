@@ -285,8 +285,7 @@ function LastJobSummary({ runner }: { runner: RunnerInfo }) {
   const icon = job.succeeded ? "\u2713" : "\u2717";
   const iconColor = job.succeeded ? "var(--accent-green)" : "var(--accent-red)";
 
-  const nameDisplay =
-    job.job_name.length > 20 ? job.job_name.slice(0, 20) + "\u2026" : job.job_name;
+  const nameDisplay = job.job_name;
 
   return (
     <div
@@ -298,6 +297,8 @@ function LastJobSummary({ runner }: { runner: RunnerInfo }) {
         color: "var(--text-secondary)",
         whiteSpace: "nowrap",
         overflow: "hidden",
+        minWidth: 0,
+        flex: 1,
       }}
       title={`Last job: ${job.job_name} — ${job.succeeded ? "succeeded" : "failed"} in ${formatDuration(job.duration_secs)}${job.latest_attempt ? ` (re-run ${job.latest_attempt.succeeded ? "succeeded" : "failed"} on ${job.latest_attempt.runner_name})` : ""}`}
     >
