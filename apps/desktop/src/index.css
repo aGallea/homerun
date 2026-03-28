@@ -776,6 +776,7 @@ p {
 .runner-row-grid {
   display: flex;
   align-items: center;
+  overflow: hidden;
 }
 
 .runner-col-name {
@@ -810,8 +811,7 @@ p {
   gap: 4px;
   white-space: nowrap;
   flex-shrink: 3;
-  min-width: 60px;
-  max-width: 200px;
+  min-width: 16px;
   overflow: hidden;
   margin-right: 12px;
 }
@@ -840,8 +840,8 @@ p {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  flex: 1 0 auto;
-  min-width: 50px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
 }
 

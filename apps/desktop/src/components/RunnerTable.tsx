@@ -386,7 +386,16 @@ function RunnerRow({
               </span>
             )}
             {!indented && runner.config.mode === "service" && <SvcBadge />}
-            <span className="font-mono" style={{ fontSize: 14, fontWeight: 500 }}>
+            <span
+              className="font-mono"
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
               {runner.config.name}
             </span>
           </div>
