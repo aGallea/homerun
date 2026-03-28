@@ -9,13 +9,22 @@ use crate::server::AppState;
 #[derive(Deserialize)]
 pub struct LocalScanRequest {
     pub path: PathBuf,
+    pub labels: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct RemoteScanRequest {
+    pub labels: Option<Vec<String>>,
 }
 
 pub async fn scan_local_handler(
     State(state): State<AppState>,
     Json(body): Json<LocalScanRequest>,
 ) -> Result<Json<Vec<DiscoveredRepo>>, (StatusCode, String)> {
-    let labels = state.config.read().await.preferences.scan_labels.clone();
+    let labels = match body.labels {
+        Some(l) if !l.is_empty() => l,
+        _ => state.config.read().await.preferences.scan_labels.clone(),
+    };
     let repos = scan_local(&body.path, &labels)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -24,10 +33,14 @@ pub async fn scan_local_handler(
 
 pub async fn scan_remote_handler(
     State(state): State<AppState>,
+    body: Option<Json<RemoteScanRequest>>,
 ) -> Result<Json<Vec<DiscoveredRepo>>, (StatusCode, String)> {
     let token = state.auth.token().await;
     let client = GitHubClient::new(token).map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
-    let labels = state.config.read().await.preferences.scan_labels.clone();
+    let labels = match body.and_then(|b| b.0.labels).filter(|l| !l.is_empty()) {
+        Some(l) => l,
+        None => state.config.read().await.preferences.scan_labels.clone(),
+    };
     let repos = scan_remote(&client, &labels)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -102,6 +115,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_scan_local_accepts_labels_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let body = serde_json::json!({
+            "path": path,
+            "labels": ["gpu"]
+        })
+        .to_string();
+
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/scan/local")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
