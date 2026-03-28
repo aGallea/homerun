@@ -784,7 +784,7 @@ p {
   justify-content: center;
   overflow: hidden;
   width: 260px;
-  min-width: 100px;
+  min-width: 80px;
   flex-shrink: 1;
   margin-right: 12px;
 }
@@ -809,11 +809,10 @@ p {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
-  flex-shrink: 1;
-  min-width: 0;
+  flex-shrink: 3;
+  min-width: 60px;
   max-width: 200px;
   overflow: hidden;
-  text-overflow: ellipsis;
   margin-right: 12px;
 }
 
@@ -841,8 +840,8 @@ p {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 auto;
+  min-width: 50px;
   overflow: hidden;
 }
 
