@@ -52,6 +52,23 @@ jobs:
           cp target/${{ matrix.target }}/release/homerund \
             apps/desktop/src-tauri/binaries/homerund-${{ matrix.target }}
 
+      - name: Build homerun CLI
+        run: cargo build --release -p homerun --target ${{ matrix.target }}
+
+      - name: Package CLI binaries
+        run: |
+          mkdir -p cli-dist
+          cp target/${{ matrix.target }}/release/homerun cli-dist/
+          cp target/${{ matrix.target }}/release/homerund cli-dist/
+          tar -czf homerun-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C cli-dist .
+
+      - name: Upload CLI tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.arch }}
+          path: homerun-*.tar.gz
+          if-no-files-found: error
+
       - name: Build Tauri app
         working-directory: apps/desktop
         # Code-signing env vars omitted — unsigned builds for now.
@@ -84,5 +101,37 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.dmg
+          files: |
+            artifacts/*.dmg
+            artifacts/*.tar.gz
           draft: false
+
+  update-tap:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: self-hosted
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compute SHA256 hashes and dispatch
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA_CLI_ARM=$(shasum -a 256 artifacts/homerun-v${VERSION}-aarch64-apple-darwin.tar.gz | awk '{print $1}')
+          SHA_CLI_X86=$(shasum -a 256 artifacts/homerun-v${VERSION}-x86_64-apple-darwin.tar.gz | awk '{print $1}')
+          SHA_DMG_ARM=$(shasum -a 256 artifacts/HomeRun_${VERSION}_aarch64.dmg | awk '{print $1}')
+          SHA_DMG_X86=$(shasum -a 256 artifacts/HomeRun_${VERSION}_x64.dmg | awk '{print $1}')
+
+          gh api repos/aGallea/homebrew-homerun/dispatches \
+            --method POST \
+            -f event_type=update-tap \
+            -f "client_payload[version]=${VERSION}" \
+            -f "client_payload[sha256_cli_arm64]=${SHA_CLI_ARM}" \
+            -f "client_payload[sha256_cli_x86_64]=${SHA_CLI_X86}" \
+            -f "client_payload[sha256_dmg_arm64]=${SHA_DMG_ARM}" \
+            -f "client_payload[sha256_dmg_x86_64]=${SHA_DMG_X86}"

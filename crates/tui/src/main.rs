@@ -19,7 +19,8 @@ use homerun::ui;
 #[derive(Parser)]
 #[command(
     name = "homerun",
-    about = "HomeRun — GitHub Actions self-hosted runner manager"
+    about = "HomeRun — GitHub Actions self-hosted runner manager",
+    version
 )]
 struct Cli {
     /// Disable TUI, use plain CLI output

@@ -1,11 +1,23 @@
 use anyhow::Result;
+use clap::Parser;
 use homerund::logging::{DaemonLogLayer, DaemonLogState};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+#[derive(Parser)]
+#[command(
+    name = "homerund",
+    about = "HomeRun daemon — manages GitHub Actions self-hosted runners",
+    version
+)]
+struct Cli {}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse CLI args (handles --version and --help automatically)
+    Cli::parse();
+
     let mut config = homerund::config::Config::default();
     let config_path = config.config_path();
     if config_path.exists() {
