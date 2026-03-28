@@ -5,6 +5,8 @@ import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
 import { useRunners } from "../hooks/useRunners";
 import { useTrayIcon } from "../hooks/useTrayIcon";
+import { useNotifications } from "../hooks/useNotifications";
+import type { Preferences } from "../api/types";
 
 const SIDEBAR_COLLAPSE_WIDTH = 900;
 
@@ -18,7 +20,23 @@ export function Layout() {
   const [starting, setStarting] = useState(false);
   const wasDisconnectedRef = useRef(false);
   const runnersHook = useRunners();
+  const [notifPrefs, setNotifPrefs] = useState<Preferences | null>(null);
   useTrayIcon(runnersHook.runners, daemonConnected);
+  useNotifications(runnersHook.runners, notifPrefs);
+
+  useEffect(() => {
+    api
+      .getPreferences()
+      .then(setNotifPrefs)
+      .catch(() => {});
+    const interval = setInterval(() => {
+      api
+        .getPreferences()
+        .then(setNotifPrefs)
+        .catch(() => {});
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleStartDaemon = useCallback(async () => {
     setStarting(true);

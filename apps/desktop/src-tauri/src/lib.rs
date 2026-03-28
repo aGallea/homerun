@@ -165,6 +165,16 @@ pub fn run() {
                 }
             });
 
+            // -- Set up macOS notifications --
+            // In dev mode, impersonate Terminal so notifications are delivered.
+            // In production, use the app's own bundle identifier.
+            let bundle_id = if tauri::is_dev() {
+                "com.apple.Terminal"
+            } else {
+                "com.homerun.app"
+            };
+            let _ = mac_notification_sys::set_application(bundle_id);
+
             // -- Initialize system tray --
             if let Err(e) = tray::init(app) {
                 eprintln!("Failed to initialize tray: {e}");
@@ -221,6 +231,7 @@ pub fn run() {
             commands::save_mini_position,
             commands::get_mini_position,
             commands::quit_app,
+            commands::send_notification,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

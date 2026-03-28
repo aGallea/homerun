@@ -32,11 +32,11 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config, daemon_logs: DaemonLogState) -> Self {
-        let runner_manager = RunnerManager::new(config.clone());
         let notifications = Arc::new(NotificationManager::with_preferences(
             config.preferences.notify_status_changes,
             config.preferences.notify_job_completions,
         ));
+        let runner_manager = RunnerManager::new(config.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
             auth: AuthManager::new(),

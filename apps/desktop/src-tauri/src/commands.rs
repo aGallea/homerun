@@ -521,3 +521,14 @@ pub async fn get_scan_results(
     let client = state.client.lock().await;
     client.get_scan_results().await
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn send_notification(title: String, body: String, icon_path: String) -> Result<(), String> {
+    mac_notification_sys::Notification::new()
+        .title(&title)
+        .message(&body)
+        .app_icon(&icon_path)
+        .send()
+        .map(|_| ())
+        .map_err(|e| format!("Failed to send notification: {e}"))
+}
