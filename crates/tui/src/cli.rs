@@ -66,9 +66,8 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
     match command {
         Some(CliCommand::List) => cmd_list(&client).await,
         Some(CliCommand::Status) => cmd_status(&client).await,
-        Some(CliCommand::About) => cmd_about(),
         Some(CliCommand::Scan { path, remote }) => cmd_scan(&client, path, remote).await,
-        Some(CliCommand::Daemon(_)) => unreachable!(),
+        Some(CliCommand::About | CliCommand::Daemon(_)) => unreachable!(),
         None => {
             eprintln!(
                 "No command specified. Use `homerun --no-tui list` or `homerun --no-tui status`."
@@ -296,7 +295,12 @@ pub async fn cmd_scan(client: &DaemonClient, path: Option<String>, remote: bool)
 mod tests {
     use super::*;
 
-    // Format helpers tested inline — integration tests require a live daemon.
+    #[test]
+    fn test_cmd_about_succeeds() {
+        let result = cmd_about();
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn test_memory_formatting() {
         let bytes: u64 = 4_509_715_456; // ~4.2 GB

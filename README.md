@@ -264,6 +264,17 @@ Or enable "Launch at login" in Settings > Startup to have it start automatically
 
 </details>
 
+<details>
+<summary><strong>"Background Items Added" notification with cryptic name</strong></summary>
+
+macOS Ventura+ shows a "Background Items Added" notification when HomeRun registers the daemon as a background service. Since the app is not yet code-signed, macOS displays a hash identifier instead of "HomeRun". This is cosmetic and doesn't affect functionality.
+
+You can manage background items in **System Settings > General > Login Items & Extensions**.
+
+Code signing is tracked in [#49](https://github.com/aGallea/homerun/issues/49) — once resolved, the notification will show "HomeRun" properly.
+
+</details>
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up the dev environment, coding standards, and the PR process.
