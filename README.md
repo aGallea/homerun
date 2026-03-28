@@ -31,9 +31,9 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
 ## Architecture
 
 ```
-┌──────────────┐   ┌─────────┐
-│  Tauri App   │   │   TUI   │     (thin clients)
-└──────┬───────┘   └────┬────┘
+┌──────────────┐    ┌─────────┐
+│  Tauri App   │    │   TUI   │     (thin clients)
+└──────┬───────┘    └────┬────┘
        └────────┬────────┘
                 │ Unix socket (REST + SSE + WebSocket)
        ┌────────┴────────┐
@@ -42,9 +42,9 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
                 │ spawns / monitors
       ┌─────────┼─────────┐
       │         │         │
-   ┌──┴──┐  ┌──┴──┐  ┌──┴──┐
-   │Run 1│  │Run 2│  │Run N│   (GitHub Actions runner processes)
-   └─────┘  └─────┘  └─────┘
+   ┌──┴──┐   ┌──┴──┐   ┌──┴──┐
+   │Run 1│   │Run 2│   │Run N│   (GitHub Actions runner processes)
+   └─────┘   └─────┘   └─────┘
 ```
 
 Runners are native child processes of the daemon — not Docker containers. Each runner is an instance of the [official GitHub Actions runner binary](https://github.com/actions/runner). All GitHub communication is outbound HTTPS. No inbound ports needed.
@@ -77,31 +77,43 @@ The `.dmg` bundles the `homerund` daemon inside the app. Releases are automated 
 
 ### Build from Source
 
+**Prerequisites:** Rust 1.75+ (`curl https://sh.rustup.rs -sSf | sh`), Node.js 20+ (`brew install node`), Xcode Command Line Tools (`xcode-select --install`)
+
 ```sh
 git clone https://github.com/aGallea/homerun.git
 cd homerun
-
-# Build the daemon and TUI
-cargo build --release -p homerund -p homerun
-
-# Binaries are in target/release/
-ls target/release/homerund target/release/homerun
+make setup        # checks prerequisites, builds daemon + TUI, installs frontend deps
 ```
 
-To build the desktop app as well, see [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev setup.
+Or build manually:
+
+```sh
+# Daemon + TUI
+cargo build --release -p homerund -p homerun
+
+# Desktop app (requires Node.js)
+cd apps/desktop && npm install && npm run tauri build
+```
 
 ### Run
 
 ```sh
-# Start the daemon (must be running before using the TUI or desktop app)
-homerund
+# Start the daemon (required by both the TUI and desktop app)
+make dev                # or: ./target/release/homerund
 
-# Launch the interactive TUI
-homerun
+# Launch the TUI (in another terminal)
+make tui                # or: ./target/release/homerun
 
-# Or use CLI mode (plain text output, no interactive UI — useful for scripts)
+# Launch the desktop app (in another terminal)
+make desktop            # or: cd apps/desktop && npm run tauri dev
+
+# CLI mode (no interactive UI — useful for scripts)
 homerun --no-tui list
 ```
+
+> **Note:** The desktop app's DMG release bundles the daemon inside the app. When building from source, start the daemon separately before launching the desktop app.
+
+Run `make help` to see all available commands.
 
 ## Screenshots
 
