@@ -811,6 +811,7 @@ p {
   white-space: nowrap;
   flex-shrink: 1;
   min-width: 0;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   margin-right: 12px;
