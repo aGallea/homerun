@@ -73,7 +73,11 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
 }
 
 pub fn colored(text: &str, color_code: &str) -> String {
-    if atty_stdout() {
+    colored_impl(text, color_code, atty_stdout())
+}
+
+fn colored_impl(text: &str, color_code: &str, is_tty: bool) -> String {
+    if is_tty {
         format!("\x1b[{color_code}m{text}\x1b[0m")
     } else {
         text.to_string()
@@ -296,8 +300,11 @@ mod tests {
 
     #[test]
     fn test_colored_without_terminal() {
-        // In test context, stdout is not a terminal, so no ANSI codes
-        let result = colored("hello", "32");
-        assert_eq!(result, "hello");
+        assert_eq!(colored_impl("hello", "32", false), "hello");
+    }
+
+    #[test]
+    fn test_colored_with_terminal() {
+        assert_eq!(colored_impl("hello", "32", true), "\x1b[32mhello\x1b[0m");
     }
 }

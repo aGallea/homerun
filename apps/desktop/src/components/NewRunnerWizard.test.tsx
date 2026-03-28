@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { NewRunnerWizard } from "./NewRunnerWizard";
 import { makeRepo } from "../test/factories";
 import { api } from "../api/commands";
@@ -18,7 +18,7 @@ const mockRepos = [
   makeRepo({ full_name: "other/utils", id: 3 }),
 ];
 
-function renderWizard(props: Partial<Parameters<typeof NewRunnerWizard>[0]> = {}) {
+async function renderWizard(props: Partial<Parameters<typeof NewRunnerWizard>[0]> = {}) {
   const defaultProps = {
     onClose: vi.fn(),
     onCreate: vi.fn().mockResolvedValue({
@@ -43,12 +43,16 @@ function renderWizard(props: Partial<Parameters<typeof NewRunnerWizard>[0]> = {}
     onCreateBatch: vi.fn().mockResolvedValue({ group_id: "g1", runners: [], errors: [] }),
     ...props,
   };
-  return {
-    ...render(
+  let result!: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
       <AuthProvider>
         <NewRunnerWizard {...defaultProps} />
       </AuthProvider>,
-    ),
+    );
+  });
+  return {
+    ...result,
     props: defaultProps,
   };
 }
@@ -63,7 +67,7 @@ beforeEach(() => {
 
 describe("NewRunnerWizard", () => {
   it("renders step 1 (Select Repository) initially", async () => {
-    renderWizard();
+    await renderWizard();
     expect(screen.getByPlaceholderText("Search repositories...")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("org/frontend")).toBeInTheDocument();
@@ -71,7 +75,7 @@ describe("NewRunnerWizard", () => {
   });
 
   it("filters repos by search input", async () => {
-    renderWizard();
+    await renderWizard();
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     fireEvent.change(screen.getByPlaceholderText("Search repositories..."), {
@@ -82,7 +86,7 @@ describe("NewRunnerWizard", () => {
   });
 
   it("advances to step 2 on repo selection", async () => {
-    renderWizard();
+    await renderWizard();
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("org/frontend"));
@@ -91,7 +95,7 @@ describe("NewRunnerWizard", () => {
   });
 
   it("disables Next on step 2 when name is empty (single mode)", async () => {
-    renderWizard();
+    await renderWizard();
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("org/frontend"));
@@ -102,7 +106,7 @@ describe("NewRunnerWizard", () => {
   });
 
   it("advances to step 3 (Launch) and calls onCreate on single create", async () => {
-    const { props } = renderWizard();
+    const { props } = await renderWizard();
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     // Step 1: select repo
@@ -127,7 +131,7 @@ describe("NewRunnerWizard", () => {
   });
 
   it("calls onCreateBatch when count > 1", async () => {
-    const { props } = renderWizard();
+    const { props } = await renderWizard();
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("org/frontend"));
@@ -153,7 +157,7 @@ describe("NewRunnerWizard", () => {
   });
 
   it("Back button returns to previous step", async () => {
-    renderWizard();
+    await renderWizard();
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("org/frontend"));
@@ -164,14 +168,14 @@ describe("NewRunnerWizard", () => {
   });
 
   it("Cancel button calls onClose", async () => {
-    const { props } = renderWizard();
+    const { props } = await renderWizard();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(props.onClose).toHaveBeenCalledTimes(1);
   });
 
   it("shows error on failed creation", async () => {
     const onCreate = vi.fn().mockRejectedValue(new Error("Network error"));
-    renderWizard({ onCreate });
+    await renderWizard({ onCreate });
     await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("org/frontend"));
