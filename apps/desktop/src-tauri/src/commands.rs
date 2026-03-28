@@ -3,8 +3,8 @@ use tauri::State;
 use crate::client::{
     AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DaemonLogEntry,
     DeviceFlowResponse, DiscoveredRepo, GroupActionResponse, JobHistoryEntry, LogEntry,
-    MetricsResponse, Preferences, RepoInfo, RunnerInfo, ScaleGroupResponse, StepLogsResponse,
-    StepsResponse,
+    MetricsResponse, Preferences, RepoInfo, RunnerInfo, ScanResults, ScaleGroupResponse,
+    StepLogsResponse, StepsResponse,
 };
 use crate::AppState;
 
@@ -456,4 +456,68 @@ pub async fn get_mini_position(
 pub async fn quit_app(app_handle: tauri::AppHandle) -> Result<(), String> {
     app_handle.exit(0);
     Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn start_scan(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    workspace_path: Option<String>,
+    authenticated: bool,
+) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let client = state.client.lock().await;
+    let socket_path = client.socket_path().to_path_buf();
+    drop(client);
+
+    if let Some(path) = workspace_path {
+        let app = app_handle.clone();
+        let sock = socket_path.clone();
+        tokio::spawn(async move {
+            let client = crate::client::DaemonClient::new(sock);
+            let body = serde_json::json!({ "path": path }).to_string();
+            if let Ok(text) = client.request("POST", "/scan/local/stream", Some(body)).await {
+                for line in text.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        let _ = app.emit("scan-progress", data);
+                    }
+                }
+            }
+        });
+    }
+
+    if authenticated {
+        let app = app_handle.clone();
+        let sock = socket_path;
+        tokio::spawn(async move {
+            let client = crate::client::DaemonClient::new(sock);
+            if let Ok(text) = client.request("POST", "/scan/remote/stream", None).await {
+                for line in text.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        let _ = app.emit("scan-progress", data);
+                    }
+                }
+            }
+        });
+    }
+
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn cancel_scan(
+    state: State<'_, AppState>,
+    scan_id: String,
+) -> Result<serde_json::Value, String> {
+    let client = state.client.lock().await;
+    client.cancel_scan(&scan_id).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_scan_results(
+    state: State<'_, AppState>,
+) -> Result<Option<ScanResults>, String> {
+    let client = state.client.lock().await;
+    client.get_scan_results().await
 }

@@ -246,4 +246,27 @@ export interface DiscoveredRepo {
   matched_labels: string[];
 }
 
+export interface ScanProgressEvent {
+  type: "started" | "checking" | "found" | "done" | "cancelled";
+  scan_type?: string;
+  repo?: string;
+  index?: number;
+  total?: number;
+  total_found?: number;
+  total_checked?: number;
+  checked?: number;
+  full_name?: string;
+  source?: string;
+  workflow_files?: string[];
+  matched_labels?: string[];
+  local_path?: string | null;
+}
+
+export interface ScanResults {
+  last_scan_at: string;
+  local_results: DiscoveredRepo[];
+  remote_results: DiscoveredRepo[];
+  merged_results: DiscoveredRepo[];
+}
+
 export type TrayIconState = "idle" | "active" | "error" | "offline";

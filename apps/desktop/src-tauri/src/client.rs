@@ -271,6 +271,14 @@ pub struct DiscoveredRepo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanResults {
+    pub last_scan_at: String,
+    pub local_results: Vec<DiscoveredRepo>,
+    pub remote_results: Vec<DiscoveredRepo>,
+    pub merged_results: Vec<DiscoveredRepo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonLogEntry {
     pub timestamp: String,
     pub level: String,
@@ -353,7 +361,7 @@ impl DaemonClient {
         &self.socket_path
     }
 
-    async fn request(
+    pub async fn request(
         &self,
         method: &str,
         path: &str,
@@ -604,6 +612,17 @@ impl DaemonClient {
         let json: serde_json::Value =
             serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
         Ok(json["active_runners"].as_u64().unwrap_or(0) as usize)
+    }
+
+    pub async fn get_scan_results(&self) -> Result<Option<ScanResults>, String> {
+        let body = self.request("GET", "/scan/results", None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn cancel_scan(&self, scan_id: &str) -> Result<serde_json::Value, String> {
+        let body = serde_json::json!({ "scan_id": scan_id }).to_string();
+        let text = self.request("POST", "/scan/cancel", Some(body)).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
     pub async fn get_daemon_logs_recent(
