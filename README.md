@@ -2,7 +2,7 @@
 
 > One-click GitHub Actions self-hosted runners for macOS
 
-[![CI](https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg)](https://github.com/aGallea/homerun/actions/workflows/ci.yml)
+[![CI](https://github.com/aGallea/homerun/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/aGallea/homerun/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/aGallea/77f18f115b500bdc5d6df52f95d399b9/raw/coverage.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/aGallea/homerun)](https://github.com/aGallea/homerun/releases/latest)
