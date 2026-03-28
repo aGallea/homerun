@@ -9,6 +9,26 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.7.0](https://github.com/aGallea/homerun/compare/v0.6.0...v0.7.0) (2026-03-28)
+
+
+### Features
+
+* add --version flag to homerun and homerund binaries ([f59b128](https://github.com/aGallea/homerun/commit/f59b12841c07d9b8a5551e86194e560ea5fbea7b))
+* add About section to desktop app and CLI about command ([0515987](https://github.com/aGallea/homerun/commit/0515987f1520ff6dcaec552b360d2f5bc401d9ff)), closes [#88](https://github.com/aGallea/homerun/issues/88)
+* add Hide View option to tray menu ([0fd2e7e](https://github.com/aGallea/homerun/commit/0fd2e7edec29cd672371dbdce5a6df3b76f1289b))
+* add Homebrew tap support and update README ([b2a0347](https://github.com/aGallea/homerun/commit/b2a03478340e77ca0b29e8020c0edf459c9e2ddc))
+* add macOS native notifications for runner status changes and job completions ([b35c52f](https://github.com/aGallea/homerun/commit/b35c52fc1edcd58638fc8edf5c511c90e2842cfa))
+* macOS native notifications and tray Hide View ([2f3705f](https://github.com/aGallea/homerun/commit/2f3705f81d4322c64852330f8922d2131106b4ee))
+* notify when a runner is deleted ([280bfa3](https://github.com/aGallea/homerun/commit/280bfa3e801e7f521f2731665bcdd7afc54ee88f))
+
+
+### Bug Fixes
+
+* add FAQ for background items notification and improve CLI test coverage ([bb4e773](https://github.com/aGallea/homerun/commit/bb4e773fb9d0d12086991b5cca9ee475b64141a2))
+* use monotonic job counter for completion notifications ([46f23d1](https://github.com/aGallea/homerun/commit/46f23d117c13e1fb827a403dce150e5ce86cd07b))
+* use monotonic job counter for completion notifications ([72ea28e](https://github.com/aGallea/homerun/commit/72ea28e0afc1f9a010c14bcceeec5c64f59d6a34))
+
 ## [0.6.0](https://github.com/aGallea/homerun/compare/v0.5.2...v0.6.0) (2026-03-28)
 
 
