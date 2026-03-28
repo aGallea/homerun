@@ -9,6 +9,7 @@ interface TrackedRunner {
   name: string;
   state: string;
   lastJobKey: string | null;
+  totalJobs: number;
 }
 
 function jobKey(runner: RunnerInfo): string | null {
@@ -50,7 +51,12 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
     if (!initialized.current) {
       const initial = new Map<string, TrackedRunner>();
       for (const r of runners) {
-        initial.set(r.config.id, { name: r.config.name, state: r.state, lastJobKey: jobKey(r) });
+        initial.set(r.config.id, {
+          name: r.config.name,
+          state: r.state,
+          lastJobKey: jobKey(r),
+          totalJobs: r.jobs_completed + r.jobs_failed,
+        });
       }
       prevRef.current = initial;
       initialized.current = true;
@@ -76,12 +82,14 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
         }
       }
 
-      // Job completion notifications
+      // Job completion notifications — use the monotonic job counter as the
+      // primary trigger so we never miss a completion even when last_completed_job
+      // is briefly cleared between consecutive jobs.
+      const currentTotalJobs = r.jobs_completed + r.jobs_failed;
       if (
         preferences.notify_job_completions &&
         old &&
-        currentJobKey &&
-        currentJobKey !== old.lastJobKey &&
+        currentTotalJobs > old.totalJobs &&
         r.last_completed_job
       ) {
         const job = r.last_completed_job;
@@ -96,7 +104,12 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
         }
       }
 
-      next.set(id, { name, state: r.state, lastJobKey: currentJobKey });
+      next.set(id, {
+        name,
+        state: r.state,
+        lastJobKey: currentJobKey,
+        totalJobs: currentTotalJobs,
+      });
     }
 
     // Detect deleted runners (were in prev, no longer in current)

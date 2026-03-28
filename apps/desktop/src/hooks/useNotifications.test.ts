@@ -38,6 +38,8 @@ function runnerWithJob(
   const base = makeRunner({ name, state: state as RunnerInfo["state"] });
   return {
     ...base,
+    jobs_completed: succeeded ? base.jobs_completed + 1 : base.jobs_completed,
+    jobs_failed: succeeded ? base.jobs_failed : base.jobs_failed + 1,
     last_completed_job: {
       job_name: jobName,
       succeeded,
@@ -216,6 +218,49 @@ describe("useNotifications", () => {
       (c: unknown[]) => (c[1] as Record<string, string>)?.title === "Job Completed",
     );
     expect(jobCalls).toHaveLength(0);
+  });
+
+  it("sends Job Completed when counter increases even if job key was briefly null", async () => {
+    const prefs = makePrefs();
+    // Runner is busy with jobs_completed=0
+    const initial = [makeRunner({ name: "r1", state: "busy" })];
+    const { rerender } = renderHook(({ runners, prefs }) => useNotifications(runners, prefs), {
+      initialProps: { runners: initial, prefs },
+    });
+
+    // Job completed (counter increased) and runner is back online with last_completed_job
+    const completed = runnerWithJob("r1", "online", true, "test", "2026-02-01T00:00:00Z", 30);
+    rerender({ runners: [completed], prefs });
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("send_notification", {
+        title: "Job Completed",
+        body: "test on r1 passed in 30s",
+        icon_path: "/resolved/resources/notifications/active.png",
+      });
+    });
+  });
+
+  it("does not double-notify when counter stays the same across polls", async () => {
+    const prefs = makePrefs();
+    const initial = [makeRunner({ name: "r1", state: "busy" })];
+    const { rerender } = renderHook(({ runners, prefs }) => useNotifications(runners, prefs), {
+      initialProps: { runners: initial, prefs },
+    });
+
+    // First completion
+    const completed = runnerWithJob("r1", "online", true, "test", "2026-02-01T00:00:00Z", 30);
+    rerender({ runners: [completed], prefs });
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledTimes(1);
+    });
+
+    // Same data on next poll — should NOT notify again
+    mockInvoke.mockClear();
+    mockResolveResource.mockImplementation((path: string) => Promise.resolve(`/resolved/${path}`));
+    rerender({ runners: [completed], prefs });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockInvoke).not.toHaveBeenCalled();
   });
 
   it("sends Runner Deleted notification when runner disappears", async () => {
