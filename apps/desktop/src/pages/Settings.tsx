@@ -63,9 +63,30 @@ export function Settings() {
       .catch(() => {});
   }, []);
 
+  // Labels input local state (synced with preferences)
+  const [labelsInput, setLabelsInput] = useState("");
+
+  useEffect(() => {
+    setLabelsInput(preferences.scan_labels.join(", "));
+  }, [preferences.scan_labels]);
+
   function updatePreference(key: keyof Preferences, value: boolean) {
     setPreferences((prev) => {
       const updated = { ...prev, [key]: value };
+      api
+        .updatePreferences(updated)
+        .then(setPreferences)
+        .catch((e) => {
+          console.error("Failed to update preference:", e);
+          setPreferences(prev);
+        });
+      return updated;
+    });
+  }
+
+  function updatePreferences(updates: Partial<Preferences>) {
+    setPreferences((prev) => {
+      const updated = { ...prev, ...updates };
       api
         .updatePreferences(updated)
         .then(setPreferences)
@@ -531,6 +552,94 @@ export function Settings() {
             description="Notify when a job completes or fails on a self-hosted runner."
             checked={preferences.notify_job_completions}
             onChange={(checked) => updatePreference("notify_job_completions", checked)}
+          />
+        </div>
+      </section>
+
+      {/* Repository Scanning */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionHeader title="Repository Scanning" />
+        <div className="card">
+          {/* Workspace path */}
+          <div style={{ padding: "8px 0" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 14 }}>Workspace path</div>
+              <p className="text-muted" style={{ margin: 0, fontSize: 12, marginBottom: 8 }}>
+                Root directory to scan for local repositories.
+              </p>
+              <input
+                type="text"
+                value={preferences.workspace_path ?? ""}
+                onChange={(e) => updatePreferences({ workspace_path: e.target.value || null })}
+                placeholder="/path/to/workspace"
+                style={{ width: "100%", maxWidth: 400 }}
+              />
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* Runner labels */}
+          <div style={{ padding: "8px 0" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 500, marginBottom: 2, fontSize: 14 }}>Runner labels</div>
+              <p className="text-muted" style={{ margin: 0, fontSize: 12, marginBottom: 8 }}>
+                Comma-separated labels to match in workflow{" "}
+                <code
+                  style={{
+                    background: "var(--bg-tertiary)",
+                    padding: "1px 6px",
+                    borderRadius: 4,
+                    fontSize: 12,
+                  }}
+                >
+                  runs-on:
+                </code>{" "}
+                fields.
+              </p>
+              <input
+                type="text"
+                value={labelsInput}
+                onChange={(e) => setLabelsInput(e.target.value)}
+                onBlur={() => {
+                  const labels = labelsInput
+                    .split(",")
+                    .map((l) => l.trim())
+                    .filter(Boolean);
+                  updatePreferences({ scan_labels: labels });
+                }}
+                placeholder="self-hosted, linux, x64"
+                style={{ width: "100%", maxWidth: 400 }}
+              />
+              {preferences.scan_labels.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {preferences.scan_labels.map((label) => (
+                    <span
+                      key={label}
+                      style={{
+                        fontSize: 11,
+                        padding: "2px 8px",
+                        borderRadius: 10,
+                        background: "rgba(210, 168, 255, 0.15)",
+                        color: "var(--accent-purple)",
+                      }}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* Auto-scan toggle */}
+          <ToggleSetting
+            label="Auto-scan on page load"
+            description="Automatically scan when opening the Repositories page."
+            checked={preferences.auto_scan}
+            onChange={(checked) => updatePreferences({ auto_scan: checked })}
           />
         </div>
       </section>
