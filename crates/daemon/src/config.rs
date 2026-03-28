@@ -90,6 +90,10 @@ impl Config {
         self.base_dir.join("history")
     }
 
+    pub fn scan_results_path(&self) -> PathBuf {
+        self.base_dir.join("scan-results.json")
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         Ok(toml::from_str(&content)?)
@@ -135,6 +139,15 @@ mod tests {
         assert_eq!(
             config.log_dir(),
             dirs::home_dir().unwrap().join(".homerun/logs")
+        );
+    }
+
+    #[test]
+    fn test_scan_results_path() {
+        let config = Config::default();
+        assert_eq!(
+            config.scan_results_path(),
+            dirs::home_dir().unwrap().join(".homerun/scan-results.json")
         );
     }
 
