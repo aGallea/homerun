@@ -13,8 +13,9 @@ export function Repositories() {
   const navigate = useNavigate();
   const { repos, loading: reposLoading, error: reposError } = useRepos();
   const { runners, createRunner, createBatch } = useOutletContext<RunnersContextType>();
-  const { discoveredRepos, scanning, lastScanTime, scanError, runScan } = useScan();
+  const { discoveredRepos, scanning, lastScanAt, scanError, progressText, runScan } = useScan();
   const [search, setSearch] = useState("");
+  const [showEnriched, setShowEnriched] = useState(true);
   const [wizardRepo, setWizardRepo] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
@@ -87,7 +88,7 @@ export function Repositories() {
 
   // Scan summary stats
   const scanSummary = useMemo(() => {
-    if (discoveredRepos.length === 0) return null;
+    if (!lastScanAt || discoveredRepos.length === 0) return null;
     let local = 0;
     let remote = 0;
     let both = 0;
@@ -97,9 +98,9 @@ export function Repositories() {
       else if (d.source === "both") both++;
     }
     return { total: discoveredRepos.length, local, remote, both };
-  }, [discoveredRepos]);
+  }, [discoveredRepos, lastScanAt]);
 
-  const hasScanned = lastScanTime !== null;
+  const hasScanned = lastScanAt !== null;
   const needsConfig = !preferences?.workspace_path;
 
   // Filter repos by search, label, and source
@@ -167,6 +168,15 @@ export function Repositories() {
       <div className="page-header">
         <h1 className="page-title">Repositories</h1>
         <div style={{ display: "flex", gap: 8 }}>
+          {discoveredRepos.length > 0 && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowEnriched((v) => !v)}
+              style={{ fontSize: 12 }}
+            >
+              {showEnriched ? "Plain view" : "Enriched view"}
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={handleScan} disabled={scanning}>
             {scanning ? "Scanning..." : "Scan"}
           </button>
@@ -187,8 +197,15 @@ export function Repositories() {
         />
       </div>
 
+      {/* Progress text */}
+      {scanning && progressText && (
+        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
+          {progressText}
+        </div>
+      )}
+
       {/* Filter bar (shown after scan) */}
-      {hasScanned && (availableLabels.length > 0 || discoveredRepos.length > 0) && (
+      {hasScanned && showEnriched && (availableLabels.length > 0 || discoveredRepos.length > 0) && (
         <div
           style={{
             display: "flex",
@@ -256,29 +273,34 @@ export function Repositories() {
       )}
 
       {/* Scan status bar */}
-      {scanSummary && (
-        <div
-          style={{
-            background: "rgba(63, 185, 80, 0.1)",
-            border: "1px solid rgba(63, 185, 80, 0.3)",
-            borderRadius: 6,
-            padding: "8px 14px",
-            marginBottom: 16,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span style={{ fontSize: 12, color: "var(--accent-green)" }}>
-            Found {scanSummary.total} repo{scanSummary.total !== 1 ? "s" : ""} with matching
-            workflows ({scanSummary.local} local, {scanSummary.remote} remote, {scanSummary.both}{" "}
-            both)
-          </span>
-          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-            Last scan: {lastScanTime?.toLocaleTimeString()}
-          </span>
-        </div>
-      )}
+      {hasScanned &&
+        (showEnriched && scanSummary ? (
+          <div
+            style={{
+              background: "rgba(63, 185, 80, 0.1)",
+              border: "1px solid rgba(63, 185, 80, 0.3)",
+              borderRadius: 6,
+              padding: "8px 14px",
+              marginBottom: 16,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span style={{ fontSize: 12, color: "var(--accent-green)" }}>
+              Found {scanSummary.total} repo{scanSummary.total !== 1 ? "s" : ""} with matching
+              workflows ({scanSummary.local} local, {scanSummary.remote} remote, {scanSummary.both}{" "}
+              both)
+            </span>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+              Last scan: {new Date(lastScanAt!).toLocaleString()}
+            </span>
+          </div>
+        ) : (
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 12 }}>
+            Last scan: {new Date(lastScanAt!).toLocaleString()}
+          </div>
+        ))}
 
       {/* Scan error */}
       {scanError && (
@@ -315,7 +337,7 @@ export function Repositories() {
           {filteredRepos.map((repo) => {
             const count = runnerCountByRepo.get(repo.full_name) ?? 0;
             const discovered = discoveryMap.get(repo.full_name);
-            const isDimmed = hasScanned && !discovered;
+            const isDimmed = hasScanned && showEnriched && !discovered;
             return (
               <div
                 key={repo.id || repo.full_name}
@@ -377,7 +399,7 @@ export function Repositories() {
                 </div>
 
                 {/* Discovery badges */}
-                {discovered && (
+                {showEnriched && discovered && (
                   <div className="flex items-center gap-8" style={{ flexWrap: "wrap" }}>
                     {discovered.matched_labels.map((label) => (
                       <span
@@ -418,7 +440,7 @@ export function Repositories() {
                 )}
 
                 {/* Workflow files */}
-                {discovered && discovered.workflow_files.length > 0 && (
+                {showEnriched && discovered && discovered.workflow_files.length > 0 && (
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     Workflows: {discovered.workflow_files.join(", ")}
                   </div>
