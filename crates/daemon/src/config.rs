@@ -2,12 +2,22 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+fn default_scan_labels() -> Vec<String> {
+    vec!["self-hosted".to_string()]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Preferences {
     pub start_runners_on_launch: bool,
     pub notify_status_changes: bool,
     pub notify_job_completions: bool,
+    #[serde(default = "default_scan_labels")]
+    pub scan_labels: Vec<String>,
+    #[serde(default)]
+    pub workspace_path: Option<String>,
+    #[serde(default)]
+    pub auto_scan: bool,
 }
 
 impl Default for Preferences {
@@ -16,6 +26,9 @@ impl Default for Preferences {
             start_runners_on_launch: false,
             notify_status_changes: true,
             notify_job_completions: true,
+            scan_labels: default_scan_labels(),
+            workspace_path: None,
+            auto_scan: false,
         }
     }
 }
@@ -149,5 +162,46 @@ mod tests {
 
         let loaded = Config::load(&path).unwrap();
         assert_eq!(config.preferences, loaded.preferences);
+    }
+
+    #[test]
+    fn test_preferences_backward_compat_defaults() {
+        // Simulate an existing config.toml that has no scan fields
+        let toml_str = r#"
+            base_dir = "/tmp/.homerun"
+
+            [preferences]
+            start_runners_on_launch = true
+            notify_status_changes = false
+            notify_job_completions = true
+        "#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let prefs = config.preferences;
+        assert_eq!(prefs.scan_labels, vec!["self-hosted".to_string()]);
+        assert_eq!(prefs.workspace_path, None);
+        assert!(!prefs.auto_scan);
+        // Existing fields preserved
+        assert!(prefs.start_runners_on_launch);
+        assert!(!prefs.notify_status_changes);
+    }
+
+    #[test]
+    fn test_preferences_scan_fields_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let mut config = Config::with_base_dir(dir.path().join(".homerun"));
+        config.preferences.scan_labels = vec!["self-hosted".to_string(), "gpu".to_string()];
+        config.preferences.workspace_path = Some("/Users/dev/workspace".to_string());
+        config.preferences.auto_scan = true;
+        config.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.preferences.scan_labels, vec!["self-hosted", "gpu"]);
+        assert_eq!(
+            loaded.preferences.workspace_path,
+            Some("/Users/dev/workspace".to_string())
+        );
+        assert!(loaded.preferences.auto_scan);
     }
 }
