@@ -136,6 +136,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/scan/local", post(api::scanner::scan_local_handler))
         .route("/scan/remote", post(api::scanner::scan_remote_handler))
         .route("/scan/local/stream", post(api::scanner::scan_local_stream))
+        .route(
+            "/scan/remote/stream",
+            post(api::scanner::scan_remote_stream),
+        )
         .route("/scan/cancel", post(api::scanner::cancel_scan))
         .route("/scan/results", get(api::scanner::get_scan_results))
         .route("/service/install", post(api_service::install_service))

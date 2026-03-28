@@ -472,6 +472,72 @@ pub async fn scan_remote(
     Ok(results)
 }
 
+/// Remote scan with progress. Fetches repo list first (phase 1), then checks each (phase 2).
+pub async fn scan_remote_with_progress<F>(
+    github_client: &GitHubClient,
+    labels: &[String],
+    cancel: CancellationToken,
+    on_progress: F,
+) -> Result<Vec<DiscoveredRepo>>
+where
+    F: Fn(ScanProgressEvent) + Send,
+{
+    let repos = github_client.list_repos().await?;
+    let total = repos.len();
+
+    on_progress(ScanProgressEvent::Started {
+        scan_type: "remote".to_string(),
+        total,
+    });
+
+    let mut results = Vec::new();
+
+    for (index, repo) in repos.into_iter().enumerate() {
+        if cancel.is_cancelled() {
+            on_progress(ScanProgressEvent::Cancelled {
+                scan_type: "remote".to_string(),
+                checked: index,
+                total,
+            });
+            return Ok(results);
+        }
+
+        on_progress(ScanProgressEvent::Checking {
+            repo: repo.full_name.clone(),
+            index: index + 1,
+            total,
+        });
+
+        let (workflow_files, matched_labels) = github_client
+            .list_workflows_with_labels(&repo.owner, &repo.name, labels)
+            .await
+            .unwrap_or_default();
+
+        if !workflow_files.is_empty() {
+            let discovered = DiscoveredRepo {
+                full_name: repo.full_name.clone(),
+                source: DiscoverySource::Remote,
+                workflow_files,
+                matched_labels,
+                local_path: None,
+            };
+            on_progress(ScanProgressEvent::Found {
+                repo: discovered.clone(),
+            });
+            results.push(discovered);
+        }
+    }
+
+    on_progress(ScanProgressEvent::Done {
+        scan_type: "remote".to_string(),
+        total_found: results.len(),
+        total_checked: total,
+    });
+
+    results.sort_by(|a, b| a.full_name.cmp(&b.full_name));
+    Ok(results)
+}
+
 // ---------------------------------------------------------------------------
 // Merge
 // ---------------------------------------------------------------------------

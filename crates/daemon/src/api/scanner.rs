@@ -15,7 +15,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::github::GitHubClient;
 use crate::scanner::persistence::{self, ScanResults};
-use crate::scanner::{scan_local, scan_local_with_progress, scan_remote, DiscoveredRepo};
+use crate::scanner::{
+    merge_results, scan_local, scan_local_with_progress, scan_remote, scan_remote_with_progress,
+    DiscoveredRepo,
+};
 use crate::server::AppState;
 
 #[derive(Clone, Default)]
@@ -128,6 +131,55 @@ pub async fn scan_local_stream(
     });
 
     Sse::new(stream)
+}
+
+pub async fn scan_remote_stream(
+    State(state): State<AppState>,
+) -> Result<Sse<impl futures::stream::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
+{
+    let token = state.auth.token().await;
+    let client = GitHubClient::new(token).map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+    let labels = state.config.read().await.preferences.scan_labels.clone();
+    let config = state.config.read().await.clone();
+    let cancel = CancellationToken::new();
+
+    let (tx, rx) = mpsc::channel::<crate::scanner::ScanProgressEvent>(100);
+
+    tokio::spawn(async move {
+        let results = scan_remote_with_progress(&client, &labels, cancel, |event| {
+            let _ = tx.try_send(event);
+        })
+        .await
+        .unwrap_or_default();
+
+        // Load existing local results to merge with
+        let existing = persistence::load_scan_results(&config.scan_results_path())
+            .await
+            .ok()
+            .flatten();
+
+        let local_results = existing
+            .as_ref()
+            .map(|r| r.local_results.clone())
+            .unwrap_or_default();
+
+        let merged = merge_results(local_results.clone(), results.clone());
+
+        let scan_results = ScanResults {
+            last_scan_at: chrono::Utc::now(),
+            local_results,
+            remote_results: results,
+            merged_results: merged,
+        };
+        let _ = persistence::save_scan_results(&config.scan_results_path(), &scan_results).await;
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
+        let json = serde_json::to_string(&event).unwrap_or_default();
+        Ok(Event::default().data(json))
+    });
+
+    Ok(Sse::new(stream))
 }
 
 #[derive(Deserialize)]
