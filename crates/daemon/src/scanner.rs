@@ -239,14 +239,14 @@ fn parse_github_full_name(url: &str) -> Option<String> {
 /// files via the API, and return repos that use any of the given `runs-on:` labels.
 pub async fn scan_remote(
     github_client: &GitHubClient,
-    _labels: &[String],
+    labels: &[String],
 ) -> Result<Vec<DiscoveredRepo>> {
     let repos = github_client.list_repos().await?;
     let mut results: Vec<DiscoveredRepo> = Vec::new();
 
     for repo in repos {
-        let workflow_files = github_client
-            .list_self_hosted_workflows(&repo.owner, &repo.name)
+        let (workflow_files, matched_labels) = github_client
+            .list_workflows_with_labels(&repo.owner, &repo.name, labels)
             .await
             .unwrap_or_default();
 
@@ -255,7 +255,7 @@ pub async fn scan_remote(
                 full_name: repo.full_name.clone(),
                 source: DiscoverySource::Remote,
                 workflow_files,
-                matched_labels: Vec::new(),
+                matched_labels,
                 local_path: None,
             });
         }

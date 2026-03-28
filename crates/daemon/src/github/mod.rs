@@ -59,8 +59,14 @@ impl GitHubClient {
     }
 
     /// Fetch `.github/workflows/` contents for `owner/repo` and return the
-    /// relative file paths of workflow files that contain `runs-on: self-hosted`.
-    pub async fn list_self_hosted_workflows(&self, owner: &str, repo: &str) -> Result<Vec<String>> {
+    /// relative file paths of workflow files that contain any of the given
+    /// `runs-on:` labels, together with the set of labels that matched.
+    pub async fn list_workflows_with_labels(
+        &self,
+        owner: &str,
+        repo: &str,
+        labels: &[String],
+    ) -> Result<(Vec<String>, Vec<String>)> {
         #[derive(Deserialize)]
         struct ContentItem {
             name: String,
@@ -72,10 +78,11 @@ impl GitHubClient {
         let route = format!("/repos/{owner}/{repo}/contents/.github/workflows");
         let items: Vec<ContentItem> = match self.octocrab.get(route, None::<&()>).await {
             Ok(v) => v,
-            Err(_) => return Ok(Vec::new()), // directory missing or no access
+            Err(_) => return Ok((Vec::new(), Vec::new())), // directory missing or no access
         };
 
         let mut matching: Vec<String> = Vec::new();
+        let mut matched_labels: Vec<String> = Vec::new();
 
         for item in items {
             if item.item_type != "file" {
@@ -104,13 +111,24 @@ impl GitHubClient {
                 Err(_) => continue,
             };
 
-            if content.contains("runs-on: self-hosted") {
+            let file_matched = labels
+                .iter()
+                .any(|label| content.contains(&format!("runs-on: {}", label)));
+            if file_matched {
                 matching.push(format!(".github/workflows/{}", item.name));
+                for label in labels {
+                    if content.contains(&format!("runs-on: {}", label))
+                        && !matched_labels.contains(label)
+                    {
+                        matched_labels.push(label.clone());
+                    }
+                }
             }
         }
 
         matching.sort();
-        Ok(matching)
+        matched_labels.sort();
+        Ok((matching, matched_labels))
     }
 
     pub async fn get_runner_registration_token(
@@ -601,17 +619,20 @@ mod tests {
         );
     }
 
-    /// Verify that list_self_hosted_workflows returns an empty vec (not an error)
+    /// Verify that list_workflows_with_labels returns empty tuples (not an error)
     /// when the workflows directory is inaccessible (error is swallowed by design).
     #[tokio::test]
-    async fn test_list_self_hosted_workflows_inaccessible_repo_returns_empty() {
+    async fn test_list_workflows_with_labels_inaccessible_repo_returns_empty() {
         let client = GitHubClient::new(Some("invalid_token_xyz".to_string())).unwrap();
+        let labels = vec!["self-hosted".to_string()];
         let result = client
-            .list_self_hosted_workflows("fake-owner-xyz-123", "fake-repo-xyz-456")
+            .list_workflows_with_labels("fake-owner-xyz-123", "fake-repo-xyz-456", &labels)
             .await;
-        // By design the function swallows errors and returns Ok(Vec::new())
+        // By design the function swallows errors and returns Ok((Vec::new(), Vec::new()))
         assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+        let (files, matched) = result.unwrap();
+        assert!(files.is_empty());
+        assert!(matched.is_empty());
     }
 
     #[test]
@@ -743,15 +764,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_self_hosted_workflows_empty_token_returns_empty() {
-        // Even with an empty token, the function should return Ok(empty vec)
+    async fn test_list_workflows_with_labels_empty_token_returns_empty() {
+        // Even with an empty token, the function should return Ok(empty tuples)
         // because it swallows directory-access errors.
         let client = GitHubClient::new(Some(String::new())).unwrap();
+        let labels = vec!["self-hosted".to_string()];
         let result = client
-            .list_self_hosted_workflows("any-owner", "any-repo")
+            .list_workflows_with_labels("any-owner", "any-repo", &labels)
             .await;
         assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+        let (files, matched) = result.unwrap();
+        assert!(files.is_empty());
+        assert!(matched.is_empty());
     }
 
     #[test]
