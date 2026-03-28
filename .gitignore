@@ -7,3 +7,20 @@ dist/
 *.swp
 *.swo
 apps/desktop/src-tauri/gen/
+
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Dev-only files (not useful to external contributors)
+CLAUDE.md
+.playwright-mcp/

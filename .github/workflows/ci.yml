@@ -16,6 +16,9 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+  # NOTE: CI runs on self-hosted runners. External contributors will need a
+  # maintainer to approve and run CI on their PRs.
+
 jobs:
   pre-commit:
     name: Pre-commit checks

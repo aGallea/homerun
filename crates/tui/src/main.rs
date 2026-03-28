@@ -37,6 +37,8 @@ enum Commands {
     List,
     /// Show runner and system status
     Status,
+    /// Show version, author, and project information
+    About,
     /// Scan for repos that use self-hosted runners
     ///
     /// Examples:
@@ -75,6 +77,7 @@ async fn main() -> Result<()> {
         return homerun::cli::run(cli.command.map(|c| match c {
             Commands::List => homerun::cli::CliCommand::List,
             Commands::Status => homerun::cli::CliCommand::Status,
+            Commands::About => homerun::cli::CliCommand::About,
             Commands::Scan { path, remote } => homerun::cli::CliCommand::Scan { path, remote },
             Commands::Daemon { action } => homerun::cli::CliCommand::Daemon(match action {
                 DaemonAction::Start => homerun::cli::DaemonAction::Start,

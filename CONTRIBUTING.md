@@ -196,7 +196,7 @@ Conventional commits power the auto-generated CHANGELOG and semantic versioning.
 
 ### Submitting a PR
 
-1. Fork the repository and create a branch from `main`:
+1. Fork the repository and create a branch from `master`:
 
    ```sh
    git checkout -b feat/my-feature

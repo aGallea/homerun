@@ -6,6 +6,7 @@ use crate::client::DaemonClient;
 pub enum CliCommand {
     List,
     Status,
+    About,
     Scan {
         /// Local workspace path to scan (None = skip local scan)
         path: Option<String>,
@@ -22,7 +23,11 @@ pub enum DaemonAction {
 }
 
 pub async fn run(command: Option<CliCommand>) -> Result<()> {
-    // Handle daemon commands first (don't require daemon to be running)
+    // Handle commands that don't require daemon connection
+    if let Some(CliCommand::About) = &command {
+        return cmd_about();
+    }
+
     if let Some(CliCommand::Daemon(action)) = &command {
         return match action {
             DaemonAction::Start => {
@@ -62,7 +67,7 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
         Some(CliCommand::List) => cmd_list(&client).await,
         Some(CliCommand::Status) => cmd_status(&client).await,
         Some(CliCommand::Scan { path, remote }) => cmd_scan(&client, path, remote).await,
-        Some(CliCommand::Daemon(_)) => unreachable!(),
+        Some(CliCommand::About | CliCommand::Daemon(_)) => unreachable!(),
         None => {
             eprintln!(
                 "No command specified. Use `homerun --no-tui list` or `homerun --no-tui status`."
@@ -99,6 +104,27 @@ pub fn color_for_state(state: &str) -> &'static str {
         "stopping" | "deleting" => "35",    // magenta
         _ => "0",                           // default
     }
+}
+
+pub fn cmd_about() -> Result<()> {
+    let version = env!("CARGO_PKG_VERSION");
+    println!(
+        "{}\n",
+        colored("HomeRun — GitHub Actions self-hosted runner manager", "1")
+    );
+    println!("  Version:     {version}");
+    println!("  License:     MIT");
+    println!("  Author:      aGallea (https://github.com/aGallea)");
+    println!("  Repository:  https://github.com/aGallea/homerun");
+    println!();
+    println!("Feedback:");
+    println!(
+        "  Bug report:      https://github.com/aGallea/homerun/issues/new?template=bug_report.md"
+    );
+    println!(
+        "  Feature request:  https://github.com/aGallea/homerun/issues/new?template=feature_request.md"
+    );
+    Ok(())
 }
 
 pub async fn cmd_list(client: &DaemonClient) -> Result<()> {
@@ -269,7 +295,12 @@ pub async fn cmd_scan(client: &DaemonClient, path: Option<String>, remote: bool)
 mod tests {
     use super::*;
 
-    // Format helpers tested inline — integration tests require a live daemon.
+    #[test]
+    fn test_cmd_about_succeeds() {
+        let result = cmd_about();
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn test_memory_formatting() {
         let bytes: u64 = 4_509_715_456; // ~4.2 GB
