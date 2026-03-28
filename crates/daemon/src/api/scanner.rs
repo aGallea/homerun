@@ -1,10 +1,52 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::sse::{Event, Sse},
+    Json,
+};
+use futures::stream::StreamExt;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::convert::Infallible;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
+use tokio_util::sync::CancellationToken;
 
 use crate::github::GitHubClient;
-use crate::scanner::{scan_local, scan_remote, DiscoveredRepo};
+use crate::scanner::persistence::{self, ScanResults};
+use crate::scanner::{scan_local, scan_local_with_progress, scan_remote, DiscoveredRepo};
 use crate::server::AppState;
+
+#[derive(Clone, Default)]
+pub struct ScanState {
+    active_scans: Arc<Mutex<HashMap<String, CancellationToken>>>,
+}
+
+impl ScanState {
+    pub fn new() -> Self {
+        Self {
+            active_scans: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn register(&self, scan_id: String, cancel: CancellationToken) {
+        self.active_scans.lock().await.insert(scan_id, cancel);
+    }
+
+    pub async fn cancel(&self, scan_id: &str) -> bool {
+        if let Some(token) = self.active_scans.lock().await.remove(scan_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn remove(&self, scan_id: &str) {
+        self.active_scans.lock().await.remove(scan_id);
+    }
+}
 
 #[derive(Deserialize)]
 pub struct LocalScanRequest {
@@ -45,6 +87,70 @@ pub async fn scan_remote_handler(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(repos))
+}
+
+#[derive(Deserialize)]
+pub struct LocalStreamRequest {
+    pub path: PathBuf,
+}
+
+pub async fn scan_local_stream(
+    State(state): State<AppState>,
+    Json(body): Json<LocalStreamRequest>,
+) -> Sse<impl futures::stream::Stream<Item = Result<Event, Infallible>>> {
+    let labels = state.config.read().await.preferences.scan_labels.clone();
+    let config = state.config.read().await.clone();
+    let cancel = CancellationToken::new();
+    let _scan_state = state.scan_state.clone();
+
+    let (tx, rx) = mpsc::channel::<crate::scanner::ScanProgressEvent>(100);
+
+    tokio::spawn(async move {
+        let results = scan_local_with_progress(&body.path, &labels, cancel, |event| {
+            let _ = tx.try_send(event);
+        })
+        .await
+        .unwrap_or_default();
+
+        // Persist local results
+        let scan_results = ScanResults {
+            last_scan_at: chrono::Utc::now(),
+            local_results: results.clone(),
+            remote_results: vec![],
+            merged_results: results,
+        };
+        let _ = persistence::save_scan_results(&config.scan_results_path(), &scan_results).await;
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
+        let json = serde_json::to_string(&event).unwrap_or_default();
+        Ok(Event::default().data(json))
+    });
+
+    Sse::new(stream)
+}
+
+#[derive(Deserialize)]
+pub struct CancelRequest {
+    pub scan_id: String,
+}
+
+pub async fn cancel_scan(
+    State(state): State<AppState>,
+    Json(body): Json<CancelRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cancelled = state.scan_state.cancel(&body.scan_id).await;
+    Ok(Json(serde_json::json!({ "cancelled": cancelled })))
+}
+
+pub async fn get_scan_results(
+    State(state): State<AppState>,
+) -> Result<Json<Option<ScanResults>>, (StatusCode, String)> {
+    let path = state.config.read().await.scan_results_path();
+    let results = persistence::load_scan_results(&path)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(results))
 }
 
 #[cfg(test)]
@@ -158,5 +264,26 @@ mod tests {
             .unwrap();
         // Missing required `path` field → 422 Unprocessable Entity
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn test_get_scan_results_empty_returns_null() {
+        let app = create_router(AppState::new_test());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/scan/results")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json.is_null());
     }
 }
