@@ -12,10 +12,11 @@ pub struct LocalScanRequest {
 }
 
 pub async fn scan_local_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(body): Json<LocalScanRequest>,
 ) -> Result<Json<Vec<DiscoveredRepo>>, (StatusCode, String)> {
-    let repos = scan_local(&body.path)
+    let labels = state.config.read().await.preferences.scan_labels.clone();
+    let repos = scan_local(&body.path, &labels)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(repos))
@@ -26,7 +27,8 @@ pub async fn scan_remote_handler(
 ) -> Result<Json<Vec<DiscoveredRepo>>, (StatusCode, String)> {
     let token = state.auth.token().await;
     let client = GitHubClient::new(token).map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
-    let repos = scan_remote(&client)
+    let labels = state.config.read().await.preferences.scan_labels.clone();
+    let repos = scan_remote(&client, &labels)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(repos))

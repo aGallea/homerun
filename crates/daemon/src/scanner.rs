@@ -16,8 +16,10 @@ use crate::github::GitHubClient;
 pub struct DiscoveredRepo {
     pub full_name: String,
     pub source: DiscoverySource,
-    /// Workflow files (relative paths) that contain `runs-on: self-hosted`
+    /// Workflow files (relative paths) that contain a matching `runs-on:` label
     pub workflow_files: Vec<String>,
+    /// Labels that were found in the workflow files
+    pub matched_labels: Vec<String>,
     pub local_path: Option<PathBuf>,
 }
 
@@ -34,21 +36,24 @@ pub enum DiscoverySource {
 // ---------------------------------------------------------------------------
 
 /// Recursively walk `workspace_dir`, find all `.github/workflows/*.yml` files,
-/// and return repos that have at least one workflow with `runs-on: self-hosted`.
-pub async fn scan_local(workspace_dir: &Path) -> Result<Vec<DiscoveredRepo>> {
-    // Map: repo_root -> (full_name, matching_workflow_files)
-    let mut found: HashMap<PathBuf, (String, Vec<String>)> = HashMap::new();
+/// and return repos that have at least one workflow with a matching `runs-on:` label.
+pub async fn scan_local(workspace_dir: &Path, labels: &[String]) -> Result<Vec<DiscoveredRepo>> {
+    // Map: repo_root -> (full_name, matching_workflow_files, matched_labels)
+    let mut found: HashMap<PathBuf, (String, Vec<String>, Vec<String>)> = HashMap::new();
 
-    collect_workflow_files(workspace_dir, &mut found).await?;
+    collect_workflow_files(workspace_dir, labels, &mut found).await?;
 
     let mut results: Vec<DiscoveredRepo> = found
         .into_iter()
-        .map(|(root, (full_name, workflow_files))| DiscoveredRepo {
-            full_name,
-            source: DiscoverySource::Local,
-            workflow_files,
-            local_path: Some(root),
-        })
+        .map(
+            |(root, (full_name, workflow_files, matched_labels))| DiscoveredRepo {
+                full_name,
+                source: DiscoverySource::Local,
+                workflow_files,
+                matched_labels,
+                local_path: Some(root),
+            },
+        )
         .collect();
 
     // Stable ordering for tests and display
@@ -60,7 +65,8 @@ pub async fn scan_local(workspace_dir: &Path) -> Result<Vec<DiscoveredRepo>> {
 /// whether its parent is a git repo and inspect the workflow files.
 async fn collect_workflow_files(
     dir: &Path,
-    found: &mut HashMap<PathBuf, (String, Vec<String>)>,
+    labels: &[String],
+    found: &mut HashMap<PathBuf, (String, Vec<String>, Vec<String>)>,
 ) -> Result<()> {
     let mut read_dir = match fs::read_dir(dir).await {
         Ok(rd) => rd,
@@ -92,7 +98,7 @@ async fn collect_workflow_files(
             if workflows_dir.is_dir() {
                 // The repo root is the parent of .github
                 if let Some(repo_root) = path.parent() {
-                    process_workflows_dir(repo_root, &workflows_dir, found).await;
+                    process_workflows_dir(repo_root, &workflows_dir, labels, found).await;
                 }
             }
             // Don't recurse into .github itself
@@ -100,7 +106,7 @@ async fn collect_workflow_files(
         }
 
         // Recurse
-        Box::pin(collect_workflow_files(&path, found)).await?;
+        Box::pin(collect_workflow_files(&path, labels, found)).await?;
     }
 
     Ok(())
@@ -109,7 +115,8 @@ async fn collect_workflow_files(
 async fn process_workflows_dir(
     repo_root: &Path,
     workflows_dir: &Path,
-    found: &mut HashMap<PathBuf, (String, Vec<String>)>,
+    labels: &[String],
+    found: &mut HashMap<PathBuf, (String, Vec<String>, Vec<String>)>,
 ) {
     let mut rd = match fs::read_dir(workflows_dir).await {
         Ok(rd) => rd,
@@ -117,6 +124,7 @@ async fn process_workflows_dir(
     };
 
     let mut matching_files: Vec<String> = Vec::new();
+    let mut matched_labels: Vec<String> = Vec::new();
 
     while let Ok(Some(entry)) = rd.next_entry().await {
         let path = entry.path();
@@ -126,13 +134,23 @@ async fn process_workflows_dir(
         }
 
         if let Ok(content) = fs::read_to_string(&path).await {
-            if content.contains("runs-on: self-hosted") {
+            let file_matched = labels
+                .iter()
+                .any(|label| content.contains(&format!("runs-on: {}", label)));
+            if file_matched {
                 let rel = path
                     .strip_prefix(repo_root)
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .to_string();
                 matching_files.push(rel);
+                for label in labels {
+                    if content.contains(&format!("runs-on: {}", label))
+                        && !matched_labels.contains(label)
+                    {
+                        matched_labels.push(label.clone());
+                    }
+                }
             }
         }
     }
@@ -142,6 +160,7 @@ async fn process_workflows_dir(
     }
 
     matching_files.sort();
+    matched_labels.sort();
 
     // Determine the repo full name from the git remote URL
     let full_name = git_remote_full_name(repo_root).await.unwrap_or_else(|| {
@@ -153,7 +172,7 @@ async fn process_workflows_dir(
 
     let entry = found
         .entry(repo_root.to_path_buf())
-        .or_insert_with(|| (full_name.clone(), Vec::new()));
+        .or_insert_with(|| (full_name.clone(), Vec::new(), Vec::new()));
     // If we already visited this root (shouldn't happen but be safe), merge files
     for f in matching_files {
         if !entry.1.contains(&f) {
@@ -161,6 +180,12 @@ async fn process_workflows_dir(
         }
     }
     entry.1.sort();
+    for l in matched_labels {
+        if !entry.2.contains(&l) {
+            entry.2.push(l);
+        }
+    }
+    entry.2.sort();
 }
 
 /// Run `git config --get remote.origin.url` in `repo_root` and extract
@@ -211,8 +236,11 @@ fn parse_github_full_name(url: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Fetch the authenticated user's repos from GitHub, check their workflow
-/// files via the API, and return repos that use `runs-on: self-hosted`.
-pub async fn scan_remote(github_client: &GitHubClient) -> Result<Vec<DiscoveredRepo>> {
+/// files via the API, and return repos that use any of the given `runs-on:` labels.
+pub async fn scan_remote(
+    github_client: &GitHubClient,
+    _labels: &[String],
+) -> Result<Vec<DiscoveredRepo>> {
     let repos = github_client.list_repos().await?;
     let mut results: Vec<DiscoveredRepo> = Vec::new();
 
@@ -227,6 +255,7 @@ pub async fn scan_remote(github_client: &GitHubClient) -> Result<Vec<DiscoveredR
                 full_name: repo.full_name.clone(),
                 source: DiscoverySource::Remote,
                 workflow_files,
+                matched_labels: Vec::new(),
                 local_path: None,
             });
         }
@@ -315,12 +344,14 @@ mod tests {
             "jobs:\n  build:\n    runs-on: self-hosted\n",
         );
 
-        let repos = scan_local(tmp.path()).await.unwrap();
+        let labels = vec!["self-hosted".to_string()];
+        let repos = scan_local(tmp.path(), &labels).await.unwrap();
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].full_name, "acme/my-project");
         assert!(repos[0].workflow_files.iter().any(|f| f.contains("ci.yml")));
         assert_eq!(repos[0].source, DiscoverySource::Local);
         assert!(repos[0].local_path.is_some());
+        assert_eq!(repos[0].matched_labels, vec!["self-hosted".to_string()]);
     }
 
     #[tokio::test]
@@ -337,7 +368,8 @@ mod tests {
             "jobs:\n  build:\n    runs-on: ubuntu-latest\n",
         );
 
-        let repos = scan_local(tmp.path()).await.unwrap();
+        let labels = vec!["self-hosted".to_string()];
+        let repos = scan_local(tmp.path(), &labels).await.unwrap();
         assert!(repos.is_empty());
     }
 
@@ -364,7 +396,8 @@ mod tests {
         create_workflow(&repo3, "deploy.yml", "runs-on: self-hosted\n");
         create_workflow(&repo3, "lint.yml", "runs-on: ubuntu-latest\n");
 
-        let repos = scan_local(tmp.path()).await.unwrap();
+        let labels = vec!["self-hosted".to_string()];
+        let repos = scan_local(tmp.path(), &labels).await.unwrap();
         assert_eq!(repos.len(), 2);
 
         let names: Vec<&str> = repos.iter().map(|r| r.full_name.as_str()).collect();
@@ -374,6 +407,57 @@ mod tests {
         let repo3_result = repos.iter().find(|r| r.full_name == "acme/repo3").unwrap();
         assert_eq!(repo3_result.workflow_files.len(), 1);
         assert!(repo3_result.workflow_files[0].contains("deploy.yml"));
+        assert_eq!(repo3_result.matched_labels, vec!["self-hosted".to_string()]);
+    }
+
+    // --- Custom label tests ---
+
+    #[tokio::test]
+    async fn test_local_scan_with_custom_labels() {
+        let tmp = TempDir::new().unwrap();
+        let repo1 = tmp.path().join("gpu-project");
+        std_fs::create_dir_all(&repo1).unwrap();
+        init_git_remote(&repo1, "git@github.com:acme/gpu-project.git");
+        create_workflow(&repo1, "train.yml", "runs-on: gpu\n");
+        let repo2 = tmp.path().join("web-app");
+        std_fs::create_dir_all(&repo2).unwrap();
+        init_git_remote(&repo2, "git@github.com:acme/web-app.git");
+        create_workflow(&repo2, "ci.yml", "runs-on: self-hosted\n");
+        let labels = vec!["gpu".to_string()];
+        let repos = scan_local(tmp.path(), &labels).await.unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].full_name, "acme/gpu-project");
+        assert_eq!(repos[0].matched_labels, vec!["gpu".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_local_scan_with_multiple_labels() {
+        let tmp = TempDir::new().unwrap();
+        let repo1 = tmp.path().join("project");
+        std_fs::create_dir_all(&repo1).unwrap();
+        init_git_remote(&repo1, "git@github.com:acme/project.git");
+        create_workflow(
+            &repo1,
+            "ci.yml",
+            "jobs:\n  build:\n    runs-on: self-hosted\n  train:\n    runs-on: gpu\n",
+        );
+        let labels = vec!["self-hosted".to_string(), "gpu".to_string()];
+        let repos = scan_local(tmp.path(), &labels).await.unwrap();
+        assert_eq!(repos.len(), 1);
+        assert!(repos[0].matched_labels.contains(&"self-hosted".to_string()));
+        assert!(repos[0].matched_labels.contains(&"gpu".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_local_scan_empty_labels_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("project");
+        std_fs::create_dir_all(&repo).unwrap();
+        init_git_remote(&repo, "git@github.com:acme/project.git");
+        create_workflow(&repo, "ci.yml", "runs-on: self-hosted\n");
+        let labels: Vec<String> = vec![];
+        let repos = scan_local(tmp.path(), &labels).await.unwrap();
+        assert!(repos.is_empty());
     }
 
     // --- DiscoveredRepo serialization ---
@@ -384,6 +468,7 @@ mod tests {
             full_name: "owner/repo".to_string(),
             source: DiscoverySource::Both,
             workflow_files: vec![".github/workflows/ci.yml".to_string()],
+            matched_labels: vec!["self-hosted".to_string()],
             local_path: Some(PathBuf::from("/Users/dev/workspace/repo")),
         };
 
@@ -393,6 +478,7 @@ mod tests {
         assert_eq!(deserialized.full_name, "owner/repo");
         assert_eq!(deserialized.source, DiscoverySource::Both);
         assert_eq!(deserialized.workflow_files.len(), 1);
+        assert_eq!(deserialized.matched_labels, vec!["self-hosted".to_string()]);
         assert_eq!(
             deserialized.local_path,
             Some(PathBuf::from("/Users/dev/workspace/repo"))
