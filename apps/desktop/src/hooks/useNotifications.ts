@@ -6,6 +6,7 @@ import type { RunnerInfo, Preferences } from "../api/types";
 type NotificationIcon = "active" | "error" | "offline";
 
 interface TrackedRunner {
+  name: string;
   state: string;
   lastJobKey: string | null;
 }
@@ -49,7 +50,7 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
     if (!initialized.current) {
       const initial = new Map<string, TrackedRunner>();
       for (const r of runners) {
-        initial.set(r.config.id, { state: r.state, lastJobKey: jobKey(r) });
+        initial.set(r.config.id, { name: r.config.name, state: r.state, lastJobKey: jobKey(r) });
       }
       prevRef.current = initial;
       initialized.current = true;
@@ -95,7 +96,16 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
         }
       }
 
-      next.set(id, { state: r.state, lastJobKey: currentJobKey });
+      next.set(id, { name, state: r.state, lastJobKey: currentJobKey });
+    }
+
+    // Detect deleted runners (were in prev, no longer in current)
+    if (preferences.notify_status_changes) {
+      for (const [id, old] of prev) {
+        if (!next.has(id)) {
+          notify("Runner Deleted", `${old.name} was removed`, "offline");
+        }
+      }
     }
 
     prevRef.current = next;
