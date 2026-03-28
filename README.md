@@ -105,7 +105,43 @@ homerun --no-tui list
 
 ## Screenshots
 
-> _Screenshots coming soon — the app is under active development._
+### Desktop App
+
+<p align="center">
+  <img src="screenshots/TAURI_Runners.png" width="720" alt="Runners dashboard — monitor all runners with live status, CPU, and job progress" />
+</p>
+<p align="center"><em>Runners dashboard — live status, CPU usage, and job progress at a glance</em></p>
+
+<p align="center">
+  <img src="screenshots/TAURI_Repositories.png" width="720" alt="Repository scanning — discover repos using self-hosted runners" />
+</p>
+<p align="center"><em>Repository scanning — find repos that use self-hosted runners across local and remote sources</em></p>
+
+<p align="center">
+  <img src="screenshots/TAURI_Runner_Progress.png" width="720" alt="Runner detail — job steps, logs, and history" />
+</p>
+<p align="center"><em>Runner detail — live job steps, log streaming, and full job history</em></p>
+
+<p align="center">
+  <img src="screenshots/TAURI_Daemon.png" width="720" alt="Daemon view — process management and live logs" />
+</p>
+<p align="center"><em>Daemon view — child processes, resource usage, and live daemon logs</em></p>
+
+### Menu Bar & Mini View
+
+<p align="center">
+  <img src="screenshots/TrayIcon_Menu.png" width="240" alt="Menu bar — quick status and controls" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="screenshots/TAURI_MiniView.png" width="320" alt="Mini view — compact runner status overlay" />
+</p>
+<p align="center"><em>Menu bar with runner status &nbsp;|&nbsp; Mini view for quick monitoring</em></p>
+
+### Terminal UI
+
+<p align="center">
+  <img src="screenshots/TUI_Runner_Progress.png" width="720" alt="TUI — keyboard-driven runner management with job details" />
+</p>
+<p align="center"><em>TUI — k9s-inspired keyboard-driven interface with runner details and job history</em></p>
 
 ## CLI Usage
 
