@@ -2,8 +2,9 @@ use tauri::State;
 
 use crate::client::{
     AuthStatus, BatchCreateResponse, CreateBatchRequest, CreateRunnerRequest, DaemonLogEntry,
-    DeviceFlowResponse, GroupActionResponse, JobHistoryEntry, LogEntry, MetricsResponse,
-    Preferences, RepoInfo, RunnerInfo, ScaleGroupResponse, StepLogsResponse, StepsResponse,
+    DeviceFlowResponse, DiscoveredRepo, GroupActionResponse, JobHistoryEntry, LogEntry,
+    MetricsResponse, Preferences, RepoInfo, RunnerInfo, ScaleGroupResponse, StepLogsResponse,
+    StepsResponse,
 };
 use crate::AppState;
 
@@ -330,6 +331,21 @@ pub async fn update_preferences(
 ) -> Result<Preferences, String> {
     let client = state.client.lock().await;
     client.update_preferences(&prefs).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn scan_local(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<DiscoveredRepo>, String> {
+    let client = state.client.lock().await;
+    client.scan_local(&path).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn scan_remote(state: State<'_, AppState>) -> Result<Vec<DiscoveredRepo>, String> {
+    let client = state.client.lock().await;
+    client.scan_remote().await
 }
 
 #[tauri::command(rename_all = "snake_case")]

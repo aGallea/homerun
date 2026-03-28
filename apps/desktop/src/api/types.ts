@@ -233,6 +233,17 @@ export interface Preferences {
   start_runners_on_launch: boolean;
   notify_status_changes: boolean;
   notify_job_completions: boolean;
+  scan_labels: string[];
+  workspace_path: string | null;
+  auto_scan: boolean;
+}
+
+export interface DiscoveredRepo {
+  full_name: string;
+  source: "local" | "remote" | "both";
+  workflow_files: string[];
+  local_path: string | null;
+  matched_labels: string[];
 }
 
 export type TrayIconState = "idle" | "active" | "error" | "offline";

@@ -5,6 +5,7 @@ import type {
   CreateBatchRequest,
   DaemonLogEntry,
   DeviceFlowResponse,
+  DiscoveredRepo,
   GroupActionResponse,
   JobHistoryEntry,
   LogEntry,
@@ -42,6 +43,10 @@ export const api = {
 
   // Repos
   listRepos: () => invoke<RepoInfo[]>("list_repos"),
+
+  // Scan
+  scanLocal: (path: string) => invoke<DiscoveredRepo[]>("scan_local", { path }),
+  scanRemote: () => invoke<DiscoveredRepo[]>("scan_remote"),
 
   // Metrics
   getMetrics: () => invoke<MetricsResponse>("get_metrics"),

@@ -253,6 +253,21 @@ pub struct Preferences {
     pub start_runners_on_launch: bool,
     pub notify_status_changes: bool,
     pub notify_job_completions: bool,
+    #[serde(default)]
+    pub scan_labels: Vec<String>,
+    #[serde(default)]
+    pub workspace_path: Option<String>,
+    #[serde(default)]
+    pub auto_scan: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredRepo {
+    pub full_name: String,
+    pub source: String,
+    pub workflow_files: Vec<String>,
+    pub local_path: Option<String>,
+    pub matched_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -569,6 +584,17 @@ impl DaemonClient {
     pub async fn update_preferences(&self, prefs: &Preferences) -> Result<Preferences, String> {
         let body = serde_json::to_string(prefs).map_err(|e| e.to_string())?;
         let text = self.request("PUT", "/preferences", Some(body)).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
+    pub async fn scan_local(&self, path: &str) -> Result<Vec<DiscoveredRepo>, String> {
+        let body = serde_json::json!({ "path": path }).to_string();
+        let text = self.request("POST", "/scan/local", Some(body)).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
+    pub async fn scan_remote(&self) -> Result<Vec<DiscoveredRepo>, String> {
+        let text = self.request("POST", "/scan/remote", None).await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 

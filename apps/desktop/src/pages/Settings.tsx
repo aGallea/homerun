@@ -47,6 +47,9 @@ export function Settings() {
     start_runners_on_launch: false,
     notify_status_changes: true,
     notify_job_completions: true,
+    scan_labels: [],
+    workspace_path: null,
+    auto_scan: false,
   });
 
   // Check launch-at-login status on mount
