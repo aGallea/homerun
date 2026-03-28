@@ -5,6 +5,7 @@ import type {
   CreateBatchRequest,
   DaemonLogEntry,
   DeviceFlowResponse,
+  DiscoveredRepo,
   GroupActionResponse,
   JobHistoryEntry,
   LogEntry,
@@ -13,6 +14,7 @@ import type {
   RepoInfo,
   RunnerInfo,
   CreateRunnerRequest,
+  ScanResults,
   ScaleGroupResponse,
   StepsResponse,
   StepLogsResponse,
@@ -42,6 +44,16 @@ export const api = {
 
   // Repos
   listRepos: () => invoke<RepoInfo[]>("list_repos"),
+
+  // Scan
+  scanLocal: (path: string) => invoke<DiscoveredRepo[]>("scan_local", { path }),
+  scanRemote: () => invoke<DiscoveredRepo[]>("scan_remote"),
+
+  // Scan (streaming)
+  startScan: (workspacePath: string | null, authenticated: boolean) =>
+    invoke<void>("start_scan", { workspace_path: workspacePath, authenticated }),
+  cancelScan: (scanId: string) => invoke<unknown>("cancel_scan", { scan_id: scanId }),
+  getScanResults: () => invoke<ScanResults | null>("get_scan_results"),
 
   // Metrics
   getMetrics: () => invoke<MetricsResponse>("get_metrics"),

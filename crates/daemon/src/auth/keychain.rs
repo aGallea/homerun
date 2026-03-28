@@ -10,25 +10,34 @@ fn auth_file_path() -> PathBuf {
 }
 
 pub fn store_token(_service: &str, _account: &str, token: &str) -> Result<()> {
-    let path = auth_file_path();
+    store_token_at(&auth_file_path(), token)
+}
+
+pub fn get_token(_service: &str, _account: &str) -> Result<Option<String>> {
+    get_token_at(&auth_file_path())
+}
+
+pub fn delete_token(_service: &str, _account: &str) -> Result<()> {
+    delete_token_at(&auth_file_path())
+}
+
+fn store_token_at(path: &std::path::Path, token: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, token)?;
+    std::fs::write(path, token)?;
 
-    // Restrict to owner-only read/write (mode 0600)
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
 
     Ok(())
 }
 
-pub fn get_token(_service: &str, _account: &str) -> Result<Option<String>> {
-    let path = auth_file_path();
-    match std::fs::read_to_string(&path) {
+fn get_token_at(path: &std::path::Path) -> Result<Option<String>> {
+    match std::fs::read_to_string(path) {
         Ok(token) if !token.is_empty() => Ok(Some(token)),
         Ok(_) => Ok(None),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -36,9 +45,8 @@ pub fn get_token(_service: &str, _account: &str) -> Result<Option<String>> {
     }
 }
 
-pub fn delete_token(_service: &str, _account: &str) -> Result<()> {
-    let path = auth_file_path();
-    match std::fs::remove_file(&path) {
+fn delete_token_at(path: &std::path::Path) -> Result<()> {
+    match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
@@ -51,16 +59,16 @@ mod tests {
 
     #[test]
     fn test_store_and_retrieve_token() {
-        let service = "com.homerun.test";
-        let account = "github-token";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
         let token = "ghp_test_token_12345";
 
-        store_token(service, account, token).unwrap();
-        let retrieved = get_token(service, account).unwrap();
+        store_token_at(&path, token).unwrap();
+        let retrieved = get_token_at(&path).unwrap();
         assert_eq!(retrieved, Some(token.to_string()));
 
-        delete_token(service, account).unwrap();
-        let deleted = get_token(service, account).unwrap();
+        delete_token_at(&path).unwrap();
+        let deleted = get_token_at(&path).unwrap();
         assert_eq!(deleted, None);
     }
 }

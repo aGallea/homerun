@@ -253,6 +253,29 @@ pub struct Preferences {
     pub start_runners_on_launch: bool,
     pub notify_status_changes: bool,
     pub notify_job_completions: bool,
+    #[serde(default)]
+    pub scan_labels: Vec<String>,
+    #[serde(default)]
+    pub workspace_path: Option<String>,
+    #[serde(default)]
+    pub auto_scan: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredRepo {
+    pub full_name: String,
+    pub source: String,
+    pub workflow_files: Vec<String>,
+    pub local_path: Option<String>,
+    pub matched_labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanResults {
+    pub last_scan_at: String,
+    pub local_results: Vec<DiscoveredRepo>,
+    pub remote_results: Vec<DiscoveredRepo>,
+    pub merged_results: Vec<DiscoveredRepo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,7 +361,7 @@ impl DaemonClient {
         &self.socket_path
     }
 
-    async fn request(
+    pub async fn request(
         &self,
         method: &str,
         path: &str,
@@ -572,12 +595,34 @@ impl DaemonClient {
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
+    pub async fn scan_local(&self, path: &str) -> Result<Vec<DiscoveredRepo>, String> {
+        let body = serde_json::json!({ "path": path }).to_string();
+        let text = self.request("POST", "/scan/local", Some(body)).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
+    pub async fn scan_remote(&self) -> Result<Vec<DiscoveredRepo>, String> {
+        let text = self.request("POST", "/scan/remote", None).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    }
+
     /// Returns the number of active runners being stopped during shutdown.
     pub async fn shutdown(&self) -> Result<usize, String> {
         let body = self.request("POST", "/daemon/shutdown", None).await?;
         let json: serde_json::Value =
             serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
         Ok(json["active_runners"].as_u64().unwrap_or(0) as usize)
+    }
+
+    pub async fn get_scan_results(&self) -> Result<Option<ScanResults>, String> {
+        let body = self.request("GET", "/scan/results", None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn cancel_scan(&self, scan_id: &str) -> Result<serde_json::Value, String> {
+        let body = serde_json::json!({ "scan_id": scan_id }).to_string();
+        let text = self.request("POST", "/scan/cancel", Some(body)).await?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
     pub async fn get_daemon_logs_recent(

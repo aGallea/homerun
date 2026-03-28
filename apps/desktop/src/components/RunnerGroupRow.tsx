@@ -70,7 +70,16 @@ export function RunnerGroupRow({
           <div className="runner-col-name">
             <div style={{ display: "flex", alignItems: "center" }}>
               <span className="runner-expand-icon">{expanded ? "▼" : "▶"}</span>
-              <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: 14 }}>
+              <span
+                style={{
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                  fontSize: 14,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {namePrefix}
               </span>
               <span className="text-muted">({runners.length})</span>
@@ -97,7 +106,9 @@ export function RunnerGroupRow({
                   background: activeCount > 0 ? "var(--accent-green)" : "var(--text-secondary)",
                 }}
               />
-              {activeCount}/{runners.length} Online
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                {activeCount}/{runners.length} Online
+              </span>
             </span>
           </div>
           <div className="runner-col-actions" onClick={(e) => e.stopPropagation()}>
