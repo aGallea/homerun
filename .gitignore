@@ -20,3 +20,7 @@ apps/desktop/src-tauri/gen/
 .idea/
 .vscode/
 *.iml
+
+# Dev-only files (not useful to external contributors)
+CLAUDE.md
+.playwright-mcp/
