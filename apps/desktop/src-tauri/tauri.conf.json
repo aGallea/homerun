@@ -35,6 +35,9 @@
     ],
     "category": "DeveloperTool",
     "copyright": "© 2026 HomeRun contributors",
+    "resources": [
+      "resources/notifications/*.png"
+    ],
     "externalBin": [
       "binaries/homerund"
     ],

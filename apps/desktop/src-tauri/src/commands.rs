@@ -437,6 +437,11 @@ pub async fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn hide_all_windows(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::window::hide_all_windows(&app_handle)
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn save_mini_position(
     app_handle: tauri::AppHandle,
     x: f64,
@@ -520,4 +525,15 @@ pub async fn get_scan_results(
 ) -> Result<Option<ScanResults>, String> {
     let client = state.client.lock().await;
     client.get_scan_results().await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn send_notification(title: String, body: String, icon_path: String) -> Result<(), String> {
+    mac_notification_sys::Notification::new()
+        .title(&title)
+        .message(&body)
+        .app_icon(&icon_path)
+        .send()
+        .map(|_| ())
+        .map_err(|e| format!("Failed to send notification: {e}"))
 }

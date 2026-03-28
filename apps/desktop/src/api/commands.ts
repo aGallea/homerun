@@ -111,6 +111,7 @@ export const api = {
   // Window management
   toggleMiniWindow: () => invoke<void>("toggle_mini_window"),
   showMainWindow: () => invoke<void>("show_main_window"),
+  hideAllWindows: () => invoke<void>("hide_all_windows"),
   saveMiniPosition: (x: number, y: number) => invoke<void>("save_mini_position", { x, y }),
   getMiniPosition: () => invoke<[number, number] | null>("get_mini_position"),
   quitApp: () => invoke<void>("quit_app"),

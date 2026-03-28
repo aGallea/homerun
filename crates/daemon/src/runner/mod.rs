@@ -892,13 +892,14 @@ impl RunnerManager {
                                         r.job_context = None;
                                         r.job_started_at = None;
 
-                                        Some(entry)
+                                        let runner_name = r.config.name.clone();
+                                        Some((entry, runner_name, duration_secs))
                                     } else {
                                         None
                                     }
                                 };
 
-                                if let Some(entry) = history_entry {
+                                if let Some((entry, _runner_name, _duration_secs)) = history_entry {
                                     manager.record_job_history(runner_id, entry).await;
                                 }
                                 manager.emit_state_event(runner_id, "online");
@@ -1287,26 +1288,29 @@ impl RunnerManager {
         state: RunnerState,
         error_message: Option<String>,
     ) -> Result<()> {
-        let mut runners = self.runners.write().await;
-        let runner = runners
-            .get_mut(id)
-            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
-        if !runner.state.can_transition_to(&state) {
-            bail!(
-                "Invalid state transition: {:?} -> {:?}",
-                runner.state,
-                state
-            );
-        }
-        let prev_running = runner.state == RunnerState::Online || runner.state == RunnerState::Busy;
+        let prev_running = {
+            let mut runners = self.runners.write().await;
+            let runner = runners
+                .get_mut(id)
+                .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+            if !runner.state.can_transition_to(&state) {
+                bail!(
+                    "Invalid state transition: {:?} -> {:?}",
+                    runner.state,
+                    state
+                );
+            }
+            let prev_running =
+                runner.state == RunnerState::Online || runner.state == RunnerState::Busy;
+            runner.state = state.clone();
+            runner.error_message = error_message;
+            prev_running
+        };
         let now_running = state == RunnerState::Online || state == RunnerState::Busy;
-        runner.state = state;
-        runner.error_message = error_message;
-        // Persist when running state changes so was_running stays current
         if prev_running != now_running {
-            drop(runners);
             let _ = self.save_to_disk().await;
         }
+
         Ok(())
     }
 
@@ -1640,14 +1644,15 @@ impl RunnerManager {
                                     r.job_context = None;
                                     r.job_started_at = None;
 
-                                    Some(entry)
+                                    let runner_name = r.config.name.clone();
+                                    Some((entry, runner_name, duration_secs))
                                 } else {
                                     None
                                 }
                             };
 
                             // Record history via cloned Arcs
-                            if let Some(entry) = history_entry {
+                            if let Some((entry, _runner_name, _duration_secs)) = history_entry {
                                 let self_name = {
                                     let map = runners.read().await;
                                     map.get(&rid)
@@ -1827,18 +1832,19 @@ impl RunnerManager {
             let _ = exit_tx.send(true);
 
             // Update state to Offline
-            let mut runners = manager.runners.write().await;
-            if let Some(r) = runners.get_mut(&runner_id) {
-                if r.state == RunnerState::Online
-                    || r.state == RunnerState::Busy
-                    || r.state == RunnerState::Stopping
-                {
-                    r.state = RunnerState::Offline;
-                    r.pid = None;
-                    r.started_at = None;
+            {
+                let mut runners = manager.runners.write().await;
+                if let Some(r) = runners.get_mut(&runner_id) {
+                    if r.state == RunnerState::Online
+                        || r.state == RunnerState::Busy
+                        || r.state == RunnerState::Stopping
+                    {
+                        r.state = RunnerState::Offline;
+                        r.pid = None;
+                        r.started_at = None;
+                    }
                 }
             }
-            drop(runners);
             manager.processes.write().await.remove(&runner_id);
             manager.emit_state_event(&runner_id, "offline");
         });

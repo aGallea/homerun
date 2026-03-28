@@ -65,6 +65,20 @@ pub fn toggle_mini_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Hide all windows (main + mini) so only the tray icon remains.
+pub fn hide_all_windows(app: &AppHandle) -> Result<(), String> {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.hide();
+    }
+    if let Some(mini) = app.get_webview_window(MINI_LABEL) {
+        let _ = mini.hide();
+    }
+    if let Some(tray) = app.get_webview_window(TRAY_PANEL_LABEL) {
+        let _ = tray.hide();
+    }
+    Ok(())
+}
+
 /// Show and focus the main window, hide the mini window.
 pub fn show_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(mini) = app.get_webview_window(MINI_LABEL) {
