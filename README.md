@@ -236,6 +236,18 @@ homerun --no-tui daemon restart
 | Auto-start         | macOS launchd                                           |
 | Notifications      | macOS native (`notify-rust`)                            |
 
+## Roadmap
+
+| Feature                          | Description                                                                            | Issue                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Live log streaming               | Capture runner step logs locally for fully real-time job progress                      | [#44](https://github.com/aGallea/homerun/issues/44)   |
+| Docker runners                   | Run runners inside containers — isolated environments, resource limits, ephemeral mode | [#84](https://github.com/aGallea/homerun/issues/84)   |
+| Kubernetes backend               | Manage runners as pods in a K8s cluster                                                | [#89](https://github.com/aGallea/homerun/issues/89)   |
+| Cross-platform (Linux & Windows) | Extend beyond macOS to Linux and Windows                                               | [#112](https://github.com/aGallea/homerun/issues/112) |
+| Organization-level runners       | Manage runners at the GitHub org level, not just per-repo                              | —                                                     |
+
+Priorities depend on user interest — if a feature would be useful to you, drop a thumbs-up on the issue.
+
 ## Requirements
 
 - macOS 13+ (Ventura or later)
