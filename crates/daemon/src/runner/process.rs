@@ -3,33 +3,7 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
-/// Resolve the full PATH from the user's login shell.
-/// This picks up paths added by nvm, fnm, Homebrew, etc. that aren't
-/// available in a bare launchd environment.
-pub fn resolve_shell_path() -> Option<String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let output = std::process::Command::new(&shell)
-        .args(["-l", "-c", "echo $PATH"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
-    }
-}
-
-/// Cached shell PATH resolved once at first use.
-static SHELL_PATH: std::sync::LazyLock<Option<String>> = std::sync::LazyLock::new(|| {
-    let path = resolve_shell_path();
-    if let Some(ref p) = path {
-        tracing::info!("Resolved shell PATH: {p}");
-    }
-    path
-});
+use crate::platform::shell::SHELL_PATH;
 
 pub async fn configure_runner(
     runner_dir: &Path,

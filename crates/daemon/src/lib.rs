@@ -6,6 +6,7 @@ pub mod launchd;
 pub mod logging;
 pub mod metrics;
 pub mod notifications;
+pub mod platform;
 pub mod runner;
 pub mod scanner;
 pub mod server;
