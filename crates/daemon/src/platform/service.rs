@@ -152,16 +152,19 @@ mod windows {
         let daemon_str = daemon_path.display().to_string();
         let tr_arg = format!("\"{}\"", daemon_str);
 
-        let status = std::process::Command::new("schtasks")
+        let output = std::process::Command::new("schtasks")
             .args([
-                "/Create", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", &tr_arg, "/RL", "HIGHEST",
-                "/F",
+                "/Create", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", &tr_arg, "/F",
             ])
-            .status()
+            .output()
             .context("Failed to run schtasks /Create")?;
+        let status = output.status;
 
         if !status.success() {
-            anyhow::bail!("schtasks /Create failed with exit code: {}", status);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = if !stderr.is_empty() { stderr } else { stdout };
+            anyhow::bail!("schtasks /Create failed (exit {}): {}", status, detail.trim());
         }
 
         tracing::info!("Daemon service installed via Task Scheduler");

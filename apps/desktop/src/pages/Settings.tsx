@@ -486,7 +486,7 @@ export function Settings() {
                           autoComplete="off"
                         />
                         <p className="form-hint">
-                          Your token is stored securely in the macOS keychain.
+                          Your token is stored securely on disk.
                         </p>
                       </div>
                       <button
@@ -511,7 +511,7 @@ export function Settings() {
         <div className="card">
           <ToggleSetting
             label="Launch at login"
-            description="Automatically start the HomeRun daemon when you log in to macOS."
+            description="Automatically start the HomeRun daemon when you log in."
             checked={launchAtLogin}
             onChange={async (checked) => {
               try {

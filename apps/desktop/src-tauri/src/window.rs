@@ -39,6 +39,7 @@ pub fn toggle_mini_window(app: &AppHandle) -> Result<(), String> {
         .inner_size(MINI_WIDTH, MINI_HEIGHT)
         .decorations(false)
         .transparent(true)
+        .shadow(false)
         .always_on_top(true)
         .resizable(false)
         .skip_taskbar(true);
@@ -114,6 +115,7 @@ pub fn toggle_tray_panel_window(app: &AppHandle, tray_center_x: i32, tray_top_y:
         .inner_size(TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT)
         .decorations(false)
         .transparent(true)
+        .shadow(false)
         .always_on_top(true)
         .resizable(false)
         .skip_taskbar(true)
@@ -150,13 +152,19 @@ fn position_near_tray(
     let panel_height = (TRAY_PANEL_HEIGHT * scale) as i32;
     let x = tray_center_x - panel_width / 2;
 
+    // Get actual window size in physical pixels (accounts for DPI scaling)
+    let actual_height = win
+        .outer_size()
+        .map(|s| s.height as i32)
+        .unwrap_or(panel_height);
+
     // Determine if tray icon is in the bottom half of the screen.
-    // If so, position the panel above the icon instead of below.
+    // If so, position the panel above the tray icon instead of below.
     let y = if let Ok(Some(monitor)) = win.primary_monitor() {
         let screen_height = monitor.size().height as i32;
         if tray_top_y > screen_height / 2 {
             // Bottom taskbar — panel above the tray icon
-            tray_top_y - panel_height
+            tray_top_y - actual_height
         } else {
             // Top menu bar — panel below the tray icon
             tray_bottom_y
