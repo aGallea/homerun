@@ -206,18 +206,20 @@ mod tests {
     #[test]
     fn test_clean_runner_config_preserves_other_files() {
         let dir = tempfile::tempdir().unwrap();
+        let run = run_script();
+        let config = config_script();
         std::fs::write(dir.path().join(".runner"), "test").unwrap();
-        std::fs::write(dir.path().join("config.sh"), "#!/bin/bash").unwrap();
-        std::fs::write(dir.path().join("run.sh"), "#!/bin/bash").unwrap();
+        std::fs::write(dir.path().join(&config), "#!/bin/bash").unwrap();
+        std::fs::write(dir.path().join(&run), "#!/bin/bash").unwrap();
         clean_runner_config(dir.path());
         assert!(!dir.path().join(".runner").exists());
         assert!(
-            dir.path().join("config.sh").exists(),
-            "config.sh should be preserved"
+            dir.path().join(&config).exists(),
+            "{config} should be preserved"
         );
         assert!(
-            dir.path().join("run.sh").exists(),
-            "run.sh should be preserved"
+            dir.path().join(&run).exists(),
+            "{run} should be preserved"
         );
     }
 

@@ -593,15 +593,38 @@ impl RunnerManager {
                 tokio::select! {
                     _ = kill_signal.notified() => {
                         // Kill requested — signal the process group
-                        let pgid = pid as i32;
-                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                        #[cfg(unix)]
+                        {
+                            let pgid = pid as i32;
+                            unsafe { libc::kill(-pgid, libc::SIGTERM); }
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                        }
+                        #[cfg(windows)]
+                        {
+                            let _ = std::process::Command::new("taskkill")
+                                .args(["/T", "/F", "/PID", &pid.to_string()])
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                        }
                         break;
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
                         // Check if process is still alive
+                        #[cfg(unix)]
                         let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+                        #[cfg(windows)]
+                        let alive = {
+                            use sysinfo::{Pid, ProcessesToUpdate, ProcessRefreshKind, System};
+                            let mut sys = System::new();
+                            sys.refresh_processes_specifics(
+                                ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+                                true,
+                                ProcessRefreshKind::new(),
+                            );
+                            sys.process(Pid::from_u32(pid)).is_some()
+                        };
                         if !alive {
                             break;
                         }
@@ -1798,28 +1821,42 @@ impl RunnerManager {
                     // The runner script spawns .NET child processes that hold the GitHub session,
                     // so we must signal the whole group to let them deregister cleanly.
                     if let Some(pid) = child.id() {
-                        let pgid = pid as i32;
-                        // SIGTERM the process group for graceful shutdown
-                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
-
-                        // Wait up to 10s for graceful exit
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(10),
-                            child.wait(),
-                        )
-                        .await
+                        // Gracefully stop the entire process tree
+                        #[cfg(unix)]
                         {
-                            Ok(status) => status,
-                            Err(_) => {
-                                tracing::warn!(
-                                    "Runner {} did not exit gracefully, sending SIGKILL",
-                                    runner_id
-                                );
-                                unsafe {
-                                    libc::kill(-pgid, libc::SIGKILL);
+                            let pgid = pid as i32;
+                            // SIGTERM the process group for graceful shutdown
+                            unsafe { libc::kill(-pgid, libc::SIGTERM); }
+
+                            // Wait up to 10s for graceful exit
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(10),
+                                child.wait(),
+                            )
+                            .await
+                            {
+                                Ok(status) => status,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Runner {} did not exit gracefully, sending SIGKILL",
+                                        runner_id
+                                    );
+                                    unsafe {
+                                        libc::kill(-pgid, libc::SIGKILL);
+                                    }
+                                    child.wait().await
                                 }
-                                child.wait().await
                             }
+                        }
+                        #[cfg(windows)]
+                        {
+                            // On Windows, use taskkill /T to kill the process tree
+                            let _ = std::process::Command::new("taskkill")
+                                .args(["/T", "/F", "/PID", &pid.to_string()])
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                            child.wait().await
                         }
                     } else {
                         // No PID — process already exited
