@@ -6,7 +6,7 @@ use crate::server::AppState;
 pub async fn shutdown_daemon(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
-    if crate::launchd::is_daemon_installed() {
+    if crate::platform::service::is_daemon_installed() {
         return Err((
             StatusCode::CONFLICT,
             Json(json!({
@@ -85,7 +85,7 @@ mod tests {
         // When launchd is NOT installed, we expect ACCEPTED.
         // When launchd IS installed, we expect CONFLICT.
         // In test environments the plist is unlikely to exist, so we expect ACCEPTED.
-        if !crate::launchd::is_daemon_installed() {
+        if !crate::platform::service::is_daemon_installed() {
             assert_eq!(response.status(), StatusCode::ACCEPTED);
         } else {
             assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -108,7 +108,7 @@ mod tests {
             .await
             .unwrap();
 
-        if crate::launchd::is_daemon_installed() {
+        if crate::platform::service::is_daemon_installed() {
             assert_eq!(response.status(), StatusCode::CONFLICT);
             let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
@@ -123,7 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_returns_active_runners_count() {
-        if crate::launchd::is_daemon_installed() {
+        if crate::platform::service::is_daemon_installed() {
             return; // Skip — shutdown blocked by launchd
         }
         let app = create_router(AppState::new_test());

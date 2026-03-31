@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod github;
+#[cfg(target_os = "macos")]
 pub mod launchd;
 pub mod logging;
 pub mod metrics;
