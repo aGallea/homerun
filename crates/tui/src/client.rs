@@ -322,6 +322,9 @@ pub struct DaemonClient {
     socket_path: PathBuf,
     #[cfg(windows)]
     pipe_name: String,
+    /// TCP address for testing on Windows (mock daemon uses TCP).
+    #[cfg(windows)]
+    tcp_addr: Option<std::net::SocketAddr>,
 }
 
 impl DaemonClient {
@@ -330,9 +333,26 @@ impl DaemonClient {
         Self { socket_path }
     }
 
+    /// On Windows, `new()` creates a TCP-based client for test compatibility.
+    /// The socket_path is read to get the TCP address written by the mock daemon.
+    #[cfg(windows)]
+    pub fn new(socket_path: PathBuf) -> Self {
+        // The mock daemon on Windows writes the TCP address to the socket_path file.
+        let tcp_addr = std::fs::read_to_string(&socket_path)
+            .ok()
+            .and_then(|s| s.trim().parse().ok());
+        Self {
+            pipe_name: r"\\.\pipe\homerun-daemon".to_string(),
+            tcp_addr,
+        }
+    }
+
     #[cfg(windows)]
     pub fn new_pipe(pipe_name: String) -> Self {
-        Self { pipe_name }
+        Self {
+            pipe_name,
+            tcp_addr: None,
+        }
     }
 
     pub fn default_socket() -> Self {
@@ -367,54 +387,8 @@ impl DaemonClient {
         &self.socket_path
     }
 
-    async fn request(&self, method: &str, path: &str, body: Option<String>) -> Result<String> {
-        // hyper requires a valid URI — the host is ignored for Unix sockets / named pipes.
-        let uri = format!("http://localhost{path}");
-        let mut builder = Request::builder().method(method).uri(&uri);
-        if body.is_some() {
-            builder = builder.header("content-type", "application/json");
-        }
-        let req = builder.body(body.unwrap_or_default())?;
-
-        #[cfg(unix)]
-        let response = {
-            let connector = UnixConnector {
-                socket_path: self.socket_path.clone(),
-            };
-            let client: Client<UnixConnector, String> =
-                Client::builder(TokioExecutor::new()).build(connector);
-            client
-                .request(req)
-                .await
-                .context("Failed to connect to daemon — is homerund running?")?
-        };
-        #[cfg(windows)]
-        let response = {
-            let connector = NamedPipeConnector {
-                pipe_name: self.pipe_name.clone(),
-            };
-            let client: Client<NamedPipeConnector, String> =
-                Client::builder(TokioExecutor::new()).build(connector);
-            client
-                .request(req)
-                .await
-                .context("Failed to connect to daemon — is homerund running?")?
-        };
-
-        let status = response.status();
-        let collected = http_body_util::BodyExt::collect(response.into_body())
-            .await
-            .context("Failed to read response body")?;
-        let bytes = collected.to_bytes();
-        let text = String::from_utf8_lossy(&bytes).to_string();
-
-        if !status.is_success() && status.as_u16() != 204 {
-            bail!("Daemon returned {status}: {text}");
-        }
-        Ok(text)
-    }
-
-    async fn raw_request(
+    /// Send an HTTP request to the daemon and return (status_code, body_text).
+    async fn send_request(
         &self,
         method: &str,
         path: &str,
@@ -440,7 +414,22 @@ impl DaemonClient {
                 .context("Failed to connect to daemon — is homerund running?")?
         };
         #[cfg(windows)]
-        let response = {
+        let response = if let Some(addr) = self.tcp_addr {
+            // Test mode: connect via TCP to mock daemon
+            let tcp_uri: hyper::Uri = format!("http://{addr}{path}").parse()?;
+            let tcp_req = Request::builder()
+                .method(method)
+                .uri(tcp_uri)
+                .header("content-type", "application/json")
+                .body(req.into_body())?;
+            let connector = hyper_util::client::legacy::connect::HttpConnector::new();
+            let client: Client<_, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(tcp_req)
+                .await
+                .context("Failed to connect to daemon — is homerund running?")?
+        } else {
             let connector = NamedPipeConnector {
                 pipe_name: self.pipe_name.clone(),
             };
@@ -458,8 +447,26 @@ impl DaemonClient {
             .context("Failed to read response body")?;
         let bytes = collected.to_bytes();
         let text = String::from_utf8_lossy(&bytes).to_string();
-
         Ok((status, text))
+    }
+
+    async fn request(&self, method: &str, path: &str, body: Option<String>) -> Result<String> {
+        let (status_code, text) = self.send_request(method, path, body).await?;
+        let status = hyper::StatusCode::from_u16(status_code).unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+
+        if !status.is_success() && status_code != 204 {
+            bail!("Daemon returned {status}: {text}");
+        }
+        Ok(text)
+    }
+
+    async fn raw_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+    ) -> Result<(u16, String)> {
+        self.send_request(method, path, body).await
     }
 
     // --- API methods ---

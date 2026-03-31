@@ -140,7 +140,7 @@ pub async fn stop_daemon() -> Result<()> {
         {
             // On Windows, check if the pipe is no longer reachable.
             if tokio::net::windows::named_pipe::ClientOptions::new()
-                .open(&default_pipe_name())
+                .open(default_pipe_name())
                 .is_err()
             {
                 return Ok(());

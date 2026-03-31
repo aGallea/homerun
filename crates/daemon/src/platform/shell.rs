@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn shell_path_lazy_lock_is_accessible() {
         // Just verify the LazyLock can be dereferenced without panic.
-        let _val: &Option<String> = &*SHELL_PATH;
+        let _val: &Option<String> = &SHELL_PATH;
     }
 
     #[cfg(windows)]

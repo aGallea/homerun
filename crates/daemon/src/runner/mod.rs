@@ -475,7 +475,7 @@ impl RunnerManager {
             let (state, pid) = if is_service {
                 // Service runners survive daemon restart — always check if process is alive
                 match find_runner_pid(&entry.config.work_dir).await {
-                    Some(pid) => (RunnerState::Online, Some(pid as u32)),
+                    Some(pid) => (RunnerState::Online, Some(pid)),
                     None => {
                         // Service runner's process died — should be restarted
                         if entry.was_running {

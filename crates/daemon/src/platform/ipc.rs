@@ -2,7 +2,6 @@
 ///
 /// On Unix, the daemon listens on a Unix domain socket (`daemon.sock`).
 /// On Windows, it listens on a Windows named pipe (`\\.\pipe\homerun-daemon`).
-
 #[cfg(windows)]
 pub const PIPE_NAME: &str = r"\\.\pipe\homerun-daemon";
 
