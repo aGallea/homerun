@@ -32,10 +32,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Add Rust toolchain to PATH
+      - name: Add Rust toolchain and Git to PATH
         run: |
-          TOOLCHAIN_BIN="$(rustup which rustc | xargs dirname)"
+          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
           echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+          # Ensure git.exe is in PATH for pre-commit on Windows
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "/c/Program Files/Git/cmd" >> $GITHUB_PATH
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -102,7 +106,7 @@ jobs:
 
       - name: Add Rust toolchain to PATH
         run: |
-          TOOLCHAIN_BIN="$(rustup which rustc | xargs dirname)"
+          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
           echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
 
       - name: Ensure Rust is available
