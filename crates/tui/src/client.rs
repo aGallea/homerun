@@ -423,8 +423,7 @@ impl DaemonClient {
                 .header("content-type", "application/json")
                 .body(req.into_body())?;
             let connector = hyper_util::client::legacy::connect::HttpConnector::new();
-            let client: Client<_, String> =
-                Client::builder(TokioExecutor::new()).build(connector);
+            let client: Client<_, String> = Client::builder(TokioExecutor::new()).build(connector);
             client
                 .request(tcp_req)
                 .await
@@ -452,7 +451,8 @@ impl DaemonClient {
 
     async fn request(&self, method: &str, path: &str, body: Option<String>) -> Result<String> {
         let (status_code, text) = self.send_request(method, path, body).await?;
-        let status = hyper::StatusCode::from_u16(status_code).unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
+        let status = hyper::StatusCode::from_u16(status_code)
+            .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
 
         if !status.is_success() && status_code != 204 {
             bail!("Daemon returned {status}: {text}");
