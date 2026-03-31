@@ -23,11 +23,19 @@ jobs:
   pre-commit:
     name: Pre-commit checks
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install pre-commit
         run: pip3 install pre-commit --quiet 2>/dev/null || pip install pre-commit --quiet
@@ -36,7 +44,7 @@ jobs:
         run: cd apps/desktop && npm ci
 
       - name: Run pre-commit
-        run: python3 -m pre_commit run --all-files --show-diff-on-failure
+        run: python3 -m pre_commit run --all-files --show-diff-on-failure || python -m pre_commit run --all-files --show-diff-on-failure
         env:
           SKIP: cargo-test,cargo-clippy
 
@@ -45,9 +53,15 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
+        shell: bash
         working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install dependencies
         run: npm ci
@@ -65,6 +79,9 @@ jobs:
     name: Rust (fmt + clippy + test + coverage)
     needs: [react-test]
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
         with:
@@ -85,7 +102,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Install cargo-llvm-cov
-        run: which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
+        run: cargo install cargo-llvm-cov --quiet 2>/dev/null || true
 
       - name: Run tests with coverage (daemon)
         run: cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
@@ -123,9 +140,15 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
+        shell: bash
         working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install dependencies
         run: npm ci
