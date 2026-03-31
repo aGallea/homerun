@@ -145,51 +145,68 @@ mod windows {
     use anyhow::{Context, Result};
     use std::path::Path;
 
-    const TASK_NAME: &str = "HomeRun Daemon";
+    const REG_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    const REG_VALUE: &str = "HomeRun Daemon";
 
-    /// Install the HomeRun daemon as a Windows Task Scheduler task that runs on logon.
+    /// Install the HomeRun daemon to start on login via the Windows Registry Run key.
+    /// This does not require administrator privileges.
     pub fn install_daemon_service(daemon_path: &Path) -> Result<()> {
         let daemon_str = daemon_path.display().to_string();
-        let tr_arg = format!("\"{}\"", daemon_str);
+        let value = format!("\"{}\"", daemon_str);
 
-        let output = std::process::Command::new("schtasks")
+        let output = std::process::Command::new("reg")
             .args([
-                "/Create", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", &tr_arg, "/F",
+                "add",
+                &format!("HKCU\\{}", REG_KEY),
+                "/v", REG_VALUE,
+                "/t", "REG_SZ",
+                "/d", &value,
+                "/f",
             ])
             .output()
-            .context("Failed to run schtasks /Create")?;
-        let status = output.status;
+            .context("Failed to run reg add")?;
 
-        if !status.success() {
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let detail = if !stderr.is_empty() { stderr } else { stdout };
-            anyhow::bail!("schtasks /Create failed (exit {}): {}", status, detail.trim());
+            anyhow::bail!("reg add failed: {}", stderr.trim());
         }
 
-        tracing::info!("Daemon service installed via Task Scheduler");
+        tracing::info!("Daemon registered to start on login via Registry Run key");
         Ok(())
     }
 
-    /// Remove the HomeRun daemon from Windows Task Scheduler.
+    /// Remove the HomeRun daemon from the Windows Registry Run key.
     pub fn uninstall_daemon_service() -> Result<()> {
-        let status = std::process::Command::new("schtasks")
-            .args(["/Delete", "/TN", TASK_NAME, "/F"])
-            .status()
-            .context("Failed to run schtasks /Delete")?;
+        let output = std::process::Command::new("reg")
+            .args([
+                "delete",
+                &format!("HKCU\\{}", REG_KEY),
+                "/v", REG_VALUE,
+                "/f",
+            ])
+            .output()
+            .context("Failed to run reg delete")?;
 
-        if !status.success() {
-            anyhow::bail!("schtasks /Delete failed with exit code: {}", status);
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Not an error if the value doesn't exist
+            if !stderr.contains("unable to find") {
+                anyhow::bail!("reg delete failed: {}", stderr.trim());
+            }
         }
 
-        tracing::info!("Daemon service uninstalled from Task Scheduler");
+        tracing::info!("Daemon removed from Registry Run key");
         Ok(())
     }
 
-    /// Returns true if the HomeRun daemon task exists in Task Scheduler.
+    /// Returns true if the HomeRun daemon is registered in the Windows Registry Run key.
     pub fn is_daemon_installed() -> bool {
-        std::process::Command::new("schtasks")
-            .args(["/Query", "/TN", TASK_NAME])
+        std::process::Command::new("reg")
+            .args([
+                "query",
+                &format!("HKCU\\{}", REG_KEY),
+                "/v", REG_VALUE,
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
