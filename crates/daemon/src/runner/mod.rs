@@ -8,6 +8,7 @@ pub mod types;
 
 use crate::config::Config;
 use crate::github::GitHubClient;
+use crate::platform::process::run_script;
 use crate::runner::binary::ensure_runner_binary;
 use crate::runner::process::{
     clean_runner_config, configure_runner, find_runner_pid, kill_orphaned_processes, remove_runner,
@@ -1321,8 +1322,8 @@ impl RunnerManager {
     /// 2. Download / cache runner binary
     /// 3. Copy binary files to runner work_dir
     /// 4. Get registration token from GitHub
-    /// 5. Run config.sh
-    /// 6. Spawn run.sh
+    /// 5. Run the config script
+    /// 6. Spawn the runner script
     /// 7. Store PID, update state to Online
     /// 8. Spawn background monitor task
     pub async fn register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
@@ -1347,7 +1348,7 @@ impl RunnerManager {
 
     /// Common register-and-start flow (assumes already in Registering state):
     /// Downloads runner binary if needed, removes stale configuration via
-    /// `config.sh remove`, then runs `config.sh` to register before starting run.sh.
+    /// the config script's remove command, then runs the config script to register before starting the runner script.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         self.set_auth_token(Some(auth_token.to_string())).await;
 
@@ -1385,7 +1386,7 @@ impl RunnerManager {
             .context("Failed to get registration token")?;
 
         // If already configured, deregister before re-configuring.
-        // config.sh refuses to configure an already-configured runner, so we
+        // The config script refuses to configure an already-configured runner, so we
         // must remove the old configuration first.
         if already_configured {
             let _ = remove_runner(&config.work_dir, &reg.token).await;
@@ -1406,7 +1407,7 @@ impl RunnerManager {
         .await
         .context("Failed to configure runner")?;
 
-        // Spawn run.sh
+        // Spawn the runner script (run.sh/run.cmd)
         let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
@@ -1794,7 +1795,7 @@ impl RunnerManager {
                 status = child.wait() => status,
                 _ = kill_signal.notified() => {
                     // Kill signal received — gracefully stop the entire process group.
-                    // run.sh spawns .NET child processes that hold the GitHub session,
+                    // The runner script spawns .NET child processes that hold the GitHub session,
                     // so we must signal the whole group to let them deregister cleanly.
                     if let Some(pid) = child.id() {
                         let pgid = pid as i32;
@@ -3269,7 +3270,7 @@ mod tests {
         let dst = tempfile::tempdir().unwrap();
 
         // Create an executable file in the source
-        let script_path = src.path().join("run.sh");
+        let script_path = src.path().join(run_script());
         fs::write(&script_path, "#!/bin/bash\necho hi").unwrap();
         #[cfg(unix)]
         {
@@ -3280,7 +3281,7 @@ mod tests {
 
         copy_dir_recursive(src.path(), dst.path()).unwrap();
 
-        let dst_script = dst.path().join("run.sh");
+        let dst_script = dst.path().join(run_script());
         assert!(dst_script.exists());
         let content = fs::read_to_string(&dst_script).unwrap();
         assert!(content.contains("echo hi"));
