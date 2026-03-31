@@ -348,6 +348,13 @@ Code signing is tracked in [#49](https://github.com/aGallea/homerun/issues/49) â
 
 </details>
 
+<details>
+<summary><strong>CI workflows fail on self-hosted runners</strong></summary>
+
+Self-hosted runners don't come with pre-installed tools like GitHub-hosted runners do. Your CI workflows will fail if the runner host is missing the tools your project needs (compilers, runtimes, package managers, etc.). Make sure all required build tools are installed on the host machine and available in PATH, then restart the runner service.
+
+</details>
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up the dev environment, coding standards, and the PR process.
