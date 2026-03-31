@@ -6,6 +6,7 @@ use axum::{
     routing::{delete, get, patch, post},
     Json, Router,
 };
+#[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::RwLock;
 
@@ -163,35 +164,50 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
+    // --- Platform-specific: extract IPC address & check for running daemon ---
+
+    #[cfg(unix)]
     let socket_path = config.socket_path();
 
-    // Check if another daemon is already running on this socket
-    if socket_path.exists() {
-        match tokio::net::UnixStream::connect(&socket_path).await {
-            Ok(_) => {
-                anyhow::bail!(
-                    "Daemon already running (socket {} is active). Stop the existing daemon first.",
-                    socket_path.display()
-                );
+    #[cfg(unix)]
+    {
+        if socket_path.exists() {
+            match tokio::net::UnixStream::connect(&socket_path).await {
+                Ok(_) => {
+                    anyhow::bail!(
+                        "Daemon already running (socket {} is active). Stop the existing daemon first.",
+                        socket_path.display()
+                    );
+                }
+                Err(_) => {
+                    tracing::info!("Removing stale socket file: {}", socket_path.display());
+                    std::fs::remove_file(&socket_path)?;
+                }
             }
-            Err(_) => {
-                tracing::info!("Removing stale socket file: {}", socket_path.display());
-                std::fs::remove_file(&socket_path)?;
-            }
+        }
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
     }
 
-    // Create parent directories
-    if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
+    #[cfg(windows)]
+    let pipe_name = config.pipe_name();
+
+    #[cfg(windows)]
+    {
+        if crate::platform::ipc::is_daemon_reachable(&pipe_name).await {
+            anyhow::bail!(
+                "Daemon already running (pipe {} is active). Stop the existing daemon first.",
+                pipe_name
+            );
+        }
     }
 
-    let listener = UnixListener::bind(&socket_path)?;
-    tracing::info!("Listening on Unix socket: {}", socket_path.display());
+    // --- Shared business logic: state, auth, runner restoration ---
 
     let state = AppState::new(config, daemon_logs);
 
-    // Restore auth token from macOS Keychain
+    // Restore auth token from credential store
     if let Err(e) = state.auth.try_restore().await {
         tracing::warn!("Failed to restore auth from keychain: {}", e);
     }
@@ -280,26 +296,54 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
 
     let app = create_router(state);
 
-    let server = axum::serve(listener, app);
+    // --- Platform-specific: bind listener, serve, shutdown ---
 
-    let shutdown_signal = async {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to register SIGTERM handler");
-        let sigint = tokio::signal::ctrl_c();
-        tokio::select! {
-            _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
-            _ = sigint => tracing::info!("Received SIGINT"),
+    #[cfg(unix)]
+    {
+        let listener = UnixListener::bind(&socket_path)?;
+        tracing::info!("Listening on Unix socket: {}", socket_path.display());
+
+        let server = axum::serve(listener, app);
+
+        let shutdown_signal = async {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to register SIGTERM handler");
+            let sigint = tokio::signal::ctrl_c();
+            tokio::select! {
+                _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
+                _ = sigint => tracing::info!("Received SIGINT"),
+            }
+        };
+
+        server.with_graceful_shutdown(shutdown_signal).await?;
+
+        // Clean up socket after graceful shutdown
+        if socket_path.exists() {
+            let _ = std::fs::remove_file(&socket_path);
         }
-    };
-
-    server.with_graceful_shutdown(shutdown_signal).await?;
-
-    // Clean up socket after graceful shutdown
-    if socket_path.exists() {
-        let _ = std::fs::remove_file(&socket_path);
     }
-    tracing::info!("Daemon shut down gracefully");
 
+    #[cfg(windows)]
+    {
+        let listener = crate::platform::ipc::named_pipe::NamedPipeListener::bind(&pipe_name)?;
+        tracing::info!("Listening on named pipe: {}", pipe_name);
+
+        let server = axum::serve(listener, app);
+
+        let shutdown_signal = async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to register Ctrl-C handler");
+            tracing::info!("Received Ctrl-C");
+        };
+
+        server.with_graceful_shutdown(shutdown_signal).await?;
+
+        // Named pipes are kernel objects — no file cleanup needed.
+    }
+
+    tracing::info!("Daemon shut down gracefully");
     Ok(())
 }
 

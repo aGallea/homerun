@@ -66,6 +66,12 @@ impl Config {
         self.base_dir.join("daemon.sock")
     }
 
+    /// Return the Windows named pipe name for this daemon instance.
+    #[cfg(windows)]
+    pub fn pipe_name(&self) -> String {
+        crate::platform::ipc::PIPE_NAME.to_string()
+    }
+
     pub fn runners_dir(&self) -> PathBuf {
         self.base_dir.join("runners")
     }
@@ -196,6 +202,15 @@ mod tests {
         // Existing fields preserved
         assert!(prefs.start_runners_on_launch);
         assert!(!prefs.notify_status_changes);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_pipe_name() {
+        let config = Config::default();
+        let name = config.pipe_name();
+        assert!(name.starts_with(r"\\.\pipe\"), "pipe name should start with \\\\.\\pipe\\");
+        assert!(name.contains("homerun"));
     }
 
     #[test]

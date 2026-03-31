@@ -46,9 +46,14 @@ pub async fn shutdown_daemon(
         }
         futures::future::join_all(stop_futures).await;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let socket_path = state.config.read().await.socket_path();
-        if socket_path.exists() {
-            let _ = std::fs::remove_file(&socket_path);
+        // On Unix, clean up the socket file. On Windows, named pipes are
+        // kernel objects and require no file cleanup.
+        #[cfg(unix)]
+        {
+            let socket_path = state.config.read().await.socket_path();
+            if socket_path.exists() {
+                let _ = std::fs::remove_file(&socket_path);
+            }
         }
         tracing::info!("Daemon shutting down");
         std::process::exit(0);
