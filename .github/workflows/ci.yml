@@ -32,19 +32,29 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Add Rust toolchain to PATH
+        run: |
+          TOOLCHAIN_BIN="$(rustup which rustc | xargs dirname)"
+          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Install pre-commit
-        run: pip3 install pre-commit --quiet 2>/dev/null || pip install pre-commit --quiet
+        run: pip install pre-commit --quiet
 
       - name: Install Node dependencies
         run: cd apps/desktop && npm ci
 
       - name: Run pre-commit
-        run: python3 -m pre_commit run --all-files --show-diff-on-failure || python -m pre_commit run --all-files --show-diff-on-failure
+        run: pre-commit run --all-files --show-diff-on-failure
         env:
           SKIP: cargo-test,cargo-clippy
 
@@ -89,6 +99,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust toolchain to PATH
+        run: |
+          TOOLCHAIN_BIN="$(rustup which rustc | xargs dirname)"
+          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
 
       - name: Ensure Rust is available
         run: |
