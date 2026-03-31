@@ -51,7 +51,7 @@ pub async fn find_runner_pids(dir_str: &str) -> Vec<u32> {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::everything(),
+        ProcessRefreshKind::nothing(),
     );
 
     let dir_lower = dir_str.to_lowercase();
@@ -103,7 +103,7 @@ pub async fn find_runner_pid(runner_dir: &Path) -> Option<u32> {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
-        ProcessRefreshKind::everything(),
+        ProcessRefreshKind::nothing(),
     );
 
     sys.processes()
@@ -227,7 +227,6 @@ pub fn configure_process_group(cmd: &mut tokio::process::Command) {
 
 #[cfg(windows)]
 pub fn configure_process_group(cmd: &mut tokio::process::Command) {
-    use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
     cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
 }

@@ -8,7 +8,6 @@ pub mod types;
 
 use crate::config::Config;
 use crate::github::GitHubClient;
-use crate::platform::process::run_script;
 use crate::runner::binary::ensure_runner_binary;
 use crate::runner::process::{
     clean_runner_config, configure_runner, find_runner_pid, kill_orphaned_processes, remove_runner,
@@ -621,7 +620,7 @@ impl RunnerManager {
                             sys.refresh_processes_specifics(
                                 ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
                                 true,
-                                ProcessRefreshKind::new(),
+                                ProcessRefreshKind::nothing(),
                             );
                             sys.process(Pid::from_u32(pid)).is_some()
                         };
@@ -3299,6 +3298,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_copy_dir_recursive_preserves_executable_bit() {
+        use crate::platform::process::run_script;
         use std::fs;
         #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
