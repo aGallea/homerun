@@ -45,11 +45,6 @@
     "windows": {
       "wix": {
         "language": "en-US"
-      },
-      "nsis": {
-        "oneClick": false,
-        "perMachine": true,
-        "allowElevation": true
       }
     },
     "macOS": {
