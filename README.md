@@ -6,7 +6,7 @@
 <h1 align="center">HomeRun</h1>
 
 <p align="center">
-  <strong>One-click GitHub Actions self-hosted runners for macOS</strong>
+  <strong>One-click GitHub Actions self-hosted runners for macOS & Windows</strong>
 </p>
 
 <p align="center">
@@ -36,11 +36,14 @@
     <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust" />
   </a>
   <img src="https://img.shields.io/badge/macOS-13%2B-brightgreen" alt="macOS 13+" />
+  <img src="https://img.shields.io/badge/Windows-10%2B-blue" alt="Windows 10+" />
 </div>
 
 ---
 
-HomeRun replaces the manual GitHub self-hosted runner setup process with a unified macOS desktop app and terminal UI. Authenticate with GitHub once, pick a repository, and launch runners with a single click. HomeRun handles download, registration, process management, log streaming, and resource monitoring — everything the official docs make you do by hand.
+HomeRun replaces the manual GitHub self-hosted runner setup process with a unified desktop app and terminal UI. Authenticate with GitHub once, pick a repository, and launch runners with a single click. HomeRun handles download, registration, process management, log streaming, and resource monitoring — everything the official docs make you do by hand.
+
+HomeRun runs on **macOS** and **Windows**, with Linux support planned.
 
 ## Features
 
@@ -56,7 +59,7 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
 - **Smart repo discovery** — scan local workspace directories or your GitHub account for repos that use self-hosted runners
 - **Terminal UI** — k9s-inspired TUI with info header, context-sensitive keybindings (F1-F4 tabs), repo search, and in-app login via Device Flow
 - **CLI mode** — scriptable `homerun --no-tui` commands with colored output for automation
-- **macOS native** — Keychain token storage, launchd auto-start, native notifications
+- **Cross-platform** — macOS (launchd auto-start, native notifications) and Windows (Task Scheduler auto-start, named pipe IPC)
 - **Pre-commit hooks** — enforces `cargo fmt`, `cargo clippy`, conventional commits, and Prettier on every commit
 
 ## Architecture
@@ -66,9 +69,9 @@ HomeRun replaces the manual GitHub self-hosted runner setup process with a unifi
 │  Tauri App   │    │   TUI   │     (thin clients)
 └──────┬───────┘    └────┬────┘
        └────────┬────────┘
-                │ Unix socket (REST + SSE + WebSocket)
+                │ IPC (REST + SSE + WebSocket)
        ┌────────┴────────┐
-       │   homerund      │     (daemon — ~/.homerun/daemon.sock)
+       │   homerund      │     (daemon — Unix socket or Windows named pipe)
        └────────┬────────┘
                 │ spawns / monitors
       ┌─────────┼─────────┐
@@ -117,7 +120,7 @@ xattr -cr /Applications/HomeRun.app
 
 ### Build from Source
 
-**Prerequisites:** Rust 1.75+ (`curl https://sh.rustup.rs -sSf | sh`), Node.js 20+ (`brew install node`), Xcode Command Line Tools (`xcode-select --install`)
+**Prerequisites:** Rust 1.75+ ([rustup.rs](https://rustup.rs)), Node.js 20+. On macOS: Xcode Command Line Tools (`xcode-select --install`). On Windows: Visual Studio Build Tools with C++ workload.
 
 ```sh
 git clone https://github.com/aGallea/homerun.git
@@ -225,16 +228,16 @@ homerun --no-tui daemon restart
 
 | Component          | Technology                                              |
 | ------------------ | ------------------------------------------------------- |
-| Daemon             | Rust + Axum (async HTTP/SSE/WebSocket over Unix socket) |
-| TUI / CLI          | Rust + Ratatui + Clap                                   |
-| Desktop app        | Tauri 2.0 + React + TypeScript                          |
-| Process management | `tokio::process` + `sysinfo`                            |
-| GitHub API         | `octocrab` crate                                        |
-| Auth token storage | macOS Keychain (`security-framework`)                   |
-| Log streaming      | Server-Sent Events (SSE)                                |
-| Real-time updates  | WebSocket                                               |
-| Auto-start         | macOS launchd                                           |
-| Notifications      | macOS native (`notify-rust`)                            |
+| Daemon             | Rust + Axum (async HTTP/SSE/WebSocket over Unix socket / Windows named pipe) |
+| TUI / CLI          | Rust + Ratatui + Clap                                                        |
+| Desktop app        | Tauri 2.0 + React + TypeScript                                               |
+| Process management | `tokio::process` + `sysinfo`                                                 |
+| GitHub API         | `octocrab` crate                                                             |
+| Auth token storage | File-based (`~/.homerun/auth.json`)                                          |
+| Log streaming      | Server-Sent Events (SSE)                                                     |
+| Real-time updates  | WebSocket                                                                    |
+| Auto-start         | macOS launchd / Windows Task Scheduler                                       |
+| Notifications      | macOS native (`mac-notification-sys`)                                        |
 
 ## Roadmap
 
@@ -243,15 +246,22 @@ homerun --no-tui daemon restart
 | Live log streaming               | Capture runner step logs locally for fully real-time job progress                      | [#44](https://github.com/aGallea/homerun/issues/44)   |
 | Docker runners                   | Run runners inside containers — isolated environments, resource limits, ephemeral mode | [#84](https://github.com/aGallea/homerun/issues/84)   |
 | Kubernetes backend               | Manage runners as pods in a K8s cluster                                                | [#89](https://github.com/aGallea/homerun/issues/89)   |
-| Cross-platform (Linux & Windows) | Extend beyond macOS to Linux and Windows                                               | [#112](https://github.com/aGallea/homerun/issues/112) |
+| Cross-platform (Linux)           | Extend to Linux (systemd auto-start, packaging)                                       | [#112](https://github.com/aGallea/homerun/issues/112) |
 | Organization-level runners       | Manage runners at the GitHub org level, not just per-repo                              | —                                                     |
 
 Priorities depend on user interest — if a feature would be useful to you, drop a thumbs-up on the issue.
 
 ## Requirements
 
+**macOS:**
 - macOS 13+ (Ventura or later)
 - ARM64 or Intel Mac
+
+**Windows:**
+- Windows 10 or later
+- x64
+
+**Both platforms:**
 - A GitHub account
 
 ## FAQ / Troubleshooting
@@ -259,12 +269,14 @@ Priorities depend on user interest — if a feature would be useful to you, drop
 <details>
 <summary><strong>Daemon won't start / "socket already exists"</strong></summary>
 
-A stale socket file may exist from a previous crash. Remove it and try again:
+**macOS/Linux:** A stale socket file may exist from a previous crash. Remove it and try again:
 
 ```sh
 rm ~/.homerun/daemon.sock
 homerund
 ```
+
+**Windows:** Named pipes are cleaned up automatically when the process exits. If the daemon reports the pipe is active, another instance may still be running. Check with `tasklist | findstr homerund`.
 
 </details>
 
@@ -312,7 +324,7 @@ The daemon must be running before launching the desktop app or TUI. Start it wit
 homerund
 ```
 
-Or enable "Launch at login" in Settings > Startup to have it start automatically via launchd.
+Or enable "Launch at login" in Settings > Startup to have it start automatically (via launchd on macOS, Task Scheduler on Windows).
 
 </details>
 
