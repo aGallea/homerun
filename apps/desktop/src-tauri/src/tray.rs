@@ -25,7 +25,8 @@ pub fn init(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let app = tray.app_handle();
                 crate::window::toggle_tray_panel_window(
                     app,
-                    pos.x,
+                    pos.x + (size.width as i32 / 2),
+                    pos.y,
                     pos.y + size.height as i32,
                 );
             }
