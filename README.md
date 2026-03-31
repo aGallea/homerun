@@ -89,7 +89,7 @@ New to self-hosted runners? See [How Self-Hosted Runners Work](docs/SELF_HOSTED_
 
 ## Quick Start
 
-### Install (DMG)
+### Install (macOS — DMG)
 
 1. Download the latest `.dmg` for your architecture from [Releases](https://github.com/aGallea/homerun/releases):
    - **Apple Silicon** (M1/M2/M3/M4): `HomeRun_<version>_aarch64.dmg`
@@ -105,7 +105,7 @@ New to self-hosted runners? See [How Self-Hosted Runners Work](docs/SELF_HOSTED_
 
 The `.dmg` bundles the `homerund` daemon inside the app. Releases are automated via [release-please](https://github.com/googleapis/release-please) — every merge to `master` with conventional commits triggers a Release PR with version bumps and changelog.
 
-### Install (Homebrew)
+### Install (macOS — Homebrew)
 
 ```sh
 brew tap aGallea/homerun
@@ -118,6 +118,12 @@ brew install --cask homerun
 xattr -cr /Applications/HomeRun.app
 ```
 
+### Install (Windows — MSI)
+
+1. Download `HomeRun_<version>_x64-setup.msi` from [Releases](https://github.com/aGallea/homerun/releases)
+2. Run the installer — it installs HomeRun and the `homerund` daemon
+3. Launch HomeRun from the Start Menu — go to Settings > Startup > "Launch at login" to auto-start the daemon via Task Scheduler
+
 ### Build from Source
 
 **Prerequisites:** Rust 1.75+ ([rustup.rs](https://rustup.rs)), Node.js 20+. On macOS: Xcode Command Line Tools (`xcode-select --install`). On Windows: Visual Studio Build Tools with C++ workload.
@@ -125,11 +131,14 @@ xattr -cr /Applications/HomeRun.app
 ```sh
 git clone https://github.com/aGallea/homerun.git
 cd homerun
+```
+
+**macOS:**
+```sh
 make setup        # checks prerequisites, builds daemon + TUI, installs frontend deps
 ```
 
-Or build manually:
-
+**Any platform (manual build):**
 ```sh
 # Daemon + TUI
 cargo build --release -p homerund -p homerun
