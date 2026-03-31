@@ -48,11 +48,7 @@ pub async fn find_runner_pids(dir_str: &str) -> Vec<u32> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
     let mut sys = System::new();
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing(),
-    );
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
 
     let dir_lower = dir_str.to_lowercase();
     sys.processes()
@@ -100,11 +96,7 @@ pub async fn find_runner_pid(runner_dir: &Path) -> Option<u32> {
     let dir_str = runner_dir.to_string_lossy().to_lowercase();
 
     let mut sys = System::new();
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing(),
-    );
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
 
     sys.processes()
         .iter()

@@ -158,9 +158,12 @@ mod windows {
             .args([
                 "add",
                 &format!("HKCU\\{}", REG_KEY),
-                "/v", REG_VALUE,
-                "/t", "REG_SZ",
-                "/d", &value,
+                "/v",
+                REG_VALUE,
+                "/t",
+                "REG_SZ",
+                "/d",
+                &value,
                 "/f",
             ])
             .output()
@@ -181,7 +184,8 @@ mod windows {
             .args([
                 "delete",
                 &format!("HKCU\\{}", REG_KEY),
-                "/v", REG_VALUE,
+                "/v",
+                REG_VALUE,
                 "/f",
             ])
             .output()
@@ -202,11 +206,7 @@ mod windows {
     /// Returns true if the HomeRun daemon is registered in the Windows Registry Run key.
     pub fn is_daemon_installed() -> bool {
         std::process::Command::new("reg")
-            .args([
-                "query",
-                &format!("HKCU\\{}", REG_KEY),
-                "/v", REG_VALUE,
-            ])
+            .args(["query", &format!("HKCU\\{}", REG_KEY), "/v", REG_VALUE])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -233,12 +233,12 @@ mod linux_stub {
     }
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+pub use linux_stub::*;
 #[cfg(target_os = "macos")]
 pub use macos::*;
 #[cfg(windows)]
 pub use windows::*;
-#[cfg(all(unix, not(target_os = "macos")))]
-pub use linux_stub::*;
 
 #[cfg(test)]
 mod tests {

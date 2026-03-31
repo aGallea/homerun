@@ -122,7 +122,10 @@ pub async fn remove_runner(runner_dir: &Path, token: &str) -> Result<()> {
         .await?;
 
     if !status.success() {
-        tracing::warn!("{} remove failed — runner may need manual cleanup on GitHub", script);
+        tracing::warn!(
+            "{} remove failed — runner may need manual cleanup on GitHub",
+            script
+        );
     }
     Ok(())
 }
@@ -153,7 +156,15 @@ mod tests {
         // On Unix, spawn fails because the script doesn't exist.
         // On Windows, cmd.exe may spawn but the script won't be found.
         // Either way, the result should indicate failure.
-        assert!(result.is_err() || result.unwrap().wait().await.map(|s| !s.success()).unwrap_or(true));
+        assert!(
+            result.is_err()
+                || result
+                    .unwrap()
+                    .wait()
+                    .await
+                    .map(|s| !s.success())
+                    .unwrap_or(true)
+        );
     }
 
     #[tokio::test]
@@ -222,10 +233,7 @@ mod tests {
             dir.path().join(&config).exists(),
             "{config} should be preserved"
         );
-        assert!(
-            dir.path().join(&run).exists(),
-            "{run} should be preserved"
-        );
+        assert!(dir.path().join(&run).exists(), "{run} should be preserved");
     }
 
     #[tokio::test]

@@ -309,8 +309,7 @@ impl tower::Service<hyper::Uri> for NamedPipeConnector {
     fn call(&mut self, _uri: hyper::Uri) -> Self::Future {
         let pipe_name = self.pipe_name.clone();
         Box::pin(async move {
-            let client =
-                tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name)?;
+            let client = tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name)?;
             Ok(hyper_util::rt::TokioIo::new(client))
         })
     }
@@ -694,11 +693,9 @@ impl DaemonClient {
     #[cfg(windows)]
     pub async fn connect_events(
         &self,
-    ) -> Result<
-        SplitStream<WebSocketStream<tokio::net::windows::named_pipe::NamedPipeClient>>,
-    > {
-        let client =
-            tokio::net::windows::named_pipe::ClientOptions::new().open(&self.pipe_name)?;
+    ) -> Result<SplitStream<WebSocketStream<tokio::net::windows::named_pipe::NamedPipeClient>>>
+    {
+        let client = tokio::net::windows::named_pipe::ClientOptions::new().open(&self.pipe_name)?;
         let uri = "ws://localhost/events";
         let (ws_stream, _response) = tokio_tungstenite::client_async(uri, client).await?;
         let (_write, read) = ws_stream.split();

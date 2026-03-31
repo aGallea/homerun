@@ -209,7 +209,10 @@ mod tests {
     fn test_pipe_name() {
         let config = Config::default();
         let name = config.pipe_name();
-        assert!(name.starts_with(r"\\.\pipe\"), "pipe name should start with \\\\.\\pipe\\");
+        assert!(
+            name.starts_with(r"\\.\pipe\"),
+            "pipe name should start with \\\\.\\pipe\\"
+        );
         assert!(name.contains("homerun"));
     }
 
