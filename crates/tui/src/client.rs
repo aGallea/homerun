@@ -2,7 +2,9 @@ use anyhow::{bail, Context, Result};
 use futures::stream::SplitStream;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use tokio_tungstenite::WebSocketStream;
 
 /// Percent-encode a string for use in a URL query parameter.
@@ -249,14 +251,16 @@ pub struct ScaleGroupResponse {
     pub skipped_busy: Vec<String>,
 }
 
-// --- Unix socket HTTP connector ---
+// --- Platform-aware HTTP connectors ---
 
 /// A tower connector that dials a Unix socket instead of TCP.
+#[cfg(unix)]
 #[derive(Clone)]
 struct UnixConnector {
     socket_path: PathBuf,
 }
 
+#[cfg(unix)]
 impl tower::Service<hyper::Uri> for UnixConnector {
     type Response = hyper_util::rt::TokioIo<tokio::net::UnixStream>;
     type Error = std::io::Error;
@@ -280,40 +284,92 @@ impl tower::Service<hyper::Uri> for UnixConnector {
     }
 }
 
+/// A tower connector that dials a Windows named pipe instead of TCP.
+#[cfg(windows)]
+#[derive(Clone)]
+struct NamedPipeConnector {
+    pipe_name: String,
+}
+
+#[cfg(windows)]
+impl tower::Service<hyper::Uri> for NamedPipeConnector {
+    type Response = hyper_util::rt::TokioIo<tokio::net::windows::named_pipe::NamedPipeClient>;
+    type Error = std::io::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _uri: hyper::Uri) -> Self::Future {
+        let pipe_name = self.pipe_name.clone();
+        Box::pin(async move {
+            let client =
+                tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name)?;
+            Ok(hyper_util::rt::TokioIo::new(client))
+        })
+    }
+}
+
 // --- DaemonClient ---
 
 pub struct DaemonClient {
+    #[cfg(unix)]
     socket_path: PathBuf,
+    #[cfg(windows)]
+    pipe_name: String,
 }
 
 impl DaemonClient {
+    #[cfg(unix)]
     pub fn new(socket_path: PathBuf) -> Self {
         Self { socket_path }
     }
 
-    pub fn default_socket() -> Self {
-        let home = dirs::home_dir().expect("no home directory");
-        Self::new(home.join(".homerun/daemon.sock"))
+    #[cfg(windows)]
+    pub fn new_pipe(pipe_name: String) -> Self {
+        Self { pipe_name }
     }
 
-    /// Check if the daemon socket exists.
+    pub fn default_socket() -> Self {
+        #[cfg(unix)]
+        {
+            let home = dirs::home_dir().expect("no home directory");
+            Self::new(home.join(".homerun/daemon.sock"))
+        }
+        #[cfg(windows)]
+        {
+            Self::new_pipe(r"\\.\pipe\homerun-daemon".to_string())
+        }
+    }
+
+    /// Check if the daemon socket/pipe exists.
     pub fn socket_exists(&self) -> bool {
-        self.socket_path.exists()
+        #[cfg(unix)]
+        {
+            self.socket_path.exists()
+        }
+        #[cfg(windows)]
+        {
+            tokio::net::windows::named_pipe::ClientOptions::new()
+                .open(&self.pipe_name)
+                .is_ok()
+        }
     }
 
     /// Return the socket path (for WebSocket connections).
+    #[cfg(unix)]
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
     }
 
     async fn request(&self, method: &str, path: &str, body: Option<String>) -> Result<String> {
-        let connector = UnixConnector {
-            socket_path: self.socket_path.clone(),
-        };
-        let client: Client<UnixConnector, String> =
-            Client::builder(TokioExecutor::new()).build(connector);
-
-        // hyper requires a valid URI — the host is ignored for Unix sockets.
+        // hyper requires a valid URI — the host is ignored for Unix sockets / named pipes.
         let uri = format!("http://localhost{path}");
         let mut builder = Request::builder().method(method).uri(&uri);
         if body.is_some() {
@@ -321,10 +377,30 @@ impl DaemonClient {
         }
         let req = builder.body(body.unwrap_or_default())?;
 
-        let response = client
-            .request(req)
-            .await
-            .context("Failed to connect to daemon — is homerund running?")?;
+        #[cfg(unix)]
+        let response = {
+            let connector = UnixConnector {
+                socket_path: self.socket_path.clone(),
+            };
+            let client: Client<UnixConnector, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(req)
+                .await
+                .context("Failed to connect to daemon — is homerund running?")?
+        };
+        #[cfg(windows)]
+        let response = {
+            let connector = NamedPipeConnector {
+                pipe_name: self.pipe_name.clone(),
+            };
+            let client: Client<NamedPipeConnector, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(req)
+                .await
+                .context("Failed to connect to daemon — is homerund running?")?
+        };
 
         let status = response.status();
         let collected = http_body_util::BodyExt::collect(response.into_body())
@@ -345,12 +421,6 @@ impl DaemonClient {
         path: &str,
         body: Option<String>,
     ) -> Result<(u16, String)> {
-        let connector = UnixConnector {
-            socket_path: self.socket_path.clone(),
-        };
-        let client: Client<UnixConnector, String> =
-            Client::builder(TokioExecutor::new()).build(connector);
-
         let uri = format!("http://localhost{path}");
         let mut builder = Request::builder().method(method).uri(&uri);
         if body.is_some() {
@@ -358,10 +428,30 @@ impl DaemonClient {
         }
         let req = builder.body(body.unwrap_or_default())?;
 
-        let response = client
-            .request(req)
-            .await
-            .context("Failed to connect to daemon — is homerund running?")?;
+        #[cfg(unix)]
+        let response = {
+            let connector = UnixConnector {
+                socket_path: self.socket_path.clone(),
+            };
+            let client: Client<UnixConnector, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(req)
+                .await
+                .context("Failed to connect to daemon — is homerund running?")?
+        };
+        #[cfg(windows)]
+        let response = {
+            let connector = NamedPipeConnector {
+                pipe_name: self.pipe_name.clone(),
+            };
+            let client: Client<NamedPipeConnector, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(req)
+                .await
+                .context("Failed to connect to daemon — is homerund running?")?
+        };
 
         let status = response.status().as_u16();
         let collected = http_body_util::BodyExt::collect(response.into_body())
@@ -588,12 +678,29 @@ impl DaemonClient {
 
     /// Connect to the daemon's WebSocket endpoint for real-time events.
     /// Returns a stream of incoming WebSocket messages.
+    #[cfg(unix)]
     pub async fn connect_events(
         &self,
     ) -> Result<SplitStream<WebSocketStream<tokio::net::UnixStream>>> {
         let stream = tokio::net::UnixStream::connect(&self.socket_path).await?;
         let uri = "ws://localhost/events";
         let (ws_stream, _response) = tokio_tungstenite::client_async(uri, stream).await?;
+        let (_write, read) = ws_stream.split();
+        Ok(read)
+    }
+
+    /// Connect to the daemon's WebSocket endpoint for real-time events.
+    /// Returns a stream of incoming WebSocket messages.
+    #[cfg(windows)]
+    pub async fn connect_events(
+        &self,
+    ) -> Result<
+        SplitStream<WebSocketStream<tokio::net::windows::named_pipe::NamedPipeClient>>,
+    > {
+        let client =
+            tokio::net::windows::named_pipe::ClientOptions::new().open(&self.pipe_name)?;
+        let uri = "ws://localhost/events";
+        let (ws_stream, _response) = tokio_tungstenite::client_async(uri, client).await?;
         let (_write, read) = ws_stream.split();
         Ok(read)
     }
