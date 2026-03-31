@@ -107,6 +107,27 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()
     Ok(())
 }
 
+/// Returns the default runner labels for the current platform and architecture.
+fn default_runner_labels() -> Vec<String> {
+    let os_label = if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "windows") {
+        "Windows"
+    } else {
+        "Linux"
+    };
+    let arch_label = if cfg!(target_arch = "aarch64") {
+        "ARM64"
+    } else {
+        "X64"
+    };
+    vec![
+        "self-hosted".to_string(),
+        os_label.to_string(),
+        arch_label.to_string(),
+    ]
+}
+
 impl RunnerManager {
     pub fn new(config: Config) -> Self {
         let (log_tx, _) = broadcast::channel(1024);
@@ -971,26 +992,14 @@ impl RunnerManager {
         let resolved_labels = if let Some(user_labels) = labels {
             if user_labels.is_empty() {
                 // No labels provided — use platform defaults
-                let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
-                if cfg!(target_arch = "aarch64") {
-                    defaults.push("ARM64".to_string());
-                } else {
-                    defaults.push("X64".to_string());
-                }
-                defaults
+                default_runner_labels()
             } else {
                 // User explicitly chose labels — use as-is
                 user_labels
             }
         } else {
             // None — use platform defaults
-            let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
-            if cfg!(target_arch = "aarch64") {
-                defaults.push("ARM64".to_string());
-            } else {
-                defaults.push("X64".to_string());
-            }
-            defaults
+            default_runner_labels()
         };
 
         let runner = RunnerInfo {
@@ -2593,7 +2602,7 @@ mod tests {
             .create(
                 "owner/repo",
                 Some("my-runner".to_string()),
-                Some(vec!["gpu".to_string(), "macOS".to_string()]),
+                Some(vec!["gpu".to_string(), "custom".to_string()]),
                 None,
                 None,
             )
@@ -2604,7 +2613,7 @@ mod tests {
         // User-provided labels are used as-is, no defaults merged
         assert_eq!(runner.config.labels.len(), 2);
         assert!(runner.config.labels.contains(&"gpu".to_string()));
-        assert!(runner.config.labels.contains(&"macOS".to_string()));
+        assert!(runner.config.labels.contains(&"custom".to_string()));
     }
 
     #[tokio::test]
@@ -2627,7 +2636,7 @@ mod tests {
 
         // Empty labels should fall back to platform defaults
         assert!(runner.config.labels.contains(&"self-hosted".to_string()));
-        assert!(runner.config.labels.contains(&"macOS".to_string()));
+        assert!(runner.config.labels.contains(&default_runner_labels()[1]));
     }
 
     #[tokio::test]
@@ -2644,7 +2653,7 @@ mod tests {
 
         // None labels should fall back to platform defaults
         assert!(runner.config.labels.contains(&"self-hosted".to_string()));
-        assert!(runner.config.labels.contains(&"macOS".to_string()));
+        assert!(runner.config.labels.contains(&default_runner_labels()[1]));
     }
 
     #[tokio::test]
