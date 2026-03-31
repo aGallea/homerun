@@ -100,7 +100,7 @@ pub fn toggle_tray_panel_window(app: &AppHandle, tray_x: i32, tray_y: i32) {
         if win.is_visible().unwrap_or(false) {
             let _ = win.hide();
         } else {
-            let _ = position_below_tray(&win, tray_x, tray_y);
+            let _ = position_near_tray(&win, tray_x, tray_y);
             let _ = win.show();
             let _ = win.set_focus();
         }
@@ -120,7 +120,7 @@ pub fn toggle_tray_panel_window(app: &AppHandle, tray_x: i32, tray_y: i32) {
         .visible(false); // start hidden, position first
 
     if let Ok(win) = builder.build() {
-        let _ = position_below_tray(&win, tray_x, tray_y);
+        let _ = position_near_tray(&win, tray_x, tray_y);
         let _ = win.show();
 
         // Hide on blur
@@ -135,16 +135,35 @@ pub fn toggle_tray_panel_window(app: &AppHandle, tray_x: i32, tray_y: i32) {
     }
 }
 
-/// Position the tray panel centered below the tray icon.
-fn position_below_tray(
+/// Position the tray panel near the tray icon.
+/// On macOS (top menu bar): panel appears below the icon.
+/// On Windows (bottom taskbar): panel appears above the icon.
+fn position_near_tray(
     win: &tauri::WebviewWindow,
     tray_x: i32,
     tray_y: i32,
 ) -> Result<(), tauri::Error> {
     let scale = win.scale_factor().unwrap_or(1.0);
     let panel_width = (TRAY_PANEL_WIDTH * scale) as i32;
+    let panel_height = (TRAY_PANEL_HEIGHT * scale) as i32;
     let x = tray_x - panel_width / 2;
-    win.set_position(PhysicalPosition::new(x, tray_y))?;
+
+    // Determine if tray icon is in the bottom half of the screen.
+    // If so, position the panel above the icon instead of below.
+    let y = if let Ok(Some(monitor)) = win.primary_monitor() {
+        let screen_height = monitor.size().height as i32;
+        if tray_y > screen_height / 2 {
+            // Bottom taskbar — position above the tray icon
+            tray_y - panel_height
+        } else {
+            // Top menu bar — position below the tray icon
+            tray_y
+        }
+    } else {
+        tray_y
+    };
+
+    win.set_position(PhysicalPosition::new(x, y))?;
     Ok(())
 }
 
