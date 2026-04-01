@@ -54,20 +54,26 @@ jobs:
 
       - name: Setup Python (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           # setup-python fails on self-hosted Windows runners due to HKLM
           # registry permissions.  Find Python in the runner's tool cache.
-          # The _work/_tool directory sits next to _work/<repo> in the
-          # runner's work folder — derive it from GITHUB_WORKSPACE.
-          WORK_DIR="$(cd "$GITHUB_WORKSPACE/../.." && pwd)"
-          PY_DIR=$(ls -d "$WORK_DIR/_tool/Python"/3.*/x64 2>/dev/null | sort -V | tail -1)
-          if [[ -z "$PY_DIR" ]]; then
-            echo "::error::No cached Python 3 found in $WORK_DIR/_tool"
+          $toolDir = Join-Path $env:GITHUB_WORKSPACE ".." ".." "_tool" | Resolve-Path -ErrorAction SilentlyContinue
+          if (-not $toolDir) {
+            Write-Error "Cannot resolve tool cache directory"
             exit 1
-          fi
-          echo "$PY_DIR" >> $GITHUB_PATH
-          echo "$PY_DIR/Scripts" >> $GITHUB_PATH
-          echo "Using Python from $PY_DIR"
+          }
+          $pyDir = Get-ChildItem -Path (Join-Path $toolDir "Python") -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name |
+            Select-Object -Last 1
+          if (-not $pyDir) {
+            Write-Error "No cached Python found in $toolDir"
+            exit 1
+          }
+          $pyBin = Join-Path $pyDir.FullName "x64"
+          Write-Host "Using Python from $pyBin"
+          "$pyBin" | Out-File -Append $env:GITHUB_PATH
+          "$pyBin\Scripts" | Out-File -Append $env:GITHUB_PATH
 
       - name: Install pre-commit
         run: |

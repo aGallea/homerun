@@ -14,10 +14,7 @@ pub async fn shutdown_daemon(
         } else {
             "Daemon is installed as a system service. Uninstall the service first."
         };
-        return Err((
-            StatusCode::CONFLICT,
-            Json(json!({ "error": msg })),
-        ));
+        return Err((StatusCode::CONFLICT, Json(json!({ "error": msg }))));
     }
 
     tracing::info!("Shutdown requested via API");
