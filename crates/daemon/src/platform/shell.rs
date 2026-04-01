@@ -20,11 +20,27 @@ pub fn resolve_shell_path() -> Option<String> {
     }
 }
 
-/// On Windows the system PATH is inherited directly from the environment,
-/// so there is no need to resolve it from a login shell.
+/// On Windows the system PATH is usually inherited from the environment,
+/// but the daemon may start before the full PATH is available (e.g. after
+/// a reboot).  We ensure Git Bash's `bin` directory is on the PATH so
+/// that GitHub Actions runners can find `bash.exe`.
 #[cfg(windows)]
 pub fn resolve_shell_path() -> Option<String> {
-    None
+    let current = std::env::var("PATH").unwrap_or_default();
+    let git_bash_bin = r"C:\Program Files\Git\bin";
+    // If Git\bin is already on the PATH, nothing to do
+    if current
+        .split(';')
+        .any(|p| p.eq_ignore_ascii_case(git_bash_bin))
+    {
+        return None;
+    }
+    // Only add it if the directory actually exists
+    if std::path::Path::new(git_bash_bin).is_dir() {
+        Some(format!("{current};{git_bash_bin}"))
+    } else {
+        None
+    }
 }
 
 /// Cached shell PATH resolved once at first use.
@@ -48,8 +64,18 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn resolve_shell_path_returns_none_on_windows() {
-        assert!(resolve_shell_path().is_none());
+    fn resolve_shell_path_includes_git_bash_on_windows() {
+        // On a Windows machine with Git installed, the result should
+        // either be None (Git\bin already on PATH) or Some containing
+        // the Git\bin path.
+        let result = resolve_shell_path();
+        if let Some(ref path) = result {
+            assert!(
+                path.contains(r"Git\bin"),
+                "expected Git\\bin in resolved PATH"
+            );
+        }
+        // If None, Git\bin is already on PATH — also acceptable
     }
 
     #[cfg(unix)]
