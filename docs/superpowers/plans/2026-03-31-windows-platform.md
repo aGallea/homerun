@@ -15,34 +15,37 @@
 ## File Structure
 
 ### New files
-| File | Responsibility |
-|---|---|
-| `crates/daemon/src/platform/mod.rs` | Re-exports all platform submodules |
-| `crates/daemon/src/platform/shell.rs` | Shell PATH resolution (Unix: login shell, Windows: None) |
-| `crates/daemon/src/platform/process.rs` | Process discovery, killing, process groups, runner script names |
+
+| File                                    | Responsibility                                                              |
+| --------------------------------------- | --------------------------------------------------------------------------- |
+| `crates/daemon/src/platform/mod.rs`     | Re-exports all platform submodules                                          |
+| `crates/daemon/src/platform/shell.rs`   | Shell PATH resolution (Unix: login shell, Windows: None)                    |
+| `crates/daemon/src/platform/process.rs` | Process discovery, killing, process groups, runner script names             |
 | `crates/daemon/src/platform/service.rs` | Auto-start install/uninstall/status (launchd on macOS, schtasks on Windows) |
-| `crates/daemon/src/platform/ipc.rs` | Named pipe listener (Windows), Unix socket helpers, client connectors |
+| `crates/daemon/src/platform/ipc.rs`     | Named pipe listener (Windows), Unix socket helpers, client connectors       |
 
 ### Modified files
-| File | What changes |
-|---|---|
-| `crates/daemon/src/lib.rs` | Add `pub mod platform;`, keep `launchd` as `#[cfg(unix)]` for now |
-| `crates/daemon/Cargo.toml` | Add `zip` dependency (Windows-only) |
-| `crates/daemon/src/runner/process.rs` | Delegate to `platform::process` and `platform::shell` |
-| `crates/daemon/src/runner/binary.rs` | Cross-platform `detect_platform()`, `.zip` extraction, `run.cmd` check |
-| `crates/daemon/src/runner/mod.rs` | Use `platform::process::runner_script()` for script names |
-| `crates/daemon/src/server.rs` | `#[cfg]`-gated serve: Unix socket vs named pipe, shutdown signals |
-| `crates/daemon/src/config.rs` | Add `pipe_name()` for Windows |
-| `crates/daemon/src/api/service.rs` | Delegate to `platform::service` instead of `crate::launchd` |
-| `crates/tui/src/client.rs` | Add `NamedPipeConnector`, platform-aware `DaemonClient` |
-| `crates/tui/src/daemon_lifecycle.rs` | Platform-aware IPC endpoint, error messages |
-| `apps/desktop/src-tauri/src/client.rs` | Add `NamedPipeConnector`, platform-aware `DaemonClient` |
+
+| File                                   | What changes                                                           |
+| -------------------------------------- | ---------------------------------------------------------------------- |
+| `crates/daemon/src/lib.rs`             | Add `pub mod platform;`, keep `launchd` as `#[cfg(unix)]` for now      |
+| `crates/daemon/Cargo.toml`             | Add `zip` dependency (Windows-only)                                    |
+| `crates/daemon/src/runner/process.rs`  | Delegate to `platform::process` and `platform::shell`                  |
+| `crates/daemon/src/runner/binary.rs`   | Cross-platform `detect_platform()`, `.zip` extraction, `run.cmd` check |
+| `crates/daemon/src/runner/mod.rs`      | Use `platform::process::runner_script()` for script names              |
+| `crates/daemon/src/server.rs`          | `#[cfg]`-gated serve: Unix socket vs named pipe, shutdown signals      |
+| `crates/daemon/src/config.rs`          | Add `pipe_name()` for Windows                                          |
+| `crates/daemon/src/api/service.rs`     | Delegate to `platform::service` instead of `crate::launchd`            |
+| `crates/tui/src/client.rs`             | Add `NamedPipeConnector`, platform-aware `DaemonClient`                |
+| `crates/tui/src/daemon_lifecycle.rs`   | Platform-aware IPC endpoint, error messages                            |
+| `apps/desktop/src-tauri/src/client.rs` | Add `NamedPipeConnector`, platform-aware `DaemonClient`                |
 
 ---
 
 ## Task 1: Create platform::shell module
 
 **Files:**
+
 - Create: `crates/daemon/src/platform/mod.rs`
 - Create: `crates/daemon/src/platform/shell.rs`
 - Modify: `crates/daemon/src/lib.rs:1-12`
@@ -126,6 +129,7 @@ mod tests {
 Add `pub mod platform;` to `crates/daemon/src/lib.rs`. Insert it alphabetically:
 
 In `crates/daemon/src/lib.rs`, add after `pub mod notifications;`:
+
 ```rust
 pub mod platform;
 ```
@@ -157,6 +161,7 @@ git commit -m "refactor: extract platform::shell module from runner/process.rs (
 ## Task 2: Create platform::process module
 
 **Files:**
+
 - Create: `crates/daemon/src/platform/process.rs`
 - Modify: `crates/daemon/src/platform/mod.rs`
 - Modify: `crates/daemon/src/runner/process.rs`
@@ -444,6 +449,7 @@ pub fn configure_process_group(cmd: &mut Command) {
 Rewrite `crates/daemon/src/runner/process.rs` to import from platform and remove the duplicated logic. The file keeps `configure_runner`, `start_runner`, `remove_runner`, `clean_runner_config` (these call runner scripts and use platform helpers), but delegates process discovery and killing to platform:
 
 Replace the imports at the top of `crates/daemon/src/runner/process.rs` (lines 1-4):
+
 ```rust
 use anyhow::Result;
 use std::path::Path;
@@ -459,12 +465,14 @@ use crate::platform::shell::SHELL_PATH;
 Remove `resolve_shell_path()` (lines 6-23), `SHELL_PATH` (lines 25-32), `kill_orphaned_processes()` (lines 94-140), `find_runner_pids()` (lines 142-157), `find_runner_pid()` (lines 159-179) — these are all now in `platform::process`.
 
 Re-export from platform so `runner/mod.rs` imports still work:
+
 ```rust
 // Re-export platform functions used by runner/mod.rs
 pub use crate::platform::process::{find_runner_pid, kill_orphaned_processes};
 ```
 
 Update `configure_runner()` to use `config_script()`:
+
 ```rust
 pub async fn configure_runner(
     runner_dir: &Path,
@@ -520,6 +528,7 @@ pub async fn configure_runner(
 ```
 
 Update `start_runner()` to use `run_script()` and `configure_process_group()`:
+
 ```rust
 pub async fn start_runner(runner_dir: &Path) -> Result<Child> {
     let dir_str = runner_dir.to_string_lossy().to_string();
@@ -541,6 +550,7 @@ pub async fn start_runner(runner_dir: &Path) -> Result<Child> {
 ```
 
 Update `remove_runner()` to use `config_script()`:
+
 ```rust
 pub async fn remove_runner(runner_dir: &Path, token: &str) -> Result<()> {
     let status = Command::new(runner_dir.join(config_script()))
@@ -577,6 +587,7 @@ git commit -m "refactor: extract platform::process module with Windows support (
 ## Task 3: Create platform::service module
 
 **Files:**
+
 - Create: `crates/daemon/src/platform/service.rs`
 - Modify: `crates/daemon/src/platform/mod.rs`
 - Modify: `crates/daemon/src/api/service.rs:12-14, 27-28, 34`
@@ -836,6 +847,7 @@ Line 34: `crate::launchd::is_daemon_installed()` → `crate::platform::service::
 In `crates/daemon/src/lib.rs`, gate the old module so it only compiles on macOS (for backward compat with any direct imports), or simply remove it since `api/service.rs` was the only consumer:
 
 Replace `pub mod launchd;` with:
+
 ```rust
 #[cfg(target_os = "macos")]
 pub mod launchd; // Deprecated: use platform::service instead
@@ -858,6 +870,7 @@ git commit -m "refactor: extract platform::service with Windows Task Scheduler s
 ## Task 4: Cross-platform binary download and extraction
 
 **Files:**
+
 - Modify: `crates/daemon/src/runner/binary.rs`
 - Modify: `crates/daemon/Cargo.toml`
 
@@ -866,17 +879,20 @@ Update `detect_platform()` for Windows, add `.zip` extraction, and use `platform
 - [ ] **Step 1: Add `zip` dependency to daemon Cargo.toml**
 
 In `crates/daemon/Cargo.toml`, add to `[dependencies]`:
+
 ```toml
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 ```
 
 Add a `[target]` section for Windows-only activation:
+
 ```toml
 [target.'cfg(windows)'.dependencies]
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ```
 
 Actually, since we are using `optional = true` with cfg, it's simpler to just add `zip` unconditionally and use `#[cfg]` in code. The crate is small. Use:
+
 ```toml
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ```
@@ -923,11 +939,13 @@ pub fn runner_download_url(version: &str, os: &str, arch: &str) -> String {
 In `crates/daemon/src/runner/binary.rs`, update the `ensure_runner_binary()` function.
 
 Add import at top of file:
+
 ```rust
 use crate::platform::process::run_script;
 ```
 
 Replace the `run.sh` check (line 54) with:
+
 ```rust
     let run_script_path = runner_dir.join(run_script());
 ```
@@ -935,6 +953,7 @@ Replace the `run.sh` check (line 54) with:
 Replace `if run_sh.exists()` (line 57 and 67) with `if run_script_path.exists()`.
 
 Replace the archive filename construction (line 88):
+
 ```rust
     let ext = if os == "win" { "zip" } else { "tar.gz" };
     let archive_path = runner_dir.join(format!("actions-runner-{os}-{arch}-{version}.{ext}"));
@@ -1072,6 +1091,7 @@ git commit -m "feat: cross-platform binary download with .zip extraction for Win
 ## Task 5: Platform-aware IPC — Config and daemon server
 
 **Files:**
+
 - Create: `crates/daemon/src/platform/ipc.rs`
 - Modify: `crates/daemon/src/platform/mod.rs`
 - Modify: `crates/daemon/src/config.rs:65-66`
@@ -1199,6 +1219,7 @@ In `crates/daemon/src/config.rs`, add after `socket_path()` (line 66):
 Rewrite the `serve()` function in `crates/daemon/src/server.rs`. The router creation and state setup remain identical — only the listener setup, stale-check, and shutdown signal change.
 
 Replace the imports (lines 1-10):
+
 ```rust
 use std::sync::Arc;
 
@@ -1223,7 +1244,7 @@ use crate::runner::RunnerManager;
 
 Replace the `serve()` function (lines 165-304) with:
 
-```rust
+````rust
 pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
     let state = AppState::new(config, daemon_logs);
 
@@ -1460,7 +1481,7 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
     tracing::info!("Daemon shut down gracefully");
     Ok(())
 }
-```
+````
 
 - [ ] **Step 5: Verify tests pass**
 
@@ -1486,6 +1507,7 @@ git commit -m "feat: named pipe IPC for Windows daemon server (#112)"
 ## Task 6: Platform-aware TUI client
 
 **Files:**
+
 - Modify: `crates/tui/src/client.rs`
 - Modify: `crates/tui/src/daemon_lifecycle.rs`
 - Modify: `crates/tui/Cargo.toml`
@@ -1542,6 +1564,7 @@ impl tower::Service<hyper::Uri> for NamedPipeConnector {
 Gate the `UnixConnector` usage and add Windows counterparts. Update the `DaemonClient` struct and methods:
 
 Gate the `UnixConnector` struct with `#[cfg(unix)]`:
+
 ```rust
 #[cfg(unix)]
 #[derive(Clone)]
@@ -1680,6 +1703,7 @@ Update `connect_events()` for Windows:
 In `crates/tui/src/daemon_lifecycle.rs`:
 
 Replace `default_socket_path()` (lines 9-13):
+
 ```rust
 #[cfg(unix)]
 fn default_socket_path() -> std::path::PathBuf {
@@ -1695,6 +1719,7 @@ fn default_pipe_name() -> String {
 ```
 
 Update `is_daemon_running()` (lines 15-21):
+
 ```rust
 #[cfg(unix)]
 async fn is_daemon_running(socket: &std::path::Path) -> bool {
@@ -1713,6 +1738,7 @@ async fn is_daemon_running() -> bool {
 ```
 
 Update `start_daemon()` (lines 23-50):
+
 ```rust
 pub async fn start_daemon() -> Result<()> {
     #[cfg(unix)]
@@ -1756,6 +1782,7 @@ pub async fn start_daemon() -> Result<()> {
 ```
 
 Update `stop_daemon()` — replace launchd-specific error message (lines 62-66):
+
 ```rust
         Err(e) => {
             let msg = format!("{e}");
@@ -1776,6 +1803,7 @@ Update `stop_daemon()` — replace launchd-specific error message (lines 62-66):
 ```
 
 Update socket cleanup in `stop_daemon()` to be Unix-only:
+
 ```rust
     #[cfg(unix)]
     let socket = default_socket_path();
@@ -1789,6 +1817,7 @@ Update socket cleanup in `stop_daemon()` to be Unix-only:
 ```
 
 The socket-polling loop in `stop_daemon()` also needs platform awareness:
+
 ```rust
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
     loop {
@@ -1832,6 +1861,7 @@ git commit -m "feat: Windows named pipe support for TUI client (#112)"
 ## Task 7: Platform-aware Desktop client
 
 **Files:**
+
 - Modify: `apps/desktop/src-tauri/src/client.rs`
 - Modify: `apps/desktop/src-tauri/Cargo.toml`
 
@@ -1842,11 +1872,13 @@ Apply the same named pipe connector pattern to the Tauri desktop client.
 In `apps/desktop/src-tauri/Cargo.toml`, gate `mac-notification-sys` to macOS only and ensure tokio is available:
 
 Replace:
+
 ```toml
 mac-notification-sys = "0.6"
 ```
 
 With:
+
 ```toml
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"
@@ -1929,6 +1961,7 @@ git commit -m "feat: Windows named pipe support for desktop client (#112)"
 ## Task 8: Update runner/mod.rs references to run.sh/config.sh
 
 **Files:**
+
 - Modify: `crates/daemon/src/runner/mod.rs`
 
 There are scattered references to `run.sh` in comments and in the copy logic that need updating.
@@ -1936,16 +1969,19 @@ There are scattered references to `run.sh` in comments and in the copy logic tha
 - [ ] **Step 1: Search and update `run.sh` references in `runner/mod.rs`**
 
 In `crates/daemon/src/runner/mod.rs`, add import:
+
 ```rust
 use crate::platform::process::run_script;
 ```
 
 Update line 3272 (test that creates a fake `run.sh`):
+
 ```rust
 let script_path = src.path().join(crate::platform::process::run_script());
 ```
 
 Update line 3283 (test that checks `run.sh` in dst):
+
 ```rust
 let dst_script = dst.path().join(crate::platform::process::run_script());
 ```
@@ -1998,6 +2034,7 @@ Expected: TUI connects to daemon via named pipe, shows health status.
 - [ ] **Step 6: Commit any test fixes**
 
 If any tests needed adjustment:
+
 ```bash
 git add -A
 git commit -m "fix: test adjustments for Windows platform support (#112)"

@@ -485,9 +485,7 @@ export function Settings() {
                           style={{ width: "100%", maxWidth: 400 }}
                           autoComplete="off"
                         />
-                        <p className="form-hint">
-                          Your token is stored securely on disk.
-                        </p>
+                        <p className="form-hint">Your token is stored securely on disk.</p>
                       </div>
                       <button
                         type="submit"

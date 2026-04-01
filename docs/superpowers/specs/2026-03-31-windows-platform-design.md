@@ -15,17 +15,17 @@ Create `crates/daemon/src/platform/` with submodules per concern (`ipc`, `proces
 
 ## Platform-Specific Touchpoints
 
-| # | Component | Current File(s) | macOS-Specific Code |
-|---|---|---|---|
-| 1 | IPC (server) | `daemon/src/server.rs` | `UnixListener`, `UnixStream`, stale socket cleanup, SIGTERM handler |
-| 2 | IPC (clients) | `tui/src/client.rs`, `desktop/src-tauri/src/client.rs` | `UnixConnector`, `UnixStream`, WebSocket over Unix socket |
-| 3 | Process mgmt | `daemon/src/runner/process.rs` | `pgrep`, `libc::kill`/`SIGTERM`/`SIGKILL`, `setsid()`, `run.sh`/`config.sh` |
-| 4 | Binary download | `daemon/src/runner/binary.rs` | Hardcoded `"osx"`, `tar xzf` extraction, `run.sh` existence check |
-| 5 | Auto-start | `daemon/src/launchd.rs` | launchd plist, `launchctl` commands |
-| 6 | Service API | `daemon/src/api/service.rs` | Direct `crate::launchd::*` calls |
-| 7 | Daemon lifecycle | `tui/src/daemon_lifecycle.rs` | `daemon.sock` path, launchd error messages |
-| 8 | Config | `daemon/src/config.rs` | `socket_path()` returns `.sock` |
-| 9 | Shell PATH | `daemon/src/runner/process.rs` | `$SHELL -l -c "echo $PATH"` |
+| #   | Component        | Current File(s)                                        | macOS-Specific Code                                                         |
+| --- | ---------------- | ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| 1   | IPC (server)     | `daemon/src/server.rs`                                 | `UnixListener`, `UnixStream`, stale socket cleanup, SIGTERM handler         |
+| 2   | IPC (clients)    | `tui/src/client.rs`, `desktop/src-tauri/src/client.rs` | `UnixConnector`, `UnixStream`, WebSocket over Unix socket                   |
+| 3   | Process mgmt     | `daemon/src/runner/process.rs`                         | `pgrep`, `libc::kill`/`SIGTERM`/`SIGKILL`, `setsid()`, `run.sh`/`config.sh` |
+| 4   | Binary download  | `daemon/src/runner/binary.rs`                          | Hardcoded `"osx"`, `tar xzf` extraction, `run.sh` existence check           |
+| 5   | Auto-start       | `daemon/src/launchd.rs`                                | launchd plist, `launchctl` commands                                         |
+| 6   | Service API      | `daemon/src/api/service.rs`                            | Direct `crate::launchd::*` calls                                            |
+| 7   | Daemon lifecycle | `tui/src/daemon_lifecycle.rs`                          | `daemon.sock` path, launchd error messages                                  |
+| 8   | Config           | `daemon/src/config.rs`                                 | `socket_path()` returns `.sock`                                             |
+| 9   | Shell PATH       | `daemon/src/runner/process.rs`                         | `$SHELL -l -c "echo $PATH"`                                                 |
 
 ## Design Sections
 
@@ -58,6 +58,7 @@ The `UnixConnector` tower service gets a `#[cfg(windows)]` counterpart `NamedPip
 **Config change:**
 
 `Config::socket_path()` renamed/extended to `Config::ipc_endpoint()`:
+
 - Unix: returns `PathBuf` for `~/.homerun/daemon.sock`
 - Windows: returns `String` for `\\.\pipe\homerun-daemon`
 
@@ -86,18 +87,22 @@ pub fn runner_script(name: &str) -> String  // "run" -> "run.sh" or "run.cmd"
 ```
 
 **Finding runner processes:**
+
 - Unix: `pgrep -f {dir_str}` (existing)
 - Windows: `sysinfo` crate (already a dependency) to enumerate processes, filter by command line containing the runner directory path
 
 **Killing processes:**
+
 - Unix: `libc::kill(-pid, SIGTERM)` then `SIGKILL` after timeout (existing)
 - Windows: `taskkill /T /F /PID {pid}` — `/T` kills the process tree (equivalent to Unix process group kill)
 
 **Process groups on spawn:**
+
 - Unix: `pre_exec(|| { setsid(); })` (existing)
 - Windows: `cmd.creation_flags(CREATE_NEW_PROCESS_GROUP)` via `std::os::windows::process::CommandExt`
 
 **Runner scripts:**
+
 - Unix: `config.sh`, `run.sh`
 - Windows: `config.cmd`, `run.cmd` (GitHub Actions runner ships both)
 
@@ -125,6 +130,7 @@ pub fn is_daemon_installed() -> bool
 **macOS:** launchd plist at `~/Library/LaunchAgents/com.homerun.daemon.plist` + `launchctl load/unload` (existing logic, moved here)
 
 **Windows:** Task Scheduler via `schtasks.exe`:
+
 - **Install:** `schtasks /Create /SC ONLOGON /TN "HomeRun Daemon" /TR "\"{daemon_path}\"" /RL HIGHEST /F`
 - **Uninstall:** `schtasks /Delete /TN "HomeRun Daemon" /F`
 - **Status:** `schtasks /Query /TN "HomeRun Daemon"` — exit code 0 means installed
@@ -146,12 +152,14 @@ pub fn detect_platform() -> (&'static str, &'static str) {
 ```
 
 **Archive format:**
+
 - Unix: `.tar.gz` — extracted with `tar xzf` (existing)
 - Windows: `.zip` — extracted with the `zip` crate (pure Rust, no shell dependency)
 
 **Download URL:** `runner_download_url()` already takes `os` as a parameter, so the URL format handles itself. The only difference is the file extension.
 
 **Runner existence check:**
+
 - Unix: check for `run.sh`
 - Windows: check for `run.cmd`
 
@@ -169,14 +177,15 @@ Both `crates/tui/src/client.rs` and `apps/desktop/src-tauri/src/client.rs` have 
 ### 8. Daemon Lifecycle (TUI)
 
 `tui/src/daemon_lifecycle.rs` changes:
+
 - `default_socket_path()` → `default_ipc_endpoint()` using platform module
 - `is_daemon_running()`: on Windows, check pipe connectivity instead of socket file existence
 - `stop_daemon()`: platform-aware error messages (launchd on macOS, Task Scheduler on Windows)
 
 ## New Dependencies
 
-| Crate | Purpose | Platform |
-|---|---|---|
+| Crate | Purpose                                | Platform                      |
+| ----- | -------------------------------------- | ----------------------------- |
 | `zip` | Extract Windows runner `.zip` archives | Windows only (`#[cfg]` gated) |
 
 No new dependencies for IPC (tokio has built-in named pipe support) or process management (`sysinfo` already present).
