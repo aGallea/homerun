@@ -48,27 +48,24 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v5
-        if: runner.os != 'Windows'
+        id: setup-python
+        continue-on-error: true
         with:
           python-version: "3.x"
 
-      - name: Setup Python (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
+      - name: Fallback Python (Windows)
+        if: steps.setup-python.outcome == 'failure' && runner.os == 'Windows'
         run: |
-          @echo off
-          REM setup-python fails on self-hosted Windows runners due to HKLM
-          REM registry permissions.  Find Python in the runner's tool cache.
-          REM GITHUB_WORKSPACE is <runner>/_work/<repo>/<repo>, tool cache is <runner>/_work/_tool
-          for /f "delims=" %%d in ('dir /b /ad "%GITHUB_WORKSPACE%\..\..\_tool\Python"') do set PY_VER=%%d
-          if not defined PY_VER (
-            echo ::error::No cached Python found in tool cache
-            exit /b 1
-          )
-          set PY_DIR=%GITHUB_WORKSPACE%\..\..\_tool\Python\%PY_VER%\x64
-          echo Using Python from %PY_DIR%
-          echo %PY_DIR%>> %GITHUB_PATH%
-          echo %PY_DIR%\Scripts>> %GITHUB_PATH%
+          # setup-python may fail on self-hosted Windows due to registry
+          # permissions.  Search all runner tool caches for a cached Python.
+          for dir in "$HOME/.homerun/runners"/*/_work/_tool/Python/*/x64; do
+            if [[ -x "$dir/python.exe" ]]; then
+              echo "Found Python at $dir"
+              echo "$dir" >> $GITHUB_PATH
+              echo "$dir/Scripts" >> $GITHUB_PATH
+              break
+            fi
+          done
 
       - name: Install pre-commit
         run: |
