@@ -7,11 +7,16 @@ pub async fn shutdown_daemon(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     if crate::platform::service::is_daemon_installed() {
+        let msg = if cfg!(target_os = "macos") {
+            "Daemon is managed by launchd. Uninstall the service first or use `launchctl unload`."
+        } else if cfg!(windows) {
+            "Daemon is registered as an auto-start service. Uninstall the service first."
+        } else {
+            "Daemon is installed as a system service. Uninstall the service first."
+        };
         return Err((
             StatusCode::CONFLICT,
-            Json(json!({
-                "error": "Daemon is managed by launchd. Uninstall the service first or use `launchctl unload`."
-            })),
+            Json(json!({ "error": msg })),
         ));
     }
 
@@ -119,7 +124,7 @@ mod tests {
                 .await
                 .unwrap();
             let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(json["error"].as_str().unwrap().contains("launchd"));
+            assert!(json["error"].as_str().unwrap().contains("service"));
         } else {
             // If launchd is not installed, shutdown should be allowed
             assert_eq!(response.status(), StatusCode::ACCEPTED);
