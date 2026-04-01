@@ -56,12 +56,13 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           # setup-python fails on self-hosted Windows runners due to HKLM
-          # registry permissions.  Find the cached Python in the tool cache
-          # and add it to PATH directly.
-          TOOL_CACHE="${RUNNER_TOOL_CACHE:-$AGENT_TOOLSDIRECTORY}"
-          PY_DIR=$(ls -d "$TOOL_CACHE/Python"/3.*/x64 2>/dev/null | sort -V | tail -1)
+          # registry permissions.  Find Python in the runner's tool cache.
+          # The _work/_tool directory sits next to _work/<repo> in the
+          # runner's work folder — derive it from GITHUB_WORKSPACE.
+          WORK_DIR="$(cd "$GITHUB_WORKSPACE/../.." && pwd)"
+          PY_DIR=$(ls -d "$WORK_DIR/_tool/Python"/3.*/x64 2>/dev/null | sort -V | tail -1)
           if [[ -z "$PY_DIR" ]]; then
-            echo "::error::No cached Python 3 found in $TOOL_CACHE"
+            echo "::error::No cached Python 3 found in $WORK_DIR/_tool"
             exit 1
           fi
           echo "$PY_DIR" >> $GITHUB_PATH
