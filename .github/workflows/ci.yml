@@ -54,26 +54,21 @@ jobs:
 
       - name: Setup Python (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: cmd
         run: |
-          # setup-python fails on self-hosted Windows runners due to HKLM
-          # registry permissions.  Find Python in the runner's tool cache.
-          $toolDir = Join-Path $env:GITHUB_WORKSPACE ".." ".." "_tool" | Resolve-Path -ErrorAction SilentlyContinue
-          if (-not $toolDir) {
-            Write-Error "Cannot resolve tool cache directory"
-            exit 1
-          }
-          $pyDir = Get-ChildItem -Path (Join-Path $toolDir "Python") -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name |
-            Select-Object -Last 1
-          if (-not $pyDir) {
-            Write-Error "No cached Python found in $toolDir"
-            exit 1
-          }
-          $pyBin = Join-Path $pyDir.FullName "x64"
-          Write-Host "Using Python from $pyBin"
-          "$pyBin" | Out-File -Append $env:GITHUB_PATH
-          "$pyBin\Scripts" | Out-File -Append $env:GITHUB_PATH
+          @echo off
+          REM setup-python fails on self-hosted Windows runners due to HKLM
+          REM registry permissions.  Find Python in the runner's tool cache.
+          REM GITHUB_WORKSPACE is <runner>/_work/<repo>/<repo>, tool cache is <runner>/_work/_tool
+          for /f "delims=" %%d in ('dir /b /ad "%GITHUB_WORKSPACE%\..\..\_tool\Python"') do set PY_VER=%%d
+          if not defined PY_VER (
+            echo ::error::No cached Python found in tool cache
+            exit /b 1
+          )
+          set PY_DIR=%GITHUB_WORKSPACE%\..\..\_tool\Python\%PY_VER%\x64
+          echo Using Python from %PY_DIR%
+          echo %PY_DIR%>> %GITHUB_PATH%
+          echo %PY_DIR%\Scripts>> %GITHUB_PATH%
 
       - name: Install pre-commit
         run: |

@@ -22,24 +22,38 @@ pub fn resolve_shell_path() -> Option<String> {
 
 /// On Windows the system PATH is usually inherited from the environment,
 /// but the daemon may start before the full PATH is available (e.g. after
-/// a reboot).  We ensure Git Bash's `bin` directory is on the PATH so
-/// that GitHub Actions runners can find `bash.exe`.
+/// a reboot).  We ensure essential directories are on the PATH so that
+/// GitHub Actions runners can find bash, pwsh, node, etc.
 #[cfg(windows)]
 pub fn resolve_shell_path() -> Option<String> {
     let current = std::env::var("PATH").unwrap_or_default();
-    let git_bash_bin = r"C:\Program Files\Git\bin";
-    // If Git\bin is already on the PATH, nothing to do
-    if current
-        .split(';')
-        .any(|p| p.eq_ignore_ascii_case(git_bash_bin))
-    {
-        return None;
+    let current_lower: Vec<String> = current.split(';').map(|p| p.to_lowercase()).collect();
+
+    // Directories that runners commonly need but may be missing after reboot
+    let essential_dirs = [
+        r"C:\Program Files\Git\bin",
+        r"C:\Program Files\Git\cmd",
+        r"C:\Program Files\PowerShell\7",
+        r"C:\Windows\System32\WindowsPowerShell\v1.0",
+    ];
+
+    let mut additions = Vec::new();
+    for dir in &essential_dirs {
+        if !current_lower.iter().any(|p| p == &dir.to_lowercase())
+            && std::path::Path::new(dir).is_dir()
+        {
+            additions.push(*dir);
+        }
     }
-    // Only add it if the directory actually exists
-    if std::path::Path::new(git_bash_bin).is_dir() {
-        Some(format!("{current};{git_bash_bin}"))
-    } else {
+
+    if additions.is_empty() {
         None
+    } else {
+        let mut path = current;
+        for dir in additions {
+            path = format!("{path};{dir}");
+        }
+        Some(path)
     }
 }
 
