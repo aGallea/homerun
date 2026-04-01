@@ -48,11 +48,29 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v5
+        if: runner.os != 'Windows'
         with:
           python-version: "3.x"
 
+      - name: Setup Python (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # setup-python fails on self-hosted Windows runners due to HKLM
+          # registry permissions.  Find the cached Python in the tool cache
+          # and add it to PATH directly.
+          TOOL_CACHE="${RUNNER_TOOL_CACHE:-$AGENT_TOOLSDIRECTORY}"
+          PY_DIR=$(ls -d "$TOOL_CACHE/Python"/3.*/x64 2>/dev/null | sort -V | tail -1)
+          if [[ -z "$PY_DIR" ]]; then
+            echo "::error::No cached Python 3 found in $TOOL_CACHE"
+            exit 1
+          fi
+          echo "$PY_DIR" >> $GITHUB_PATH
+          echo "$PY_DIR/Scripts" >> $GITHUB_PATH
+          echo "Using Python from $PY_DIR"
+
       - name: Install pre-commit
-        run: pip install pre-commit --quiet
+        run: |
+          python -m pip install pre-commit --quiet
 
       - name: Install Node dependencies
         run: cd apps/desktop && npm ci
