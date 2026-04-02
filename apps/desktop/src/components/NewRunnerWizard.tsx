@@ -15,7 +15,8 @@ interface NewRunnerWizardProps {
   preselectedRepo?: string;
 }
 
-const DEFAULT_LABELS = ["self-hosted", "macOS", "ARM64"];
+// Empty default — the daemon sets platform-appropriate labels (e.g. self-hosted, Windows, X64)
+const DEFAULT_LABELS: string[] = [];
 const STEPS = ["Select Repository", "Configure", "Launch"];
 
 function generateName(repoName: string): string {
@@ -532,7 +533,7 @@ function StepConfigure({
           value={labelsInput}
           onChange={(e) => onLabelsInput(e.target.value)}
           style={{ width: "100%" }}
-          placeholder="e.g. self-hosted, macOS, ARM64"
+          placeholder="e.g. self-hosted, gpu (leave empty for defaults)"
         />
       </div>
     </div>

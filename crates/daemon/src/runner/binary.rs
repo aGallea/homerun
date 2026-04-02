@@ -2,21 +2,28 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
+use crate::platform::process::run_script;
+
 /// Global lock to prevent concurrent downloads/extractions of the runner binary.
 static DOWNLOAD_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// Constructs the GitHub Actions runner download URL for the given version, OS, and architecture.
 pub fn runner_download_url(version: &str, os: &str, arch: &str) -> String {
+    let ext = if os == "win" { "zip" } else { "tar.gz" };
     format!(
-        "https://github.com/actions/runner/releases/download/v{version}/actions-runner-{os}-{arch}-{version}.tar.gz"
+        "https://github.com/actions/runner/releases/download/v{version}/actions-runner-{os}-{arch}-{version}.{ext}"
     )
 }
 
 /// Returns (os, arch) for the current platform.
-/// OS is always "osx" (macOS only for now).
-/// Arch is "arm64" for aarch64, otherwise "x64".
 pub fn detect_platform() -> (&'static str, &'static str) {
-    let os = "osx";
+    let os = if cfg!(target_os = "macos") {
+        "osx"
+    } else if cfg!(target_os = "windows") {
+        "win"
+    } else {
+        "linux"
+    };
     let arch = if cfg!(target_arch = "aarch64") {
         "arm64"
     } else {
@@ -42,8 +49,8 @@ pub async fn get_latest_runner_version() -> Result<String> {
 }
 
 /// Ensures the GitHub Actions runner binary is downloaded and extracted to cache_dir.
-/// If `cache_dir/runner-{version}/run.sh` already exists, returns early.
-/// Otherwise downloads the tar.gz, extracts it, and cleans up the archive.
+/// If `cache_dir/runner-{version}/run.sh` (or `run.cmd` on Windows) already exists, returns early.
+/// Otherwise downloads the archive, extracts it, and cleans up.
 /// Returns the path to the versioned runner directory.
 pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
     let version = get_latest_runner_version()
@@ -51,10 +58,10 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
         .context("Failed to determine latest runner version")?;
 
     let runner_dir = cache_dir.join(format!("runner-{version}"));
-    let run_sh = runner_dir.join("run.sh");
+    let run_script_path = runner_dir.join(run_script());
 
     // Fast path: already cached, no lock needed
-    if run_sh.exists() {
+    if run_script_path.exists() {
         tracing::debug!("Runner binary already cached at {:?}", runner_dir);
         return Ok(runner_dir);
     }
@@ -63,7 +70,7 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
     let _guard = DOWNLOAD_LOCK.lock().await;
 
     // Re-check after acquiring lock (another caller may have finished)
-    if run_sh.exists() {
+    if run_script_path.exists() {
         tracing::debug!("Runner binary already cached at {:?}", runner_dir);
         return Ok(runner_dir);
     }
@@ -85,7 +92,8 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
         anyhow::bail!("Failed to download runner: HTTP {}", response.status());
     }
 
-    let archive_path = runner_dir.join(format!("actions-runner-{os}-{arch}-{version}.tar.gz"));
+    let ext = if os == "win" { "zip" } else { "tar.gz" };
+    let archive_path = runner_dir.join(format!("actions-runner-{os}-{arch}-{version}.{ext}"));
 
     let bytes = response
         .bytes()
@@ -98,17 +106,34 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
 
     tracing::info!("Extracting runner archive to {:?}", runner_dir);
 
-    let status = tokio::process::Command::new("tar")
-        .arg("xzf")
-        .arg(&archive_path)
-        .arg("-C")
-        .arg(&runner_dir)
-        .status()
-        .await
-        .context("Failed to run tar to extract runner archive")?;
+    #[cfg(unix)]
+    {
+        let status = tokio::process::Command::new("tar")
+            .arg("xzf")
+            .arg(&archive_path)
+            .arg("-C")
+            .arg(&runner_dir)
+            .status()
+            .await
+            .context("Failed to run tar to extract runner archive")?;
 
-    if !status.success() {
-        anyhow::bail!("tar extraction failed with status: {}", status);
+        if !status.success() {
+            anyhow::bail!("tar extraction failed with status: {}", status);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let archive_clone = archive_path.clone();
+        let dir_clone = runner_dir.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let file = std::fs::File::open(&archive_clone)?;
+            let mut archive = zip::ZipArchive::new(file)?;
+            archive.extract(&dir_clone)?;
+            Ok(())
+        })
+        .await
+        .context("Zip extraction task panicked")??;
     }
 
     tokio::fs::remove_file(&archive_path)
@@ -143,6 +168,24 @@ mod tests {
     }
 
     #[test]
+    fn test_download_url_windows_x64() {
+        let url = runner_download_url("2.321.0", "win", "x64");
+        assert_eq!(
+            url,
+            "https://github.com/actions/runner/releases/download/v2.321.0/actions-runner-win-x64-2.321.0.zip"
+        );
+    }
+
+    #[test]
+    fn test_download_url_linux_x64() {
+        let url = runner_download_url("2.321.0", "linux", "x64");
+        assert_eq!(
+            url,
+            "https://github.com/actions/runner/releases/download/v2.321.0/actions-runner-linux-x64-2.321.0.tar.gz"
+        );
+    }
+
+    #[test]
     fn test_download_url_different_version() {
         let url = runner_download_url("2.300.0", "osx", "arm64");
         assert!(url.contains("v2.300.0"));
@@ -159,15 +202,26 @@ mod tests {
     #[test]
     fn test_detect_platform() {
         let (os, arch) = detect_platform();
-        assert_eq!(os, "osx");
+        if cfg!(target_os = "macos") {
+            assert_eq!(os, "osx");
+        } else if cfg!(target_os = "windows") {
+            assert_eq!(os, "win");
+        } else {
+            assert_eq!(os, "linux");
+        }
         assert!(arch == "arm64" || arch == "x64");
     }
 
     #[test]
-    fn test_detect_platform_os_is_always_osx() {
-        // HomeRun only supports macOS
+    fn test_detect_platform_os_is_correct() {
         let (os, _arch) = detect_platform();
-        assert_eq!(os, "osx");
+        if cfg!(target_os = "macos") {
+            assert_eq!(os, "osx");
+        } else if cfg!(target_os = "windows") {
+            assert_eq!(os, "win");
+        } else {
+            assert_eq!(os, "linux");
+        }
     }
 
     #[test]
@@ -176,7 +230,7 @@ mod tests {
         assert!(arch == "arm64" || arch == "x64", "unexpected arch: {arch}");
     }
 
-    /// Test the cache-hit early-return path: if `runner-{version}/run.sh`
+    /// Test the cache-hit early-return path: if `runner-{version}/run.sh` (or `run.cmd`)
     /// already exists, `ensure_runner_binary` should return immediately
     /// with the runner directory path without making any network calls.
     #[tokio::test]
@@ -190,19 +244,16 @@ mod tests {
         let version = "2.999.0";
         let runner_dir = cache_dir.join(format!("runner-{version}"));
         fs::create_dir_all(&runner_dir).expect("failed to create runner dir");
-        fs::write(runner_dir.join("run.sh"), "#!/bin/bash\necho runner")
-            .expect("failed to write run.sh");
+        fs::write(runner_dir.join(run_script()), "#!/bin/bash\necho runner")
+            .expect("failed to write run script");
 
-        // Patch octocrab global instance so the mock version matches.
-        // We don't need to do that because if run.sh exists the function
-        // returns early *before* calling get_latest_runner_version.
-        // However, ensure_runner_binary ALWAYS calls get_latest_runner_version
-        // first; so we cannot call it without a real network call.
-        //
-        // Instead, we test the building blocks directly:
-        // 1. The run.sh exists check works correctly.
-        let run_sh = runner_dir.join("run.sh");
-        assert!(run_sh.exists(), "run.sh should exist in simulated cache");
+        // We test the building blocks directly:
+        // 1. The run script exists check works correctly.
+        let run_script_path = runner_dir.join(run_script());
+        assert!(
+            run_script_path.exists(),
+            "run script should exist in simulated cache"
+        );
 
         // 2. The runner_dir path is constructed consistently.
         let expected_runner_dir = cache_dir.join(format!("runner-{version}"));
@@ -226,7 +277,7 @@ mod tests {
         assert!(url.contains(&format!("actions-runner-{os}-{arch}-{version}")));
     }
 
-    /// Test that runner_download_url with empty strings still produces a valid URL structure.
+    /// Test that runner_download_url with edge case version still produces a valid URL structure.
     #[test]
     fn test_download_url_with_edge_case_version() {
         let url = runner_download_url("0.0.0", "osx", "x64");

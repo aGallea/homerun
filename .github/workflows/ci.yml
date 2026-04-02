@@ -23,20 +23,59 @@ jobs:
   pre-commit:
     name: Pre-commit checks
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Add Rust toolchain and Git to PATH
+        run: |
+          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
+          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+          # Ensure git.exe is in PATH for pre-commit on Windows
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "/c/Program Files/Git/cmd" >> $GITHUB_PATH
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        id: setup-python
+        continue-on-error: true
+        with:
+          python-version: "3.x"
+
+      - name: Fallback Python (Windows)
+        if: steps.setup-python.outcome == 'failure' && runner.os == 'Windows'
+        run: |
+          # setup-python may fail on self-hosted Windows due to registry
+          # permissions.  Search all runner tool caches for a cached Python.
+          for dir in "$HOME/.homerun/runners"/*/_work/_tool/Python/*/x64; do
+            if [[ -x "$dir/python.exe" ]]; then
+              echo "Found Python at $dir"
+              echo "$dir" >> $GITHUB_PATH
+              echo "$dir/Scripts" >> $GITHUB_PATH
+              break
+            fi
+          done
+
       - name: Install pre-commit
-        run: pip3 install pre-commit --quiet 2>/dev/null || pip install pre-commit --quiet
+        run: |
+          python -m pip install pre-commit --quiet
 
       - name: Install Node dependencies
         run: cd apps/desktop && npm ci
 
       - name: Run pre-commit
-        run: python3 -m pre_commit run --all-files --show-diff-on-failure
+        run: pre-commit run --all-files --show-diff-on-failure
         env:
           SKIP: cargo-test,cargo-clippy
 
@@ -45,9 +84,15 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
+        shell: bash
         working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install dependencies
         run: npm ci
@@ -65,6 +110,9 @@ jobs:
     name: Rust (fmt + clippy + test + coverage)
     needs: [react-test]
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,6 +120,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust toolchain to PATH
+        run: |
+          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
+          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
 
       - name: Ensure Rust is available
         run: |
@@ -85,7 +138,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Install cargo-llvm-cov
-        run: which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
+        run: cargo install cargo-llvm-cov --quiet 2>/dev/null || true
 
       - name: Run tests with coverage (daemon)
         run: cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
@@ -123,9 +176,15 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
+        shell: bash
         working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install dependencies
         run: npm ci

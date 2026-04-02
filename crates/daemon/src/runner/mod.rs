@@ -107,6 +107,27 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()
     Ok(())
 }
 
+/// Returns the default runner labels for the current platform and architecture.
+fn default_runner_labels() -> Vec<String> {
+    let os_label = if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "windows") {
+        "Windows"
+    } else {
+        "Linux"
+    };
+    let arch_label = if cfg!(target_arch = "aarch64") {
+        "ARM64"
+    } else {
+        "X64"
+    };
+    vec![
+        "self-hosted".to_string(),
+        os_label.to_string(),
+        arch_label.to_string(),
+    ]
+}
+
 impl RunnerManager {
     pub fn new(config: Config) -> Self {
         let (log_tx, _) = broadcast::channel(1024);
@@ -454,7 +475,7 @@ impl RunnerManager {
             let (state, pid) = if is_service {
                 // Service runners survive daemon restart — always check if process is alive
                 match find_runner_pid(&entry.config.work_dir).await {
-                    Some(pid) => (RunnerState::Online, Some(pid as u32)),
+                    Some(pid) => (RunnerState::Online, Some(pid)),
                     None => {
                         // Service runner's process died — should be restarted
                         if entry.was_running {
@@ -592,15 +613,38 @@ impl RunnerManager {
                 tokio::select! {
                     _ = kill_signal.notified() => {
                         // Kill requested — signal the process group
-                        let pgid = pid as i32;
-                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                        #[cfg(unix)]
+                        {
+                            let pgid = pid as i32;
+                            unsafe { libc::kill(-pgid, libc::SIGTERM); }
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                        }
+                        #[cfg(windows)]
+                        {
+                            let _ = std::process::Command::new("taskkill")
+                                .args(["/T", "/F", "/PID", &pid.to_string()])
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                        }
                         break;
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
                         // Check if process is still alive
+                        #[cfg(unix)]
                         let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+                        #[cfg(windows)]
+                        let alive = {
+                            use sysinfo::{Pid, ProcessesToUpdate, ProcessRefreshKind, System};
+                            let mut sys = System::new();
+                            sys.refresh_processes_specifics(
+                                ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+                                true,
+                                ProcessRefreshKind::nothing(),
+                            );
+                            sys.process(Pid::from_u32(pid)).is_some()
+                        };
                         if !alive {
                             break;
                         }
@@ -948,26 +992,14 @@ impl RunnerManager {
         let resolved_labels = if let Some(user_labels) = labels {
             if user_labels.is_empty() {
                 // No labels provided — use platform defaults
-                let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
-                if cfg!(target_arch = "aarch64") {
-                    defaults.push("ARM64".to_string());
-                } else {
-                    defaults.push("X64".to_string());
-                }
-                defaults
+                default_runner_labels()
             } else {
                 // User explicitly chose labels — use as-is
                 user_labels
             }
         } else {
             // None — use platform defaults
-            let mut defaults = vec!["self-hosted".to_string(), "macOS".to_string()];
-            if cfg!(target_arch = "aarch64") {
-                defaults.push("ARM64".to_string());
-            } else {
-                defaults.push("X64".to_string());
-            }
-            defaults
+            default_runner_labels()
         };
 
         let runner = RunnerInfo {
@@ -1321,8 +1353,8 @@ impl RunnerManager {
     /// 2. Download / cache runner binary
     /// 3. Copy binary files to runner work_dir
     /// 4. Get registration token from GitHub
-    /// 5. Run config.sh
-    /// 6. Spawn run.sh
+    /// 5. Run the config script
+    /// 6. Spawn the runner script
     /// 7. Store PID, update state to Online
     /// 8. Spawn background monitor task
     pub async fn register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
@@ -1347,7 +1379,7 @@ impl RunnerManager {
 
     /// Common register-and-start flow (assumes already in Registering state):
     /// Downloads runner binary if needed, removes stale configuration via
-    /// `config.sh remove`, then runs `config.sh` to register before starting run.sh.
+    /// the config script's remove command, then runs the config script to register before starting the runner script.
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         self.set_auth_token(Some(auth_token.to_string())).await;
 
@@ -1385,7 +1417,7 @@ impl RunnerManager {
             .context("Failed to get registration token")?;
 
         // If already configured, deregister before re-configuring.
-        // config.sh refuses to configure an already-configured runner, so we
+        // The config script refuses to configure an already-configured runner, so we
         // must remove the old configuration first.
         if already_configured {
             let _ = remove_runner(&config.work_dir, &reg.token).await;
@@ -1406,7 +1438,7 @@ impl RunnerManager {
         .await
         .context("Failed to configure runner")?;
 
-        // Spawn run.sh
+        // Spawn the runner script (run.sh/run.cmd)
         let mut child = start_runner(&config.work_dir)
             .await
             .context("Failed to start runner process")?;
@@ -1794,31 +1826,45 @@ impl RunnerManager {
                 status = child.wait() => status,
                 _ = kill_signal.notified() => {
                     // Kill signal received — gracefully stop the entire process group.
-                    // run.sh spawns .NET child processes that hold the GitHub session,
+                    // The runner script spawns .NET child processes that hold the GitHub session,
                     // so we must signal the whole group to let them deregister cleanly.
                     if let Some(pid) = child.id() {
-                        let pgid = pid as i32;
-                        // SIGTERM the process group for graceful shutdown
-                        unsafe { libc::kill(-pgid, libc::SIGTERM); }
-
-                        // Wait up to 10s for graceful exit
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(10),
-                            child.wait(),
-                        )
-                        .await
+                        // Gracefully stop the entire process tree
+                        #[cfg(unix)]
                         {
-                            Ok(status) => status,
-                            Err(_) => {
-                                tracing::warn!(
-                                    "Runner {} did not exit gracefully, sending SIGKILL",
-                                    runner_id
-                                );
-                                unsafe {
-                                    libc::kill(-pgid, libc::SIGKILL);
+                            let pgid = pid as i32;
+                            // SIGTERM the process group for graceful shutdown
+                            unsafe { libc::kill(-pgid, libc::SIGTERM); }
+
+                            // Wait up to 10s for graceful exit
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(10),
+                                child.wait(),
+                            )
+                            .await
+                            {
+                                Ok(status) => status,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Runner {} did not exit gracefully, sending SIGKILL",
+                                        runner_id
+                                    );
+                                    unsafe {
+                                        libc::kill(-pgid, libc::SIGKILL);
+                                    }
+                                    child.wait().await
                                 }
-                                child.wait().await
                             }
+                        }
+                        #[cfg(windows)]
+                        {
+                            // On Windows, use taskkill /T to kill the process tree
+                            let _ = std::process::Command::new("taskkill")
+                                .args(["/T", "/F", "/PID", &pid.to_string()])
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                            child.wait().await
                         }
                     } else {
                         // No PID — process already exited
@@ -2556,7 +2602,7 @@ mod tests {
             .create(
                 "owner/repo",
                 Some("my-runner".to_string()),
-                Some(vec!["gpu".to_string(), "macOS".to_string()]),
+                Some(vec!["gpu".to_string(), "custom".to_string()]),
                 None,
                 None,
             )
@@ -2567,7 +2613,7 @@ mod tests {
         // User-provided labels are used as-is, no defaults merged
         assert_eq!(runner.config.labels.len(), 2);
         assert!(runner.config.labels.contains(&"gpu".to_string()));
-        assert!(runner.config.labels.contains(&"macOS".to_string()));
+        assert!(runner.config.labels.contains(&"custom".to_string()));
     }
 
     #[tokio::test]
@@ -2590,7 +2636,7 @@ mod tests {
 
         // Empty labels should fall back to platform defaults
         assert!(runner.config.labels.contains(&"self-hosted".to_string()));
-        assert!(runner.config.labels.contains(&"macOS".to_string()));
+        assert!(runner.config.labels.contains(&default_runner_labels()[1]));
     }
 
     #[tokio::test]
@@ -2607,7 +2653,7 @@ mod tests {
 
         // None labels should fall back to platform defaults
         assert!(runner.config.labels.contains(&"self-hosted".to_string()));
-        assert!(runner.config.labels.contains(&"macOS".to_string()));
+        assert!(runner.config.labels.contains(&default_runner_labels()[1]));
     }
 
     #[tokio::test]
@@ -3261,6 +3307,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_copy_dir_recursive_preserves_executable_bit() {
+        use crate::platform::process::run_script;
         use std::fs;
         #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
@@ -3269,7 +3316,7 @@ mod tests {
         let dst = tempfile::tempdir().unwrap();
 
         // Create an executable file in the source
-        let script_path = src.path().join("run.sh");
+        let script_path = src.path().join(run_script());
         fs::write(&script_path, "#!/bin/bash\necho hi").unwrap();
         #[cfg(unix)]
         {
@@ -3280,7 +3327,7 @@ mod tests {
 
         copy_dir_recursive(src.path(), dst.path()).unwrap();
 
-        let dst_script = dst.path().join("run.sh");
+        let dst_script = dst.path().join(run_script());
         assert!(dst_script.exists());
         let content = fs::read_to_string(&dst_script).unwrap();
         assert!(content.contains("echo hi"));

@@ -20,7 +20,7 @@ repos:
       - id: no-commit-to-branch
         name: no-push-to-master
         args: ["--branch", "master"]
-        stages: [pre-push]
+        stages: [push]
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
@@ -91,7 +91,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [pre-push]
+        stages: [push]
 
       - id: typescript-check
         name: tsc --noEmit

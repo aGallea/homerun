@@ -54,10 +54,30 @@ pub fn start_event_loop(
 }
 
 /// Start WebSocket event forwarding (optional — if daemon is reachable).
+#[cfg(unix)]
 pub fn start_ws_forwarding(
     tx: mpsc::UnboundedSender<AppEvent>,
     mut ws_read: futures::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+    >,
+) {
+    tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_read.next().await {
+            if let WsMessage::Text(text) = msg {
+                if tx.send(AppEvent::DaemonEvent(text.to_string())).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// Start WebSocket event forwarding (optional — if daemon is reachable).
+#[cfg(windows)]
+pub fn start_ws_forwarding(
+    tx: mpsc::UnboundedSender<AppEvent>,
+    mut ws_read: futures::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<tokio::net::windows::named_pipe::NamedPipeClient>,
     >,
 ) {
     tokio::spawn(async move {

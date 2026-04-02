@@ -48,6 +48,8 @@ pub type SharedState = Arc<RwLock<MockState>>;
 pub struct MockDaemon {
     socket_path: PathBuf,
     _tmp_dir: tempfile::TempDir,
+    #[cfg(windows)]
+    _tcp_addr: Option<std::net::SocketAddr>,
 }
 
 impl MockDaemon {
@@ -59,6 +61,12 @@ impl MockDaemon {
 
     pub fn socket_path(&self) -> &PathBuf {
         &self.socket_path
+    }
+
+    /// On Windows, returns the TCP address the mock daemon is listening on.
+    #[cfg(windows)]
+    pub fn tcp_addr(&self) -> Option<std::net::SocketAddr> {
+        self._tcp_addr
     }
 }
 
@@ -127,12 +135,30 @@ impl MockDaemonBuilder {
         let shared_state: SharedState = Arc::new(RwLock::new(self.state));
         let app = routes::create_router(shared_state);
 
-        let listener =
-            tokio::net::UnixListener::bind(&socket_path).expect("Failed to bind mock Unix socket");
+        #[cfg(unix)]
+        {
+            let listener = tokio::net::UnixListener::bind(&socket_path)
+                .expect("Failed to bind mock Unix socket");
 
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.ok();
+            });
+        }
+
+        #[cfg(windows)]
+        let tcp_addr = {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("Failed to bind mock TCP socket");
+            let addr = listener.local_addr().unwrap();
+            // Write the port to the socket_path file so clients can discover it
+            std::fs::write(&socket_path, addr.to_string())
+                .expect("Failed to write mock TCP address");
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.ok();
+            });
+            addr
+        };
 
         // Give the server a moment to start
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -140,6 +166,8 @@ impl MockDaemonBuilder {
         MockDaemon {
             socket_path,
             _tmp_dir: tmp_dir,
+            #[cfg(windows)]
+            _tcp_addr: Some(tcp_addr),
         }
     }
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// Percent-encode a string for use in a URL query parameter.
 fn url_encode(s: &str) -> String {
@@ -304,14 +306,16 @@ pub struct ChildProcessInfo {
     pub memory_bytes: u64,
 }
 
-// --- Unix socket HTTP connector ---
+// --- Platform-aware HTTP connectors ---
 
 /// A tower connector that dials a Unix socket instead of TCP.
+#[cfg(unix)]
 #[derive(Clone)]
 struct UnixConnector {
     socket_path: PathBuf,
 }
 
+#[cfg(unix)]
 impl tower::Service<hyper::Uri> for UnixConnector {
     type Response = hyper_util::rt::TokioIo<tokio::net::UnixStream>;
     type Error = std::io::Error;
@@ -335,30 +339,100 @@ impl tower::Service<hyper::Uri> for UnixConnector {
     }
 }
 
+/// A tower connector that dials a Windows named pipe instead of TCP.
+#[cfg(windows)]
+#[derive(Clone)]
+struct NamedPipeConnector {
+    pipe_name: String,
+}
+
+#[cfg(windows)]
+impl tower::Service<hyper::Uri> for NamedPipeConnector {
+    type Response = hyper_util::rt::TokioIo<tokio::net::windows::named_pipe::NamedPipeClient>;
+    type Error = std::io::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _uri: hyper::Uri) -> Self::Future {
+        let pipe_name = self.pipe_name.clone();
+        Box::pin(async move {
+            let client =
+                tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name)?;
+            Ok(hyper_util::rt::TokioIo::new(client))
+        })
+    }
+}
+
 // --- DaemonClient ---
 
 pub struct DaemonClient {
+    #[cfg(unix)]
     socket_path: PathBuf,
+    #[cfg(windows)]
+    pipe_name: String,
 }
 
 impl DaemonClient {
+    #[cfg(unix)]
     pub fn new(socket_path: PathBuf) -> Self {
         Self { socket_path }
     }
 
-    pub fn default_socket() -> Self {
-        let home = dirs::home_dir().expect("no home directory");
-        Self::new(home.join(".homerun/daemon.sock"))
+    #[cfg(windows)]
+    pub fn new_pipe(pipe_name: String) -> Self {
+        Self { pipe_name }
     }
 
-    /// Check if the daemon socket exists.
+    pub fn default_socket() -> Self {
+        #[cfg(unix)]
+        {
+            let home = dirs::home_dir().expect("no home directory");
+            Self::new(home.join(".homerun/daemon.sock"))
+        }
+        #[cfg(windows)]
+        {
+            Self::new_pipe(r"\\.\pipe\homerun-daemon".to_string())
+        }
+    }
+
+    /// Check if the daemon socket/pipe exists.
     pub fn socket_exists(&self) -> bool {
-        self.socket_path.exists()
+        #[cfg(unix)]
+        {
+            self.socket_path.exists()
+        }
+        #[cfg(windows)]
+        {
+            tokio::net::windows::named_pipe::ClientOptions::new()
+                .open(&self.pipe_name)
+                .is_ok()
+        }
     }
 
     /// Return the socket path.
+    #[cfg(unix)]
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
+    }
+
+    /// Create a new client with the same connection parameters.
+    pub fn clone_connection(&self) -> Self {
+        #[cfg(unix)]
+        {
+            Self::new(self.socket_path.clone())
+        }
+        #[cfg(windows)]
+        {
+            Self::new_pipe(self.pipe_name.clone())
+        }
     }
 
     pub async fn request(
@@ -367,13 +441,7 @@ impl DaemonClient {
         path: &str,
         body: Option<String>,
     ) -> Result<String, String> {
-        let connector = UnixConnector {
-            socket_path: self.socket_path.clone(),
-        };
-        let client: Client<UnixConnector, String> =
-            Client::builder(TokioExecutor::new()).build(connector);
-
-        // hyper requires a valid URI — the host is ignored for Unix sockets.
+        // hyper requires a valid URI — the host is ignored for Unix sockets / named pipes.
         let uri = format!("http://localhost{path}");
         let mut builder = Request::builder().method(method).uri(&uri);
         if body.is_some() {
@@ -383,10 +451,30 @@ impl DaemonClient {
             .body(body.unwrap_or_default())
             .map_err(|e| e.to_string())?;
 
-        let response = client
-            .request(req)
-            .await
-            .map_err(|e| format!("Failed to connect to daemon — is homerund running? {e}"))?;
+        #[cfg(unix)]
+        let response = {
+            let connector = UnixConnector {
+                socket_path: self.socket_path.clone(),
+            };
+            let client: Client<UnixConnector, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(req)
+                .await
+                .map_err(|e| format!("Failed to connect to daemon — is homerund running? {e}"))?
+        };
+        #[cfg(windows)]
+        let response = {
+            let connector = NamedPipeConnector {
+                pipe_name: self.pipe_name.clone(),
+            };
+            let client: Client<NamedPipeConnector, String> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            client
+                .request(req)
+                .await
+                .map_err(|e| format!("Failed to connect to daemon — is homerund running? {e}"))?
+        };
 
         let status = response.status();
         let collected = http_body_util::BodyExt::collect(response.into_body())

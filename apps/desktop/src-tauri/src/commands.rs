@@ -24,7 +24,10 @@ pub async fn start_daemon(app_handle: tauri::AppHandle) -> Result<bool, String> 
             return Err("Daemon is already running".to_string());
         }
         // Stale socket — remove it
-        let _ = std::fs::remove_file(client.socket_path());
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(client.socket_path());
+        }
     }
 
     // Spawn sidecar
@@ -55,21 +58,23 @@ pub async fn start_daemon(app_handle: tauri::AppHandle) -> Result<bool, String> 
 }
 
 /// Helper: stop the daemon (not a Tauri command — avoids State<> lifetime issues)
-async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String> {
-    let client = crate::client::DaemonClient::new(socket_path.clone());
+async fn do_stop_daemon(client: crate::client::DaemonClient) -> Result<bool, String> {
     let active_runners = match client.shutdown().await {
         Ok(count) => count,
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("launchd") || msg.contains("Uninstall the service") {
                 // Uninstall the launchd service, then retry shutdown
-                let client = crate::client::DaemonClient::new(socket_path.clone());
-                client.uninstall_service().await.map_err(|e| format!("Failed to uninstall launchd service: {e}"))?;
+                let retry_client = client.clone_connection();
+                retry_client.uninstall_service().await.map_err(|e| format!("Failed to uninstall launchd service: {e}"))?;
                 // Retry shutdown after uninstalling service
-                match client.shutdown().await {
+                match retry_client.shutdown().await {
                     Ok(count) => count,
                     Err(e2) => {
-                        let _ = std::fs::remove_file(&socket_path);
+                        #[cfg(unix)]
+                        {
+                            let _ = std::fs::remove_file(client.socket_path());
+                        }
                         let msg2 = e2.to_string();
                         if !msg2.contains("connect") {
                             return Err(format!("Failed to stop daemon after uninstalling service: {msg2}"));
@@ -79,7 +84,10 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
                 }
             } else {
                 // Already down — clean up stale socket
-                let _ = std::fs::remove_file(&socket_path);
+                #[cfg(unix)]
+                {
+                    let _ = std::fs::remove_file(client.socket_path());
+                }
                 return Ok(true);
             }
         }
@@ -88,7 +96,7 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
     let timeout_secs: u64 = 5 + if active_runners > 0 { 15 } else { 0 };
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     loop {
-        if !socket_path.exists() {
+        if !client.socket_exists() {
             return Ok(true);
         }
         if tokio::time::Instant::now() >= deadline {
@@ -100,8 +108,8 @@ async fn do_stop_daemon(socket_path: std::path::PathBuf) -> Result<bool, String>
 
 #[tauri::command]
 pub async fn stop_daemon(state: State<'_, AppState>) -> Result<bool, String> {
-    let socket_path = state.client.lock().await.socket_path().to_path_buf();
-    do_stop_daemon(socket_path).await
+    let client = state.client.lock().await.clone_connection();
+    do_stop_daemon(client).await
 }
 
 #[tauri::command]
@@ -109,8 +117,8 @@ pub async fn restart_daemon(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let socket_path = state.client.lock().await.socket_path().to_path_buf();
-    let _ = do_stop_daemon(socket_path).await;
+    let client = state.client.lock().await.clone_connection();
+    let _ = do_stop_daemon(client).await;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     start_daemon(app_handle).await
 }
@@ -119,11 +127,7 @@ pub async fn restart_daemon(
 pub async fn health_check(state: State<'_, AppState>) -> Result<bool, String> {
     // Use a fresh client to avoid mutex contention with other commands
     // that may be hanging when the daemon is down.
-    let socket_path = {
-        let client = state.client.lock().await;
-        client.socket_path().to_path_buf()
-    };
-    let check_client = crate::client::DaemonClient::new(socket_path);
+    let check_client = state.client.lock().await.clone_connection();
     match tokio::time::timeout(
         std::time::Duration::from_secs(2),
         check_client.health(),
@@ -219,13 +223,9 @@ pub async fn poll_device_flow(
     device_code: String,
     interval: u64,
 ) -> Result<AuthStatus, String> {
-    // Get the socket path, then drop the lock immediately so other commands
+    // Clone connection info, then drop the lock immediately so other commands
     // are not blocked during the long-running poll.
-    let socket_path = {
-        let client = state.client.lock().await;
-        client.socket_path().to_path_buf()
-    };
-    let poll_client = crate::client::DaemonClient::new(socket_path);
+    let poll_client = state.client.lock().await.clone_connection();
     poll_client.poll_device_flow(&device_code, interval).await
 }
 
@@ -472,17 +472,14 @@ pub async fn start_scan(
 ) -> Result<(), String> {
     use tauri::Emitter;
 
-    let client = state.client.lock().await;
-    let socket_path = client.socket_path().to_path_buf();
-    drop(client);
+    let base_client = state.client.lock().await.clone_connection();
 
     if let Some(path) = workspace_path {
         let app = app_handle.clone();
-        let sock = socket_path.clone();
+        let scan_client = base_client.clone_connection();
         tokio::spawn(async move {
-            let client = crate::client::DaemonClient::new(sock);
             let body = serde_json::json!({ "path": path }).to_string();
-            if let Ok(text) = client.request("POST", "/scan/local/stream", Some(body)).await {
+            if let Ok(text) = scan_client.request("POST", "/scan/local/stream", Some(body)).await {
                 for line in text.lines() {
                     if let Some(data) = line.strip_prefix("data: ") {
                         let _ = app.emit("scan-progress", data);
@@ -494,10 +491,9 @@ pub async fn start_scan(
 
     if authenticated {
         let app = app_handle.clone();
-        let sock = socket_path;
+        let scan_client = base_client.clone_connection();
         tokio::spawn(async move {
-            let client = crate::client::DaemonClient::new(sock);
-            if let Ok(text) = client.request("POST", "/scan/remote/stream", None).await {
+            if let Ok(text) = scan_client.request("POST", "/scan/remote/stream", None).await {
                 for line in text.lines() {
                     if let Some(data) = line.strip_prefix("data: ") {
                         let _ = app.emit("scan-progress", data);
@@ -529,11 +525,19 @@ pub async fn get_scan_results(
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn send_notification(title: String, body: String, icon_path: String) -> Result<(), String> {
-    mac_notification_sys::Notification::new()
-        .title(&title)
-        .message(&body)
-        .app_icon(&icon_path)
-        .send()
-        .map(|_| ())
-        .map_err(|e| format!("Failed to send notification: {e}"))
+    #[cfg(target_os = "macos")]
+    {
+        mac_notification_sys::Notification::new()
+            .title(&title)
+            .message(&body)
+            .app_icon(&icon_path)
+            .send()
+            .map(|_| ())
+            .map_err(|e| format!("Failed to send notification: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&title, &body, &icon_path);
+        Ok(())
+    }
 }

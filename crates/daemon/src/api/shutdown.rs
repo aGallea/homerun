@@ -6,13 +6,15 @@ use crate::server::AppState;
 pub async fn shutdown_daemon(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
-    if crate::launchd::is_daemon_installed() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(json!({
-                "error": "Daemon is managed by launchd. Uninstall the service first or use `launchctl unload`."
-            })),
-        ));
+    if crate::platform::service::is_daemon_installed() {
+        let msg = if cfg!(target_os = "macos") {
+            "Daemon is managed by launchd. Uninstall the service first or use `launchctl unload`."
+        } else if cfg!(windows) {
+            "Daemon is registered as an auto-start service. Uninstall the service first."
+        } else {
+            "Daemon is installed as a system service. Uninstall the service first."
+        };
+        return Err((StatusCode::CONFLICT, Json(json!({ "error": msg }))));
     }
 
     tracing::info!("Shutdown requested via API");
@@ -46,9 +48,14 @@ pub async fn shutdown_daemon(
         }
         futures::future::join_all(stop_futures).await;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let socket_path = state.config.read().await.socket_path();
-        if socket_path.exists() {
-            let _ = std::fs::remove_file(&socket_path);
+        // On Unix, clean up the socket file. On Windows, named pipes are
+        // kernel objects and require no file cleanup.
+        #[cfg(unix)]
+        {
+            let socket_path = state.config.read().await.socket_path();
+            if socket_path.exists() {
+                let _ = std::fs::remove_file(&socket_path);
+            }
         }
         tracing::info!("Daemon shutting down");
         std::process::exit(0);
@@ -85,7 +92,7 @@ mod tests {
         // When launchd is NOT installed, we expect ACCEPTED.
         // When launchd IS installed, we expect CONFLICT.
         // In test environments the plist is unlikely to exist, so we expect ACCEPTED.
-        if !crate::launchd::is_daemon_installed() {
+        if !crate::platform::service::is_daemon_installed() {
             assert_eq!(response.status(), StatusCode::ACCEPTED);
         } else {
             assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -108,13 +115,13 @@ mod tests {
             .await
             .unwrap();
 
-        if crate::launchd::is_daemon_installed() {
+        if crate::platform::service::is_daemon_installed() {
             assert_eq!(response.status(), StatusCode::CONFLICT);
             let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
             let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(json["error"].as_str().unwrap().contains("launchd"));
+            assert!(json["error"].as_str().unwrap().contains("service"));
         } else {
             // If launchd is not installed, shutdown should be allowed
             assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -123,7 +130,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_returns_active_runners_count() {
-        if crate::launchd::is_daemon_installed() {
+        if crate::platform::service::is_daemon_installed() {
             return; // Skip — shutdown blocked by launchd
         }
         let app = create_router(AppState::new_test());
