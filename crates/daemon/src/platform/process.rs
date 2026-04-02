@@ -208,7 +208,6 @@ pub async fn kill_orphaned_processes(runner_dir: &Path) {
 
 #[cfg(unix)]
 pub fn configure_process_group(cmd: &mut tokio::process::Command) {
-    use std::os::unix::process::CommandExt;
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();
