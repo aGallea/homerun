@@ -1814,7 +1814,22 @@ impl RunnerManager {
             });
         }
 
-        // 5d. Spawn step-watcher polling task
+        // 5d. On Windows, stdout piping through cmd.exe wrappers is unreliable
+        // (Runner.Listener.exe output doesn't flow through the piped cmd.exe stdout).
+        // Spawn diag log tailing as the primary job-event detection mechanism.
+        #[cfg(windows)]
+        {
+            let mgr = self.clone();
+            let rid = id.to_string();
+            let diag_dir = config.work_dir.join("_diag");
+            let wd = config.work_dir.clone();
+            let sw = self.step_watcher.clone();
+            tokio::spawn(async move {
+                Self::tail_diag_logs(mgr, &rid, &diag_dir, &wd, sw).await;
+            });
+        }
+
+        // 5e. Spawn step-watcher polling task
         {
             let step_watcher = self.step_watcher.clone();
             let rid = id.to_string();
