@@ -17,21 +17,30 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install Node dependencies
         run: cd apps/desktop && npm ci
 
       - name: Run React tests with coverage
         run: cd apps/desktop && npm run test:coverage
 
-      - name: Install cargo-llvm-cov
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust toolchain to PATH
         run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
+          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
+          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+
+      - name: Install cargo-llvm-cov
+        run: which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet
 
       - name: Run tests with coverage
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | tee coverage-summary.txt
+        run: cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | tee coverage-summary.txt
 
       - name: Update badge
         env:
