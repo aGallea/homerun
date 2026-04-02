@@ -29,11 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Add Rust toolchain and Git to PATH
         run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
           TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
           echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
           # Ensure git.exe is in PATH for pre-commit on Windows
@@ -118,13 +116,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Add Rust toolchain to PATH
         run: |
-          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
-          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          echo "$(dirname "$(rustup which rustc)")" >> $GITHUB_PATH
 
       - name: Ensure Rust is available
         run: |
