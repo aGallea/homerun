@@ -22,39 +22,102 @@ pub fn resolve_shell_path() -> Option<String> {
 
 /// On Windows the system PATH is usually inherited from the environment,
 /// but the daemon may start before the full PATH is available (e.g. after
-/// a reboot).  We ensure essential directories are on the PATH so that
-/// GitHub Actions runners can find bash, pwsh, node, etc.
+/// a reboot or when launched from the desktop app).  We dynamically discover
+/// tool locations and ensure essential directories are on the PATH so that
+/// GitHub Actions runners can find bash, git, pwsh, etc.
 #[cfg(windows)]
 pub fn resolve_shell_path() -> Option<String> {
+    use std::path::PathBuf;
+
     let current = std::env::var("PATH").unwrap_or_default();
     let current_lower: Vec<String> = current.split(';').map(|p| p.to_lowercase()).collect();
 
-    // Directories that runners commonly need but may be missing after reboot
-    let essential_dirs = [
-        r"C:\Program Files\Git\bin",
-        r"C:\Program Files\Git\cmd",
-        r"C:\Program Files\PowerShell\7",
+    let mut essential_dirs: Vec<PathBuf> = Vec::new();
+
+    // Discover Git install location from the registry, then derive
+    // the subdirectories that runners need (bin, usr\bin, cmd).
+    if let Some(git_root) = find_git_install_dir() {
+        for subdir in &["bin", "usr\\bin", "cmd"] {
+            essential_dirs.push(git_root.join(subdir));
+        }
+    }
+
+    // PowerShell directories (system-known locations).
+    essential_dirs.push(PathBuf::from(
         r"C:\Windows\System32\WindowsPowerShell\v1.0",
-    ];
+    ));
+    // PowerShell 7 can be installed anywhere, but the default is:
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        essential_dirs.push(PathBuf::from(pf).join("PowerShell\\7"));
+    }
 
-    let mut additions = Vec::new();
+    let mut path = current;
     for dir in &essential_dirs {
-        if !current_lower.iter().any(|p| p == &dir.to_lowercase())
-            && std::path::Path::new(dir).is_dir()
+        let dir_str = dir.to_string_lossy();
+        if !current_lower
+            .iter()
+            .any(|p| p == &dir_str.to_lowercase())
+            && dir.is_dir()
         {
-            additions.push(*dir);
+            path = format!("{path};{dir_str}");
         }
     }
 
-    if additions.is_empty() {
-        None
-    } else {
-        let mut path = current;
-        for dir in additions {
-            path = format!("{path};{dir}");
+    // Always return Some so the runner process gets an explicit PATH,
+    // even when no additions were needed — this prevents the runner from
+    // inheriting a stripped-down environment.
+    Some(path)
+}
+
+/// Find the Git installation directory on Windows by checking the registry
+/// and falling back to well-known locations.
+#[cfg(windows)]
+fn find_git_install_dir() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+
+    // Try the Windows registry (works from native Windows processes).
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\GitForWindows",
+            "/v",
+            "InstallPath",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        // Output line looks like: "    InstallPath    REG_SZ    C:\Program Files\Git"
+        if let Some(pos) = line.find("REG_SZ") {
+            let path = line[pos + "REG_SZ".len()..].trim();
+            if !path.is_empty() {
+                let p = PathBuf::from(path);
+                if p.is_dir() {
+                    return Some(p);
+                }
+            }
         }
-        Some(path)
     }
+
+    // Fallback: check well-known locations
+    for candidate in &[
+        std::env::var("ProgramFiles")
+            .unwrap_or_else(|_| r"C:\Program Files".to_string())
+            + r"\Git",
+        r"C:\Program Files\Git".to_string(),
+        r"C:\Program Files (x86)\Git".to_string(),
+    ] {
+        let p = PathBuf::from(candidate);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+
+    None
 }
 
 /// Cached shell PATH resolved once at first use.
@@ -78,18 +141,13 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn resolve_shell_path_includes_git_bash_on_windows() {
-        // On a Windows machine with Git installed, the result should
-        // either be None (Git\bin already on PATH) or Some containing
-        // the Git\bin path.
+    fn resolve_shell_path_always_returns_some_on_windows() {
+        // On Windows, resolve_shell_path always returns Some so that the
+        // runner process gets an explicit PATH.
         let result = resolve_shell_path();
-        if let Some(ref path) = result {
-            assert!(
-                path.contains(r"Git\bin"),
-                "expected Git\\bin in resolved PATH"
-            );
-        }
-        // If None, Git\bin is already on PATH — also acceptable
+        assert!(result.is_some(), "expected Some on Windows, got None");
+        let path = result.unwrap();
+        assert!(!path.is_empty());
     }
 
     #[cfg(unix)]
