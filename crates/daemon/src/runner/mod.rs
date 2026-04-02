@@ -733,9 +733,7 @@ impl RunnerManager {
             if current_log.as_ref() != Some(&log_path) {
                 if needs_initial_seek {
                     // First time: skip to end of existing file
-                    file_offset = std::fs::metadata(&log_path)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
+                    file_offset = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
                     needs_initial_seek = false;
                 } else {
                     // New log file appeared mid-run — read from the start
@@ -809,8 +807,7 @@ impl RunnerManager {
                         let rid_poll = runner_id.to_string();
                         tokio::spawn(async move {
                             loop {
-                                tokio::time::sleep(std::time::Duration::from_millis(500))
-                                    .await;
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                                 if !sw.poll(&rid_poll).await {
                                     break;
                                 }
@@ -861,19 +858,15 @@ impl RunnerManager {
                                         r.job_context.as_ref().and_then(|c| c.job_id),
                                     )
                                 });
-                                if let Some((owner, repo, runner_name, job_name, job_id)) =
-                                    info
-                                {
+                                if let Some((owner, repo, runner_name, job_name, job_id)) = info {
                                     let token = manager.auth_token.read().await.clone();
                                     if let Some(token) = token {
                                         if let Ok(gh) =
                                             crate::github::GitHubClient::new(Some(token))
                                         {
                                             let msg = if let Some(jid) = job_id {
-                                                gh.get_annotations_by_job_id(
-                                                    &owner, &repo, jid,
-                                                )
-                                                .await
+                                                gh.get_annotations_by_job_id(&owner, &repo, jid)
+                                                    .await
                                             } else {
                                                 gh.get_job_failure_message(
                                                     &owner,
@@ -912,29 +905,20 @@ impl RunnerManager {
                             if let Some(r) = map.get_mut(runner_id) {
                                 let now = chrono::Utc::now();
                                 let started_at = r.job_started_at.unwrap_or(now);
-                                let duration_secs =
-                                    (now - started_at).num_seconds().max(0) as u64;
+                                let duration_secs = (now - started_at).num_seconds().max(0) as u64;
 
                                 let entry = types::JobHistoryEntry {
                                     job_name: r.current_job.clone().unwrap_or_default(),
                                     started_at,
                                     completed_at: now,
                                     succeeded,
-                                    branch: r
-                                        .job_context
-                                        .as_ref()
-                                        .map(|c| c.branch.clone()),
-                                    pr_number: r
-                                        .job_context
-                                        .as_ref()
-                                        .and_then(|c| c.pr_number),
-                                    run_url: r.job_context.as_ref().map(|c| {
-                                        match c.job_id {
-                                            Some(job_id) => {
-                                                format!("{}/job/{}", c.run_url, job_id)
-                                            }
-                                            None => c.run_url.clone(),
+                                    branch: r.job_context.as_ref().map(|c| c.branch.clone()),
+                                    pr_number: r.job_context.as_ref().and_then(|c| c.pr_number),
+                                    run_url: r.job_context.as_ref().map(|c| match c.job_id {
+                                        Some(job_id) => {
+                                            format!("{}/job/{}", c.run_url, job_id)
                                         }
+                                        None => c.run_url.clone(),
                                     }),
                                     error_message: error_message.clone(),
                                     steps,
