@@ -679,6 +679,15 @@ impl RunnerManager {
 
     /// Tail the latest Runner_*.log in the _diag directory to detect job events
     /// for reattached (orphaned) runners whose stdout we can't read.
+    /// Tail the latest Runner_*.log in `_diag/` using offset-based polling.
+    ///
+    /// This is the primary job-event detection mechanism on Windows, where
+    /// Runner.Listener.exe output doesn't flow through the piped cmd.exe
+    /// stdout. It also runs for reattached (orphaned) runners on all platforms.
+    ///
+    /// Uses synchronous file reads + offset tracking (like `WorkerLogWatcher`)
+    /// instead of async `BufReader::lines()`, which doesn't reliably pick up
+    /// data appended after EOF on regular files.
     async fn tail_diag_logs(
         manager: Self,
         runner_id: &str,
@@ -686,286 +695,289 @@ impl RunnerManager {
         work_dir: &std::path::Path,
         step_watcher: WorkerLogWatcher,
     ) {
-        use tokio::io::{AsyncBufReadExt, BufReader};
+        let mut current_log: Option<std::path::PathBuf> = None;
+        let mut file_offset: u64 = 0;
+        // Start by skipping existing content so we only process new lines
+        let mut needs_initial_seek = true;
 
         loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            // Check if runner still exists
+            {
+                let map = manager.runners.read().await;
+                if !map.contains_key(runner_id) {
+                    break;
+                }
+            }
+
             // Find the latest Runner_*.log
             let latest = match std::fs::read_dir(diag_dir) {
                 Ok(entries) => entries
                     .filter_map(|e| e.ok())
                     .filter(|e| e.file_name().to_string_lossy().starts_with("Runner_"))
-                    .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok())),
-                Err(_) => break,
-            };
-
-            let log_path = match latest {
-                Some(entry) => entry.path(),
-                None => {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()))
+                    .map(|e| e.path()),
+                Err(_) => {
+                    // _diag dir doesn't exist yet — runner still starting, keep waiting
                     continue;
                 }
             };
 
-            // Seek to end and tail new lines
-            let file = match tokio::fs::File::open(&log_path).await {
-                Ok(f) => f,
-                Err(_) => break,
+            let log_path = match latest {
+                Some(p) => p,
+                None => continue, // No Runner_*.log yet
             };
-            // Seek to end
-            let metadata = match file.metadata().await {
-                Ok(m) => m,
-                Err(_) => break,
-            };
-            let file_len = metadata.len();
-            let file = match tokio::fs::File::open(&log_path).await {
-                Ok(f) => f,
-                Err(_) => break,
-            };
-            let reader = BufReader::new(file);
-            let mut lines = reader.lines();
-            // Skip to end
-            let mut skipped = 0u64;
-            while skipped < file_len {
-                match lines.next_line().await {
-                    Ok(Some(line)) => skipped += line.len() as u64 + 1,
-                    _ => break,
+
+            // If a newer log file appeared, switch to it
+            if current_log.as_ref() != Some(&log_path) {
+                if needs_initial_seek {
+                    // First time: skip to end of existing file
+                    file_offset = std::fs::metadata(&log_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    needs_initial_seek = false;
+                } else {
+                    // New log file appeared mid-run — read from the start
+                    file_offset = 0;
                 }
+                current_log = Some(log_path.clone());
             }
 
-            // Now tail new lines
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => {
-                        // Broadcast as a log entry for the runner process logs
-                        if let Some(idx) = line.find("WRITE LINE: ") {
-                            let stdout_line = &line[idx + "WRITE LINE: ".len()..];
-                            let entry = LogEntry {
-                                runner_id: runner_id.to_string(),
-                                timestamp: chrono::Utc::now(),
-                                line: stdout_line.to_string(),
-                                stream: "stdout".to_string(),
-                            };
-                            let _ = manager.log_tx.send(entry.clone());
-                            {
-                                let mut map = manager.recent_logs.write().await;
-                                let dq = map
-                                    .entry(runner_id.to_string())
-                                    .or_insert_with(VecDeque::new);
-                                dq.push_back(entry);
-                                if dq.len() > RECENT_LOGS_MAX {
-                                    dq.pop_front();
+            // Read new content from offset
+            let content = match std::fs::read_to_string(&log_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let content_len = content.len() as u64;
+            if content_len <= file_offset {
+                continue; // No new data
+            }
+
+            let new_text = &content[file_offset as usize..];
+            file_offset = content_len;
+
+            for line in new_text.lines() {
+                // Broadcast as a log entry for the runner process logs
+                if let Some(idx) = line.find("WRITE LINE: ") {
+                    let stdout_line = &line[idx + "WRITE LINE: ".len()..];
+                    let entry = LogEntry {
+                        runner_id: runner_id.to_string(),
+                        timestamp: chrono::Utc::now(),
+                        line: stdout_line.to_string(),
+                        stream: "stdout".to_string(),
+                    };
+                    let _ = manager.log_tx.send(entry.clone());
+                    {
+                        let mut map = manager.recent_logs.write().await;
+                        let dq = map
+                            .entry(runner_id.to_string())
+                            .or_insert_with(VecDeque::new);
+                        dq.push_back(entry);
+                        if dq.len() > RECENT_LOGS_MAX {
+                            dq.pop_front();
+                        }
+                    }
+                }
+
+                // Extract job event payload
+                let payload = if let Some(idx) = line.find("WRITE LINE: ") {
+                    &line[idx + "WRITE LINE: ".len()..]
+                } else {
+                    line
+                };
+
+                match parse_job_event(payload) {
+                    Some(JobEvent::Started(job_name)) => {
+                        {
+                            let mut map = manager.runners.write().await;
+                            if let Some(r) = map.get_mut(runner_id) {
+                                r.state = RunnerState::Busy;
+                                r.current_job = Some(job_name.clone());
+                                r.job_started_at = Some(chrono::Utc::now());
+                                r.last_completed_job = None;
+                            }
+                        }
+                        manager.emit_state_event(runner_id, "busy");
+                        let _ = manager.save_to_disk().await;
+                        step_watcher
+                            .start_watching(runner_id, &job_name, work_dir)
+                            .await;
+                        // Spawn step-watcher polling task
+                        let sw = step_watcher.clone();
+                        let rid_poll = runner_id.to_string();
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_millis(500))
+                                    .await;
+                                if !sw.poll(&rid_poll).await {
+                                    break;
                                 }
+                            }
+                        });
+                    }
+                    Some(JobEvent::Completed { succeeded, result }) => {
+                        // Capture steps before stopping the watcher
+                        let steps = step_watcher
+                            .get_steps(runner_id)
+                            .await
+                            .map(|s| s.steps)
+                            .unwrap_or_default();
+                        step_watcher.stop_watching(runner_id).await;
+
+                        // Fetch job context if the poller didn't get it in time
+                        let fetched_ctx = {
+                            let has_ctx = manager
+                                .runners
+                                .read()
+                                .await
+                                .get(runner_id)
+                                .is_some_and(|r| r.job_context.is_some());
+                            if has_ctx {
+                                None
+                            } else {
+                                manager.fetch_missing_job_context(runner_id).await
+                            }
+                        };
+                        if let Some(ctx) = &fetched_ctx {
+                            let mut map = manager.runners.write().await;
+                            if let Some(r) = map.get_mut(runner_id) {
+                                r.job_context = Some(ctx.clone());
                             }
                         }
 
-                        // Runner_*.log lines contain "WRITE LINE: <timestamp>: Running job: ..."
-                        // Extract the part after "WRITE LINE: "
-                        let payload = if let Some(idx) = line.find("WRITE LINE: ") {
-                            &line[idx + "WRITE LINE: ".len()..]
+                        let error_message = if succeeded {
+                            None
                         } else {
-                            &line
-                        };
-
-                        match parse_job_event(payload) {
-                            Some(JobEvent::Started(job_name)) => {
-                                {
-                                    let mut map = manager.runners.write().await;
-                                    if let Some(r) = map.get_mut(runner_id) {
-                                        r.state = RunnerState::Busy;
-                                        r.current_job = Some(job_name.clone());
-                                        r.job_started_at = Some(chrono::Utc::now());
-                                        r.last_completed_job = None;
-                                    }
-                                }
-                                manager.emit_state_event(runner_id, "busy");
-                                let _ = manager.save_to_disk().await;
-                                step_watcher
-                                    .start_watching(runner_id, &job_name, work_dir)
-                                    .await;
-                                // Spawn step-watcher polling task
-                                let sw = step_watcher.clone();
-                                let rid_poll = runner_id.to_string();
-                                tokio::spawn(async move {
-                                    loop {
-                                        tokio::time::sleep(std::time::Duration::from_millis(500))
-                                            .await;
-                                        if !sw.poll(&rid_poll).await {
-                                            break;
-                                        }
-                                    }
+                            let annotation_msg = {
+                                let map = manager.runners.read().await;
+                                let info = map.get(runner_id).map(|r| {
+                                    (
+                                        r.config.repo_owner.clone(),
+                                        r.config.repo_name.clone(),
+                                        r.config.name.clone(),
+                                        r.current_job.clone().unwrap_or_default(),
+                                        r.job_context.as_ref().and_then(|c| c.job_id),
+                                    )
                                 });
-                            }
-                            Some(JobEvent::Completed { succeeded, result }) => {
-                                // Capture steps before stopping the watcher
-                                let steps = step_watcher
-                                    .get_steps(runner_id)
-                                    .await
-                                    .map(|s| s.steps)
-                                    .unwrap_or_default();
-                                step_watcher.stop_watching(runner_id).await;
-
-                                // Fetch job context if the poller didn't get it in time
-                                let fetched_ctx = {
-                                    let has_ctx = manager
-                                        .runners
-                                        .read()
-                                        .await
-                                        .get(runner_id)
-                                        .is_some_and(|r| r.job_context.is_some());
-                                    if has_ctx {
-                                        None
-                                    } else {
-                                        manager.fetch_missing_job_context(runner_id).await
-                                    }
-                                };
-                                if let Some(ctx) = &fetched_ctx {
-                                    let mut map = manager.runners.write().await;
-                                    if let Some(r) = map.get_mut(runner_id) {
-                                        r.job_context = Some(ctx.clone());
-                                    }
-                                }
-
-                                let error_message = if succeeded {
-                                    None
-                                } else {
-                                    // Try to fetch the full error message from GitHub annotations.
-                                    // Prefer direct job_id lookup (avoids matching wrong run under
-                                    // concurrency cancellation), fall back to search if unavailable.
-                                    let annotation_msg = {
-                                        let map = manager.runners.read().await;
-                                        let info = map.get(runner_id).map(|r| {
-                                            (
-                                                r.config.repo_owner.clone(),
-                                                r.config.repo_name.clone(),
-                                                r.config.name.clone(),
-                                                r.current_job.clone().unwrap_or_default(),
-                                                r.job_context.as_ref().and_then(|c| c.job_id),
-                                            )
-                                        });
-                                        if let Some((owner, repo, runner_name, job_name, job_id)) =
-                                            info
+                                if let Some((owner, repo, runner_name, job_name, job_id)) =
+                                    info
+                                {
+                                    let token = manager.auth_token.read().await.clone();
+                                    if let Some(token) = token {
+                                        if let Ok(gh) =
+                                            crate::github::GitHubClient::new(Some(token))
                                         {
-                                            let token = manager.auth_token.read().await.clone();
-                                            if let Some(token) = token {
-                                                if let Ok(gh) =
-                                                    crate::github::GitHubClient::new(Some(token))
-                                                {
-                                                    let msg = if let Some(jid) = job_id {
-                                                        gh.get_annotations_by_job_id(
-                                                            &owner, &repo, jid,
-                                                        )
-                                                        .await
-                                                    } else {
-                                                        gh.get_job_failure_message(
-                                                            &owner,
-                                                            &repo,
-                                                            &runner_name,
-                                                            &job_name,
-                                                        )
-                                                        .await
-                                                    };
-                                                    match msg {
-                                                        Ok(msg) => {
-                                                            tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
-                                                            msg
-                                                        }
-                                                        Err(e) => {
-                                                            tracing::warn!("Failed to fetch job annotations for {runner_name}: {e}");
-                                                            None
-                                                        }
-                                                    }
-                                                } else {
+                                            let msg = if let Some(jid) = job_id {
+                                                gh.get_annotations_by_job_id(
+                                                    &owner, &repo, jid,
+                                                )
+                                                .await
+                                            } else {
+                                                gh.get_job_failure_message(
+                                                    &owner,
+                                                    &repo,
+                                                    &runner_name,
+                                                    &job_name,
+                                                )
+                                                .await
+                                            };
+                                            match msg {
+                                                Ok(msg) => {
+                                                    tracing::info!("Annotation fetch result for {runner_name}: {msg:?}");
+                                                    msg
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!("Failed to fetch job annotations for {runner_name}: {e}");
                                                     None
                                                 }
-                                            } else {
-                                                None
                                             }
                                         } else {
                                             None
                                         }
-                                    };
-                                    Some(annotation_msg.unwrap_or(result))
-                                };
-
-                                // Build history entry and update runner state
-                                let history_entry = {
-                                    let mut map = manager.runners.write().await;
-                                    if let Some(r) = map.get_mut(runner_id) {
-                                        let now = chrono::Utc::now();
-                                        let started_at = r.job_started_at.unwrap_or(now);
-                                        let duration_secs =
-                                            (now - started_at).num_seconds().max(0) as u64;
-
-                                        let entry = types::JobHistoryEntry {
-                                            job_name: r.current_job.clone().unwrap_or_default(),
-                                            started_at,
-                                            completed_at: now,
-                                            succeeded,
-                                            branch: r
-                                                .job_context
-                                                .as_ref()
-                                                .map(|c| c.branch.clone()),
-                                            pr_number: r
-                                                .job_context
-                                                .as_ref()
-                                                .and_then(|c| c.pr_number),
-                                            run_url: r.job_context.as_ref().map(|c| {
-                                                match c.job_id {
-                                                    Some(job_id) => {
-                                                        format!("{}/job/{}", c.run_url, job_id)
-                                                    }
-                                                    None => c.run_url.clone(),
-                                                }
-                                            }),
-                                            error_message: error_message.clone(),
-                                            steps,
-                                            latest_attempt: None,
-                                            job_number: 0,
-                                        };
-
-                                        r.last_completed_job = Some(types::CompletedJob {
-                                            job_name: entry.job_name.clone(),
-                                            succeeded,
-                                            completed_at: now,
-                                            duration_secs,
-                                            branch: entry.branch.clone(),
-                                            pr_number: entry.pr_number,
-                                            run_url: entry.run_url.clone(),
-                                            error_message: error_message.clone(),
-                                            latest_attempt: None,
-                                        });
-
-                                        if succeeded {
-                                            r.jobs_completed += 1;
-                                        } else {
-                                            r.jobs_failed += 1;
-                                        }
-                                        r.state = RunnerState::Online;
-                                        r.current_job = None;
-                                        r.job_context = None;
-                                        r.job_started_at = None;
-
-                                        let runner_name = r.config.name.clone();
-                                        Some((entry, runner_name, duration_secs))
                                     } else {
                                         None
                                     }
+                                } else {
+                                    None
+                                }
+                            };
+                            Some(annotation_msg.unwrap_or(result))
+                        };
+
+                        // Build history entry and update runner state
+                        let history_entry = {
+                            let mut map = manager.runners.write().await;
+                            if let Some(r) = map.get_mut(runner_id) {
+                                let now = chrono::Utc::now();
+                                let started_at = r.job_started_at.unwrap_or(now);
+                                let duration_secs =
+                                    (now - started_at).num_seconds().max(0) as u64;
+
+                                let entry = types::JobHistoryEntry {
+                                    job_name: r.current_job.clone().unwrap_or_default(),
+                                    started_at,
+                                    completed_at: now,
+                                    succeeded,
+                                    branch: r
+                                        .job_context
+                                        .as_ref()
+                                        .map(|c| c.branch.clone()),
+                                    pr_number: r
+                                        .job_context
+                                        .as_ref()
+                                        .and_then(|c| c.pr_number),
+                                    run_url: r.job_context.as_ref().map(|c| {
+                                        match c.job_id {
+                                            Some(job_id) => {
+                                                format!("{}/job/{}", c.run_url, job_id)
+                                            }
+                                            None => c.run_url.clone(),
+                                        }
+                                    }),
+                                    error_message: error_message.clone(),
+                                    steps,
+                                    latest_attempt: None,
+                                    job_number: 0,
                                 };
 
-                                if let Some((entry, _runner_name, _duration_secs)) = history_entry {
-                                    manager.record_job_history(runner_id, entry).await;
+                                r.last_completed_job = Some(types::CompletedJob {
+                                    job_name: entry.job_name.clone(),
+                                    succeeded,
+                                    completed_at: now,
+                                    duration_secs,
+                                    branch: entry.branch.clone(),
+                                    pr_number: entry.pr_number,
+                                    run_url: entry.run_url.clone(),
+                                    error_message: error_message.clone(),
+                                    latest_attempt: None,
+                                });
+
+                                if succeeded {
+                                    r.jobs_completed += 1;
+                                } else {
+                                    r.jobs_failed += 1;
                                 }
-                                manager.emit_state_event(runner_id, "online");
-                                let _ = manager.save_to_disk().await;
+                                r.state = RunnerState::Online;
+                                r.current_job = None;
+                                r.job_context = None;
+                                r.job_started_at = None;
+
+                                let runner_name = r.config.name.clone();
+                                Some((entry, runner_name, duration_secs))
+                            } else {
+                                None
                             }
-                            None => {}
+                        };
+
+                        if let Some((entry, _runner_name, _duration_secs)) = history_entry {
+                            manager.record_job_history(runner_id, entry).await;
                         }
+                        manager.emit_state_event(runner_id, "online");
+                        let _ = manager.save_to_disk().await;
                     }
-                    Ok(None) => {
-                        // EOF — wait and retry
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    }
-                    Err(_) => break,
+                    None => {}
                 }
             }
         }
