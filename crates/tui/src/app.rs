@@ -37,6 +37,7 @@ pub enum DisplayItem {
         name_prefix: String,
         runner_count: usize,
         status_summary: HashMap<String, usize>,
+        jobs_active: usize,
     },
     RunnerRow {
         runner_index: usize,
@@ -250,10 +251,14 @@ impl App {
                 .unwrap_or_else(|| first_runner.config.name.clone());
 
             let mut status_summary = HashMap::new();
+            let mut jobs_active = 0usize;
             for &idx in indices {
                 *status_summary
                     .entry(self.runners[idx].state.clone())
                     .or_insert(0) += 1;
+                if self.runners[idx].state == "busy" && self.runners[idx].current_job.is_some() {
+                    jobs_active += 1;
+                }
             }
 
             items.push(DisplayItem::GroupRow {
@@ -261,6 +266,7 @@ impl App {
                 name_prefix,
                 runner_count: indices.len(),
                 status_summary,
+                jobs_active,
             });
 
             if self.expanded_groups.contains(group_id) {
@@ -732,6 +738,7 @@ mod tests {
             job_context: None,
             job_started_at: None,
             estimated_job_duration_secs: None,
+            last_completed_job: None,
         }
     }
 

@@ -119,6 +119,7 @@ async fn create_runner(
         job_context: None,
         job_started_at: None,
         estimated_job_duration_secs: None,
+        last_completed_job: None,
     };
 
     state.write().await.runners.push(runner.clone());

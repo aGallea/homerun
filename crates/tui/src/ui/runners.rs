@@ -29,6 +29,66 @@ fn state_color(state: &str) -> Color {
     }
 }
 
+/// Build the status spans shown after the runner name in the list.
+/// - Busy: shows the current job name (and progress % if available)
+/// - Online with last job: shows result icon + job name + duration
+/// - Otherwise: shows the state name
+fn runner_status_spans(runner: &RunnerInfo) -> Vec<Span<'static>> {
+    if runner.state == "busy" {
+        if let Some(ref job) = runner.current_job {
+            let mut spans = vec![Span::styled(
+                format!(" \u{27F3} {job}"),
+                Style::default().fg(Color::Yellow),
+            )];
+            // Show progress percentage if we have timing data
+            if let (Some(ref started_str), Some(estimate)) =
+                (&runner.job_started_at, runner.estimated_job_duration_secs)
+            {
+                if estimate > 0 {
+                    if let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_str) {
+                        let elapsed = (chrono::Utc::now() - started.with_timezone(&chrono::Utc))
+                            .num_seconds()
+                            .max(0) as u64;
+                        let pct = ((elapsed as f64 / estimate as f64) * 100.0).min(100.0) as u16;
+                        spans.push(Span::styled(
+                            format!(" {pct}%"),
+                            Style::default().fg(Color::DarkGray),
+                        ));
+                    }
+                }
+            }
+            return spans;
+        }
+        return vec![Span::styled(
+            " (busy)".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )];
+    }
+
+    if runner.state == "online" {
+        if let Some(ref last) = runner.last_completed_job {
+            let (icon, color) = if last.succeeded {
+                ("\u{2713}", Color::Green)
+            } else {
+                ("\u{2717}", Color::Red)
+            };
+            let dur = format_duration(last.duration_secs);
+            return vec![
+                Span::styled(format!(" {icon}"), Style::default().fg(color)),
+                Span::styled(
+                    format!(" {} {dur}", last.job_name),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ];
+        }
+    }
+
+    vec![Span::styled(
+        format!(" ({})", runner.state),
+        Style::default().fg(Color::DarkGray),
+    )]
+}
+
 fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
     // Determine how many runners are in each group for tree markers
     // We need to know if a runner is the last child in its group
@@ -57,6 +117,7 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
                 name_prefix,
                 runner_count,
                 status_summary,
+                jobs_active,
             } => {
                 let expanded = app.expanded_groups.contains(group_id);
                 let arrow = if expanded { "▼" } else { "▶" };
@@ -85,6 +146,14 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
                     ));
                 }
 
+                // Show active job count when runners are busy
+                if *jobs_active > 0 {
+                    spans.push(Span::styled(
+                        format!("\u{27F3}×{jobs_active}"),
+                        Style::default().fg(Color::Yellow),
+                    ));
+                }
+
                 ListItem::new(Line::from(spans))
             }
             DisplayItem::RunnerRow {
@@ -93,6 +162,9 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
             } => {
                 let runner = &app.runners[*runner_index];
                 let status_color = state_color(&runner.state);
+
+                // Build status suffix based on runner state
+                let status_spans = runner_status_spans(runner);
 
                 if let Some(gid) = group_id {
                     let pos = group_positions.entry(gid.clone()).or_insert(0);
@@ -105,27 +177,23 @@ fn draw_runner_list(f: &mut Frame, app: &App, area: Rect) {
                         "├─"
                     };
 
-                    ListItem::new(Line::from(vec![
+                    let mut spans = vec![
                         Span::styled(
                             format!("  {tree_marker} "),
                             Style::default().fg(Color::DarkGray),
                         ),
                         Span::styled("● ", Style::default().fg(status_color)),
                         Span::raw(runner.config.name.as_str()),
-                        Span::styled(
-                            format!(" ({})", runner.state),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]))
+                    ];
+                    spans.extend(status_spans);
+                    ListItem::new(Line::from(spans))
                 } else {
-                    ListItem::new(Line::from(vec![
+                    let mut spans = vec![
                         Span::styled("● ", Style::default().fg(status_color)),
                         Span::raw(runner.config.name.as_str()),
-                        Span::styled(
-                            format!(" ({})", runner.state),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]))
+                    ];
+                    spans.extend(status_spans);
+                    ListItem::new(Line::from(spans))
                 }
             }
         })
@@ -166,6 +234,7 @@ fn draw_runner_detail(f: &mut Frame, app: &App, area: Rect) {
             name_prefix,
             runner_count,
             status_summary,
+            ..
         }) => {
             let s = format_group_detail(group_id, name_prefix, *runner_count, status_summary);
             let lines: Vec<Line> = s.lines().map(|l| Line::from(l.to_string())).collect();
@@ -554,6 +623,7 @@ mod tests {
             job_context: None,
             job_started_at: None,
             estimated_job_duration_secs: None,
+            last_completed_job: None,
         }
     }
 

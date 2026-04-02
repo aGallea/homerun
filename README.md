@@ -139,14 +139,30 @@ cd homerun
 make setup        # checks prerequisites, builds daemon + TUI, installs frontend deps
 ```
 
+**Windows:**
+
+```powershell
+# Daemon + TUI (release binaries)
+cargo build --release -p homerund -p homerun
+
+# MSI installer (copies the daemon sidecar, builds the frontend, and packages the MSI)
+copy target\release\homerund.exe apps\desktop\src-tauri\binaries\homerund-x86_64-pc-windows-msvc.exe
+cd apps\desktop
+npm install
+npx tauri build
+# Output: apps\desktop\src-tauri\target\release\bundle\msi\HomeRun_<version>_x64_en-US.msi
+```
+
 **Any platform (manual build):**
 
 ```sh
 # Daemon + TUI
 cargo build --release -p homerund -p homerun
 
-# Desktop app (requires Node.js)
-cd apps/desktop && npm install && npm run tauri build
+# Desktop app (requires Node.js — builds DMG on macOS, MSI + NSIS on Windows)
+cargo build --release -p homerund
+cp target/release/homerund$(rustc -vV | grep host | cut -d' ' -f2 | sed 's/^/-/') apps/desktop/src-tauri/binaries/
+cd apps/desktop && npm install && npx tauri build
 ```
 
 ### Run
@@ -165,9 +181,17 @@ make desktop            # or: cd apps/desktop && npm run tauri dev
 homerun --no-tui list
 ```
 
-> **Note:** The desktop app's DMG release bundles the daemon inside the app. When building from source, start the daemon separately before launching the desktop app.
+On Windows (PowerShell):
 
-Run `make help` to see all available commands.
+```powershell
+.\target\release\homerund.exe         # start daemon
+.\target\release\homerun.exe          # launch TUI
+.\target\release\homerun.exe --no-tui list   # CLI mode
+```
+
+> **Note:** The desktop app release bundles the daemon inside the app (DMG on macOS, MSI on Windows). When building from source, start the daemon separately before launching the desktop app.
+
+Run `make help` (macOS) to see all available commands.
 
 ## Screenshots
 
