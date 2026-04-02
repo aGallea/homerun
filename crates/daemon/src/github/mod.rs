@@ -4,6 +4,13 @@ use anyhow::{bail, Result};
 use serde::Deserialize;
 use types::{RepoInfo, RunnerRegistration};
 
+/// Check whether an `anyhow::Error` wraps a GitHub 401 "Bad credentials" response.
+pub fn is_bad_credentials(err: &anyhow::Error) -> bool {
+    let msg = format!("{err:#}");
+    // octocrab surfaces 401s as "GitHub: Bad credentials" or with status 401
+    msg.contains("Bad credentials") || msg.contains("status code 401")
+}
+
 pub struct GitHubClient {
     octocrab: octocrab::Octocrab,
     token: String,

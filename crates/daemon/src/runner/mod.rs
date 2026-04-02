@@ -6,6 +6,7 @@ pub mod step_log_cache;
 pub mod steps;
 pub mod types;
 
+use crate::auth::AuthManager;
 use crate::config::Config;
 use crate::github::GitHubClient;
 use crate::runner::binary::ensure_runner_binary;
@@ -71,6 +72,7 @@ pub struct RunnerManager {
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
     name_counters: Arc<RwLock<HashMap<String, u32>>>,
     auth_token: Arc<RwLock<Option<String>>>,
+    auth_manager: Option<AuthManager>,
     step_watcher: WorkerLogWatcher,
     pub step_log_cache: step_log_cache::StepLogCache,
     job_history: Arc<RwLock<HashMap<String, Vec<types::JobHistoryEntry>>>>,
@@ -141,10 +143,17 @@ impl RunnerManager {
             recent_logs: Arc::new(RwLock::new(HashMap::new())),
             name_counters: Arc::new(RwLock::new(HashMap::new())),
             auth_token: Arc::new(RwLock::new(None)),
+            auth_manager: None,
             step_watcher: WorkerLogWatcher::new(),
             step_log_cache: step_log_cache::StepLogCache::new(),
             job_history: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Attach an `AuthManager` so the runner manager can invalidate auth
+    /// when GitHub returns "Bad credentials".
+    pub fn set_auth_manager(&mut self, auth: AuthManager) {
+        self.auth_manager = Some(auth);
     }
 
     pub async fn set_auth_token(&self, token: Option<String>) {
@@ -1411,10 +1420,21 @@ impl RunnerManager {
         kill_orphaned_processes(&config.work_dir).await;
 
         let gh = GitHubClient::new(Some(auth_token.to_string()))?;
-        let reg = gh
+        let reg = match gh
             .get_runner_registration_token(&config.repo_owner, &config.repo_name)
             .await
-            .context("Failed to get registration token")?;
+        {
+            Ok(reg) => reg,
+            Err(e) => {
+                if crate::github::is_bad_credentials(&e) {
+                    tracing::warn!("GitHub token is invalid (Bad credentials), logging out");
+                    if let Some(ref auth) = self.auth_manager {
+                        let _ = auth.logout().await;
+                    }
+                }
+                return Err(e).context("Failed to get registration token");
+            }
+        };
 
         // If already configured, deregister before re-configuring.
         // The config script refuses to configure an already-configured runner, so we

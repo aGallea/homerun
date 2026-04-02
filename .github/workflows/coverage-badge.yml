@@ -11,6 +11,9 @@ jobs:
   update-badge:
     name: Update coverage badge
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
 

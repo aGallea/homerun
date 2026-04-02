@@ -37,10 +37,12 @@ impl AppState {
             config.preferences.notify_status_changes,
             config.preferences.notify_job_completions,
         ));
-        let runner_manager = RunnerManager::new(config.clone());
+        let auth = AuthManager::new();
+        let mut runner_manager = RunnerManager::new(config.clone());
+        runner_manager.set_auth_manager(auth.clone());
         Self {
             config: Arc::new(RwLock::new(config)),
-            auth: AuthManager::new(),
+            auth,
             runner_manager,
             metrics: Arc::new(MetricsCollector::new()),
             notifications,
