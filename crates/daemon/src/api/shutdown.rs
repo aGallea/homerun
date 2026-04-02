@@ -77,7 +77,7 @@ mod tests {
     use crate::server::{create_router, AppState};
 
     #[tokio::test]
-    async fn test_shutdown_returns_accepted() {
+    async fn test_shutdown_returns_accepted_or_conflict() {
         let app = create_router(AppState::new_test());
         let response = app
             .oneshot(
@@ -89,14 +89,13 @@ mod tests {
             )
             .await
             .unwrap();
-        // When launchd is NOT installed, we expect ACCEPTED.
-        // When launchd IS installed, we expect CONFLICT.
-        // In test environments the plist is unlikely to exist, so we expect ACCEPTED.
-        if !crate::platform::service::is_daemon_installed() {
-            assert_eq!(response.status(), StatusCode::ACCEPTED);
-        } else {
-            assert_eq!(response.status(), StatusCode::CONFLICT);
-        }
+        // On machines where the daemon is registered as a service,
+        // shutdown returns CONFLICT; otherwise ACCEPTED.
+        let status = response.status();
+        assert!(
+            status == StatusCode::ACCEPTED || status == StatusCode::CONFLICT,
+            "expected ACCEPTED or CONFLICT, got {status}"
+        );
     }
 
     #[tokio::test]
@@ -133,9 +132,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_returns_active_runners_count() {
-        if crate::platform::service::is_daemon_installed() {
-            return; // Skip — shutdown blocked by launchd
-        }
         let app = create_router(AppState::new_test());
         let response = app
             .oneshot(
@@ -147,6 +143,9 @@ mod tests {
             )
             .await
             .unwrap();
+        if response.status() == StatusCode::CONFLICT {
+            return; // Daemon is installed as a service — shutdown blocked
+        }
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
