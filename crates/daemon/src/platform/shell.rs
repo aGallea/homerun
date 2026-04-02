@@ -43,9 +43,7 @@ pub fn resolve_shell_path() -> Option<String> {
     }
 
     // PowerShell directories (system-known locations).
-    essential_dirs.push(PathBuf::from(
-        r"C:\Windows\System32\WindowsPowerShell\v1.0",
-    ));
+    essential_dirs.push(PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0"));
     // PowerShell 7 can be installed anywhere, but the default is:
     if let Ok(pf) = std::env::var("ProgramFiles") {
         essential_dirs.push(PathBuf::from(pf).join("PowerShell\\7"));
@@ -54,11 +52,7 @@ pub fn resolve_shell_path() -> Option<String> {
     let mut path = current;
     for dir in &essential_dirs {
         let dir_str = dir.to_string_lossy();
-        if !current_lower
-            .iter()
-            .any(|p| p == &dir_str.to_lowercase())
-            && dir.is_dir()
-        {
+        if !current_lower.iter().any(|p| p == &dir_str.to_lowercase()) && dir.is_dir() {
             path = format!("{path};{dir_str}");
         }
     }
@@ -78,12 +72,7 @@ fn find_git_install_dir() -> Option<std::path::PathBuf> {
 
     // Try the Windows registry (works from native Windows processes).
     let output = Command::new("reg")
-        .args([
-            "query",
-            r"HKLM\SOFTWARE\GitForWindows",
-            "/v",
-            "InstallPath",
-        ])
+        .args(["query", r"HKLM\SOFTWARE\GitForWindows", "/v", "InstallPath"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
@@ -105,9 +94,7 @@ fn find_git_install_dir() -> Option<std::path::PathBuf> {
 
     // Fallback: check well-known locations
     for candidate in &[
-        std::env::var("ProgramFiles")
-            .unwrap_or_else(|_| r"C:\Program Files".to_string())
-            + r"\Git",
+        std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string()) + r"\Git",
         r"C:\Program Files\Git".to_string(),
         r"C:\Program Files (x86)\Git".to_string(),
     ] {
