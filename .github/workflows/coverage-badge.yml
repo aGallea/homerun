@@ -28,13 +28,10 @@ jobs:
       - name: Run React tests with coverage
         run: cd apps/desktop && npm run test:coverage
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Add Rust toolchain to PATH
+      - name: Add Rust to PATH
         run: |
-          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
-          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          echo "$(dirname "$(rustup which rustc)")" >> $GITHUB_PATH
 
       - name: Install cargo-llvm-cov
         run: which cargo-llvm-cov || cargo install cargo-llvm-cov --quiet

@@ -28,9 +28,11 @@ jobs:
           ref: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
           token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Install Rust toolchain
+      - name: Add Rust to PATH
         if: ${{ steps.release.outputs.pr }}
-        uses: dtolnay/rust-toolchain@stable
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          echo "$(dirname "$(rustup which rustc)")" >> $GITHUB_PATH
 
       - name: Regenerate Cargo.lock files
         if: ${{ steps.release.outputs.pr }}
