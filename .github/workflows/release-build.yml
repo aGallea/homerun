@@ -19,6 +19,9 @@ jobs:
     name: Build macOS (${{ matrix.arch }})
     runs-on: self-hosted
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -151,6 +154,9 @@ jobs:
     name: Create GitHub Release
     needs: [build-macos, build-windows]
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
 
@@ -178,6 +184,9 @@ jobs:
     name: Update Homebrew Tap
     needs: release
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

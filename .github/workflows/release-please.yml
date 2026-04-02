@@ -11,6 +11,9 @@ permissions:
 jobs:
   release-please:
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
