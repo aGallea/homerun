@@ -88,7 +88,7 @@ jobs:
             python3 -m pre_commit run --all-files --show-diff-on-failure
           fi
         env:
-          SKIP: cargo-test,cargo-clippy
+          SKIP: no-commit-to-branch,cargo-test,cargo-clippy
 
   react-test:
     name: React (test + coverage)
