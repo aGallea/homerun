@@ -72,6 +72,10 @@ jobs:
           path: homerun-*.tar.gz
           if-no-files-found: error
 
+      - name: Clean Tauri build cache
+        working-directory: apps/desktop/src-tauri
+        run: cargo clean
+
       - name: Build Tauri app
         working-directory: apps/desktop
         run: npx tauri build --target ${{ matrix.target }}
