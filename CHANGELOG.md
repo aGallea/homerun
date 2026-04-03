@@ -9,6 +9,16 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.8.2](https://github.com/aGallea/homerun/compare/v0.8.1...v0.8.2) (2026-04-03)
+
+
+### Bug Fixes
+
+* CI badge, release version caching, and sidebar logo size ([eace8ad](https://github.com/aGallea/homerun/commit/eace8ad085f3ba9a21d9a891022dc1b9364376e8))
+* CI badge, release version caching, and sidebar logo size ([f783cd0](https://github.com/aGallea/homerun/commit/f783cd0361bc6b4075490ae0fb27561f087a8097))
+* **ci:** skip no-commit-to-branch hook on push-to-master CI runs ([cf38754](https://github.com/aGallea/homerun/commit/cf387541b6f8335a42332683091f6356fce38b68))
+* **ci:** skip no-commit-to-branch hook on push-to-master CI runs ([c39fa50](https://github.com/aGallea/homerun/commit/c39fa5052a0ec58bcbedd746244abd72144e6991))
+
 ## [0.8.1](https://github.com/aGallea/homerun/compare/v0.8.0...v0.8.1) (2026-04-03)
 
 
