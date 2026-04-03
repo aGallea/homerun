@@ -9,6 +9,58 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.8.0](https://github.com/aGallea/homerun/compare/v0.7.0...v0.8.0) (2026-04-03)
+
+
+### Features
+
+* add Windows MSI build to release workflow ([#112](https://github.com/aGallea/homerun/issues/112)) ([4dd5082](https://github.com/aGallea/homerun/commit/4dd508236061d07fa92dc2cfbf4381296e2c3dc5))
+* cross-platform binary download with .zip extraction for Windows ([#112](https://github.com/aGallea/homerun/issues/112)) ([b8bfc62](https://github.com/aGallea/homerun/commit/b8bfc623a4f33c77f78678a4558f9d4393f11060))
+* named pipe IPC for Windows daemon server ([#112](https://github.com/aGallea/homerun/issues/112)) ([0044323](https://github.com/aGallea/homerun/commit/00443232d985c3054a91cbe455fec44b72da50f2))
+* show job progress in runner overview and add Windows build docs ([35d7f1c](https://github.com/aGallea/homerun/commit/35d7f1c1f6375c7508d186c48875fb94256ecdb0))
+* Windows named pipe support for desktop client ([#112](https://github.com/aGallea/homerun/issues/112)) ([355b987](https://github.com/aGallea/homerun/commit/355b9877c91e38f12b206339e120c052312a91ca))
+* Windows named pipe support for TUI client ([#112](https://github.com/aGallea/homerun/issues/112)) ([1e920d2](https://github.com/aGallea/homerun/commit/1e920d27ca1403d663930832e6422c00ff86d5f1))
+* Windows platform support ([c8f0fb0](https://github.com/aGallea/homerun/commit/c8f0fb091846a8bdcb1f6095e563f9bd9b417000))
+
+
+### Bug Fixes
+
+* add .gitattributes for LF normalization and fix XML end-of-file ([#113](https://github.com/aGallea/homerun/issues/113)) ([211814a](https://github.com/aGallea/homerun/commit/211814aa7635f81f55b1aaa6a37db60507d46203))
+* add essential dirs to runner PATH and use cmd for Python setup ([#113](https://github.com/aGallea/homerun/issues/113)) ([b7a1010](https://github.com/aGallea/homerun/commit/b7a10103f5c12b105cc5b6a0b30ffb49aad609a7))
+* add setup-node and rust-toolchain to coverage-badge workflow ([57d2450](https://github.com/aGallea/homerun/commit/57d2450c8046b999fb27d9972575107f0695b10e))
+* add shell: bash to all self-hosted workflow jobs ([8bc86a9](https://github.com/aGallea/homerun/commit/8bc86a99cbb0d16b5f39c04e83c9c3b21dbd60c4))
+* cargo fmt and use PowerShell for Python setup in CI ([#113](https://github.com/aGallea/homerun/issues/113)) ([19b2d9e](https://github.com/aGallea/homerun/commit/19b2d9e59a07e367acaa2733d59b953e264e7d8d))
+* CI PATH resolution for Windows Git Bash ([#112](https://github.com/aGallea/homerun/issues/112)) ([f1c095c](https://github.com/aGallea/homerun/commit/f1c095c5ea9a273c5b91e1325c553f939472ad6b))
+* CI rustup shim and python issues on Windows runner ([#112](https://github.com/aGallea/homerun/issues/112)) ([aef6775](https://github.com/aGallea/homerun/commit/aef6775d30c7f40f703dc3c35ed114617b536fbc))
+* clippy warnings and Windows test client TCP support ([#112](https://github.com/aGallea/homerun/issues/112)) ([bd68b00](https://github.com/aGallea/homerun/commit/bd68b00bb4e46fd388a925402d05ba17d1aeffdf))
+* derive Python tool cache path from GITHUB_WORKSPACE ([#113](https://github.com/aGallea/homerun/issues/113)) ([3a9591b](https://github.com/aGallea/homerun/commit/3a9591b57dd41be98d83ce72d1580e5be273983e))
+* dynamically discover Git install path for runner PATH ([5700d00](https://github.com/aGallea/homerun/commit/5700d002bfa4f54e4525520840fa89d1a4e95daa))
+* enable diag log tailing for freshly spawned runners on Windows ([942ec47](https://github.com/aGallea/homerun/commit/942ec47e894828e8e6647a2ec88da97d3d4be140))
+* ensure Git Bash is on PATH for Windows runners ([#113](https://github.com/aGallea/homerun/issues/113)) ([869294e](https://github.com/aGallea/homerun/commit/869294e2110e6f593a27b27c3206b91ba18b6284))
+* fallback to any runner's Python cache when setup-python fails ([#113](https://github.com/aGallea/homerun/issues/113)) ([8706baa](https://github.com/aGallea/homerun/commit/8706baaf60a086c317af679821734c3d05643772))
+* improve tray panel positioning for bottom taskbar ([#112](https://github.com/aGallea/homerun/issues/112)) ([c80b8ad](https://github.com/aGallea/homerun/commit/c80b8adf8d0214ccc9dc0dd86045ec26391435cc))
+* logout on bad credentials and add bash shell to coverage workflow ([5f1ddef](https://github.com/aGallea/homerun/commit/5f1ddef76931e6e6b772ea89ed780ccca5d17858))
+* make all shutdown tests resilient to daemon service state ([13e415f](https://github.com/aGallea/homerun/commit/13e415fb1337521ef865df010beef6d48df1a06c))
+* make CI workflow cross-platform for Windows self-hosted runner ([#112](https://github.com/aGallea/homerun/issues/112)) ([b71c957](https://github.com/aGallea/homerun/commit/b71c957abd37645b0aef13bcbd33f750dd6378ea))
+* make shutdown test resilient to daemon service state ([f6f0d47](https://github.com/aGallea/homerun/commit/f6f0d47bb29df23d278548212e2062cbbd8bfc68))
+* make shutdown test resilient to daemon service state ([3809747](https://github.com/aGallea/homerun/commit/3809747495cfaa0f00c94e6c7dacc8f1c057bac9))
+* platform-aware shutdown error message ([#113](https://github.com/aGallea/homerun/issues/113)) ([df841a4](https://github.com/aGallea/homerun/commit/df841a4121b5c21327711e4a0f7891314fce097f))
+* position tray panel above taskbar on Windows ([#112](https://github.com/aGallea/homerun/issues/112)) ([0c25876](https://github.com/aGallea/homerun/commit/0c258764778753142d614ea346d8933150c0f2ba))
+* remove dtolnay/rust-toolchain from CI to avoid concurrent rustup conflicts ([5bc4bef](https://github.com/aGallea/homerun/commit/5bc4bef14960ce1a2742e9d5bfd4e1bbb850c896))
+* remove invalid NSIS config from tauri.conf.json ([#112](https://github.com/aGallea/homerun/issues/112)) ([f42ffaa](https://github.com/aGallea/homerun/commit/f42ffaace8ec3d3f3b6007c8544adc0b1587bfca))
+* remove jq dependency from coverage badge workflow ([adf552d](https://github.com/aGallea/homerun/commit/adf552d2858e9f4c3f9c73dd53fd38a9cc14927e))
+* remove jq dependency from coverage badge workflow ([54a091d](https://github.com/aGallea/homerun/commit/54a091d5b052ab4b8e8bc391327c87befa79e116))
+* remove unused CommandExt import in unix process group ([#113](https://github.com/aGallea/homerun/issues/113)) ([a276410](https://github.com/aGallea/homerun/commit/a27641067a769ceb6414f285a382c594a7242cad))
+* resolve Windows compilation blockers in runner/mod.rs and test-utils ([#112](https://github.com/aGallea/homerun/issues/112)) ([a453984](https://github.com/aGallea/homerun/commit/a4539840580431d24bebaf68ddf4755101d35319))
+* rewrite diag log tailing to use poll-based file reading ([83c72eb](https://github.com/aGallea/homerun/commit/83c72eb0d411c93f649e83591c8afc1a343c4368))
+* skip setup-python on Windows self-hosted runner ([#113](https://github.com/aGallea/homerun/issues/113)) ([90410b9](https://github.com/aGallea/homerun/commit/90410b9349a0a1b697cb12fcfbc6b80985ac42fe))
+* update pre-commit stage names for v4 compatibility ([#113](https://github.com/aGallea/homerun/issues/113)) ([b6b6417](https://github.com/aGallea/homerun/commit/b6b64179f24719e1dce0d0096ab7973427bcaefe))
+* use existing Rust installation instead of dtolnay/rust-toolchain ([96b2709](https://github.com/aGallea/homerun/commit/96b2709eedea1d9ee4a6ff06a4df0506ebf17688))
+* use platform-aware default runner labels ([#112](https://github.com/aGallea/homerun/issues/112)) ([36918de](https://github.com/aGallea/homerun/commit/36918de44cf434f379b82a1114a911b0c4d136ce))
+* use Registry Run key instead of schtasks for Windows auto-start ([#112](https://github.com/aGallea/homerun/issues/112)) ([e239d61](https://github.com/aGallea/homerun/commit/e239d6117e029ba29bad8923f3bc1b5b413b2f5e))
+* Windows compilation fixes and release workflow ([#112](https://github.com/aGallea/homerun/issues/112)) ([d5cfa59](https://github.com/aGallea/homerun/commit/d5cfa59daf04640d906caf27ce33711c5a697f5f))
+* Windows launch-at-login, remove macOS-specific UI text ([#112](https://github.com/aGallea/homerun/issues/112)) ([cf42d68](https://github.com/aGallea/homerun/commit/cf42d684deb6df6f0b26217c8d40a7a87cc54241))
+
 ## [0.7.0](https://github.com/aGallea/homerun/compare/v0.6.0...v0.7.0) (2026-03-28)
 
 
