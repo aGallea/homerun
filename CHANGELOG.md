@@ -9,6 +9,16 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.8.1](https://github.com/aGallea/homerun/compare/v0.8.0...v0.8.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* **ci:** add pip scripts dir to PATH for macOS self-hosted runners ([9f49b67](https://github.com/aGallea/homerun/commit/9f49b67d71df8c8915c64fbe6ac645b2c8cd4fb3))
+* **ci:** fall back to python3 -m pre_commit when binary not in PATH ([9eaa285](https://github.com/aGallea/homerun/commit/9eaa2859fc1bddf072ca2b04f4c7658e1de650fc))
+* **ci:** use python3 fallback for pre-commit on macOS self-hosted runners ([3d90011](https://github.com/aGallea/homerun/commit/3d9001192b10f332e9da71b61fbb9146a0bfae4d))
+* restrict macOS release build to macOS self-hosted runners ([d334fb3](https://github.com/aGallea/homerun/commit/d334fb38629c0d886605ab015d96a454b5de38c0))
+
 ## [0.8.0](https://github.com/aGallea/homerun/compare/v0.7.0...v0.8.0) (2026-04-03)
 
 
