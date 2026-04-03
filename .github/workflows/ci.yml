@@ -141,6 +141,10 @@ jobs:
       - name: Run tests with coverage (tui)
         run: cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
 
+      - name: Clean Rust build artifacts
+        if: always()
+        run: cargo clean
+
       - name: Download React coverage
         uses: actions/download-artifact@v4
         with:
