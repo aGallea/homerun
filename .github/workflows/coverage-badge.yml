@@ -39,6 +39,10 @@ jobs:
       - name: Run tests with coverage
         run: cargo llvm-cov -p homerund -p homerun --all-features --summary-only 2>&1 | tee coverage-summary.txt
 
+      - name: Clean Rust build artifacts
+        if: always()
+        run: cargo clean
+
       - name: Update badge
         env:
           GIST_SECRET: ${{ secrets.GIST_SECRET }}
@@ -47,11 +51,9 @@ jobs:
           echo "Coverage: $COVERAGE%"
           # Map 50-95% to hue 0(red)-120(green)
           HUE=$(awk "BEGIN {h=($COVERAGE-50)/(95-50)*120; if(h<0)h=0; if(h>120)h=120; printf \"%.0f\", h}")
-          # Build badge JSON and gist payload with jq
-          BADGE=$(jq -n --arg cov "${COVERAGE}%" --arg color "hsl($HUE, 100%, 40%)" \
-            '{schemaVersion:1, label:"coverage", message:$cov, color:$color}')
-          PAYLOAD=$(jq -n --arg content "$BADGE" \
-            '{files:{"coverage.json":{content:$content}}}')
+          # Build badge JSON and gist payload (no jq dependency)
+          BADGE="{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"hsl($HUE, 100%, 40%)\"}"
+          PAYLOAD="{\"files\":{\"coverage.json\":{\"content\":$(printf '%s' "$BADGE" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/')}}}"
           curl -sf -X PATCH \
             -H "Authorization: token $GIST_SECRET" \
             -H "Content-Type: application/json" \
