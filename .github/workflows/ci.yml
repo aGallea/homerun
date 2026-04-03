@@ -69,9 +69,8 @@ jobs:
         run: |
           # macOS self-hosted runners may only have python3
           if command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
-            python3 -m pip install pre-commit --quiet
-            # Ensure pip scripts dir is in PATH
-            echo "$(python3 -m site --user-base)/bin" >> $GITHUB_PATH
+            python3 -m pip install pre-commit --quiet --break-system-packages 2>/dev/null \
+              || python3 -m pip install pre-commit --quiet
           else
             python -m pip install pre-commit --quiet
           fi
@@ -80,7 +79,12 @@ jobs:
         run: cd apps/desktop && npm ci
 
       - name: Run pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+        run: |
+          if command -v pre-commit &>/dev/null; then
+            pre-commit run --all-files --show-diff-on-failure
+          else
+            python3 -m pre_commit run --all-files --show-diff-on-failure
+          fi
         env:
           SKIP: cargo-test,cargo-clippy
 
