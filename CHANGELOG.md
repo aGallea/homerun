@@ -9,6 +9,14 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.8.3](https://github.com/aGallea/homerun/compare/v0.8.2...v0.8.3) (2026-05-02)
+
+
+### Bug Fixes
+
+* **desktop:** resolve npm audit vulnerabilities ([9fc8b15](https://github.com/aGallea/homerun/commit/9fc8b15482cfd513873cb6f68efe34c893c09bd8))
+* **desktop:** resolve npm audit vulnerabilities ([bc6806c](https://github.com/aGallea/homerun/commit/bc6806cb4612825addb6c9ff012aec73cf7dd960))
+
 ## [0.8.2](https://github.com/aGallea/homerun/compare/v0.8.1...v0.8.2) (2026-04-03)
 
 
