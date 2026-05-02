@@ -9,6 +9,14 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.8.4](https://github.com/aGallea/homerun/compare/v0.8.3...v0.8.4) (2026-05-02)
+
+
+### Bug Fixes
+
+* **desktop:** bump @tauri-apps/api to 2.11 to match Rust crate ([a7a6fb8](https://github.com/aGallea/homerun/commit/a7a6fb8e0539810c028336584e4048ffa3032539))
+* **desktop:** bump @tauri-apps/api to 2.11 to match Rust crate ([01580aa](https://github.com/aGallea/homerun/commit/01580aa3ab8bf62bfcd66c86d6819a5e6a463ca1))
+
 ## [0.8.3](https://github.com/aGallea/homerun/compare/v0.8.2...v0.8.3) (2026-05-02)
 
 
