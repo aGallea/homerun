@@ -204,6 +204,7 @@ pub fn run() {
             commands::poll_device_flow,
             commands::list_repos,
             commands::get_metrics,
+            commands::docker_status,
             commands::service_status,
             commands::install_service,
             commands::uninstall_service,

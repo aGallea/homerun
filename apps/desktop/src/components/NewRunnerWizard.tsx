@@ -1,12 +1,17 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRepos } from "../hooks/useRepos";
+import { api } from "../api/commands";
 import type {
   BatchCreateResponse,
+  ContainerConfig,
   CreateBatchRequest,
   CreateRunnerRequest,
   RepoInfo,
   RunnerInfo,
 } from "../api/types";
+
+const DEFAULT_CONTAINER_IMAGE = "ghcr.io/agallea/homerun-runner:ubuntu-24.04";
+type RunnerModeChoice = "app" | "service" | "container";
 
 interface NewRunnerWizardProps {
   onClose: () => void;
@@ -56,12 +61,30 @@ export function NewRunnerWizard({
 
   const [name, setName] = useState("");
   const [labelsInput, setLabelsInput] = useState(DEFAULT_LABELS.join(", "));
-  const [mode, setMode] = useState<"app" | "service">("app");
+  const [mode, setMode] = useState<RunnerModeChoice>("app");
+  const [containerImage, setContainerImage] = useState(DEFAULT_CONTAINER_IMAGE);
+  const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
   const [count, setCount] = useState(1);
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launched, setLaunched] = useState(false);
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+
+  // Preflight — only offer "Container" mode if Docker is actually reachable.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getDockerStatus()
+      .then((res) => {
+        if (!cancelled) setDockerAvailable(res.available);
+      })
+      .catch(() => {
+        if (!cancelled) setDockerAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredRepos = useMemo(() => {
     const q = search.toLowerCase();
@@ -91,6 +114,8 @@ export function NewRunnerWizard({
       .split(",")
       .map((l) => l.trim())
       .filter(Boolean);
+    const container: ContainerConfig | undefined =
+      mode === "container" ? { image: containerImage.trim() } : undefined;
 
     if (count === 1) {
       try {
@@ -99,6 +124,7 @@ export function NewRunnerWizard({
           name: name.trim() || undefined,
           labels,
           mode,
+          container,
         });
         setLaunched(true);
       } catch (e) {
@@ -114,6 +140,7 @@ export function NewRunnerWizard({
           count,
           labels,
           mode,
+          container,
         });
         const results: BatchResult[] = result.runners.map((r) => ({
           name: r.config.name,
@@ -141,7 +168,8 @@ export function NewRunnerWizard({
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const isNextDisabled = count === 1 ? !name.trim() : false;
+  const isNextDisabled =
+    (count === 1 ? !name.trim() : false) || (mode === "container" && !containerImage.trim());
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
@@ -208,6 +236,9 @@ export function NewRunnerWizard({
               onLabelsInput={setLabelsInput}
               mode={mode}
               onMode={setMode}
+              dockerAvailable={dockerAvailable}
+              containerImage={containerImage}
+              onContainerImage={setContainerImage}
               count={count}
               onCount={setCount}
             />
@@ -218,6 +249,7 @@ export function NewRunnerWizard({
               name={name}
               labels={labels}
               mode={mode}
+              containerImage={containerImage}
               count={count}
               error={launchError}
             />
@@ -369,8 +401,11 @@ interface StepConfigureProps {
   onName: (v: string) => void;
   labelsInput: string;
   onLabelsInput: (v: string) => void;
-  mode: "app" | "service";
-  onMode: (v: "app" | "service") => void;
+  mode: RunnerModeChoice;
+  onMode: (v: RunnerModeChoice) => void;
+  dockerAvailable: boolean | null;
+  containerImage: string;
+  onContainerImage: (v: string) => void;
   count: number;
   onCount: (v: number) => void;
 }
@@ -383,6 +418,9 @@ function StepConfigure({
   onLabelsInput,
   mode,
   onMode,
+  dockerAvailable,
+  containerImage,
+  onContainerImage,
   count,
   onCount,
 }: StepConfigureProps) {
@@ -430,21 +468,29 @@ function StepConfigure({
       <div className="form-group">
         <label className="form-label">Mode</label>
         <div style={{ display: "flex", gap: 10 }}>
-          {(["app", "service"] as const).map((m) => {
+          {(["app", "service", "container"] as const).map((m) => {
             const selected = mode === m;
-            const iconColor = selected ? "var(--accent-blue)" : "var(--text-secondary)";
+            const disabled = m === "container" && dockerAvailable === false;
+            const iconColor = disabled
+              ? "var(--text-secondary)"
+              : selected
+                ? "var(--accent-blue)"
+                : "var(--text-secondary)";
             return (
               <button
                 key={m}
-                onClick={() => onMode(m)}
+                onClick={() => !disabled && onMode(m)}
+                disabled={disabled}
+                title={disabled ? "Docker isn't reachable — start Docker Desktop to use this mode" : undefined}
                 style={{
                   flex: 1,
                   padding: "12px",
                   background: selected ? "rgba(59, 130, 246, 0.08)" : "var(--bg-tertiary)",
                   border: `1.5px solid ${selected ? "var(--accent-blue)" : "var(--border)"}`,
                   borderRadius: 10,
-                  cursor: "pointer",
+                  cursor: disabled ? "not-allowed" : "pointer",
                   textAlign: "left",
+                  opacity: disabled ? 0.5 : 1,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -475,7 +521,7 @@ function StepConfigure({
                         <line x1="8" y1="21" x2="16" y2="21" />
                         <line x1="12" y1="17" x2="12" y2="21" />
                       </svg>
-                    ) : (
+                    ) : m === "service" ? (
                       <svg
                         width="14"
                         height="14"
@@ -491,22 +537,69 @@ function StepConfigure({
                         <line x1="6" y1="6" x2="6.01" y2="6" />
                         <line x1="6" y1="18" x2="6.01" y2="18" />
                       </svg>
+                    ) : (
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke={iconColor}
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <ellipse cx="12" cy="6" rx="9" ry="3" />
+                        <path d="M3 6v12c0 1.66 4.03 3 9 3s9-1.34 9-3V6" />
+                        <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+                      </svg>
                     )}
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-                    {m === "app" ? "App" : "Service"}
+                    {m === "app" ? "App" : m === "service" ? "Service" : "Container"}
                   </span>
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
                   {m === "app"
                     ? "Runs as a foreground process. Stops with daemon."
-                    : "Runs as a background service. Survives restarts."}
+                    : m === "service"
+                      ? "Runs as a background service. Survives restarts."
+                      : disabled
+                        ? "Docker isn't reachable right now."
+                        : "Runs inside a Docker container for isolation."}
                 </div>
               </button>
             );
           })}
         </div>
       </div>
+
+      {mode === "container" && (
+        <div className="form-group">
+          <label className="form-label" htmlFor="runner-image">
+            Image
+          </label>
+          <input
+            id="runner-image"
+            type="text"
+            value={containerImage}
+            onChange={(e) => onContainerImage(e.target.value)}
+            style={{ width: "100%" }}
+            placeholder={DEFAULT_CONTAINER_IMAGE}
+            className="font-mono"
+          />
+          <p className="form-hint">
+            Defaults to HomeRun's base image. Any image with glibc and bash works — see{" "}
+            <a
+              href="https://github.com/aGallea/homerun/blob/master/docs/DOCKER_RUNNERS.md"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Docker Runners
+            </a>
+            .
+          </p>
+        </div>
+      )}
 
       <div className="form-group" style={{ marginTop: 8 }}>
         <label className="form-label" htmlFor="runner-name">
@@ -545,11 +638,12 @@ interface StepLaunchProps {
   name: string;
   labels: string[];
   mode: string;
+  containerImage: string;
   count: number;
   error: string | null;
 }
 
-function StepLaunch({ repo, name, labels, mode, count, error }: StepLaunchProps) {
+function StepLaunch({ repo, name, labels, mode, containerImage, count, error }: StepLaunchProps) {
   const slug = repo.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
 
   return (
@@ -585,6 +679,12 @@ function StepLaunch({ repo, name, labels, mode, count, error }: StepLaunchProps)
             {mode}
           </span>
         </div>
+        {mode === "container" && (
+          <div className="launch-summary-row">
+            <span className="launch-summary-key">Image</span>
+            <span className="launch-summary-value font-mono">{containerImage}</span>
+          </div>
+        )}
       </div>
     </div>
   );

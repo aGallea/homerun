@@ -149,6 +149,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/service/uninstall", post(api_service::uninstall_service))
         .route("/service/status", get(api_service::service_status))
         .route("/updates/check", get(api_updates::check_updates))
+        .route("/system/docker-status", get(api::system::docker_status))
         .route(
             "/preferences",
             get(api::preferences::get_preferences).put(api::preferences::update_preferences),

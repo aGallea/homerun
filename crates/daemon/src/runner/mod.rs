@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod docker;
 pub mod history;
 pub mod process;
 pub mod state;
@@ -20,8 +21,21 @@ use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::pin::Pin;
 use std::sync::Arc;
+use tokio::io::AsyncRead;
 use tokio::sync::{broadcast, watch, Notify, RwLock};
+
+/// A runner's underlying execution unit — a native child process, or a
+/// Docker container. `RunnerManager`'s state machine, log streaming, and
+/// stop/monitor plumbing operate on either uniformly past this point.
+enum RunningProcess {
+    Native(tokio::process::Child),
+    Container {
+        docker: bollard::Docker,
+        container_id: String,
+    },
+}
 
 /// Wrapper for persisting runners to disk with their last running state.
 /// Uses `#[serde(flatten)]` for backward compatibility with old runners.json
@@ -507,6 +521,7 @@ impl RunnerManager {
                     config: entry.config,
                     state,
                     pid,
+                    container_id: None,
                     uptime_secs: None,
                     started_at: None,
                     jobs_completed: 0,
@@ -976,6 +991,7 @@ impl RunnerManager {
         labels: Option<Vec<String>>,
         mode: Option<RunnerMode>,
         group_id: Option<String>,
+        container: Option<types::ContainerConfig>,
     ) -> Result<RunnerInfo> {
         let parts: Vec<&str> = repo_full_name.split('/').collect();
         if parts.len() != 2 {
@@ -1017,9 +1033,11 @@ impl RunnerManager {
                 mode: mode.unwrap_or(RunnerMode::App),
                 work_dir,
                 group_id,
+                container,
             },
             state: RunnerState::Creating,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -1043,6 +1061,7 @@ impl RunnerManager {
         count: u8,
         labels: Option<Vec<String>>,
         mode: Option<RunnerMode>,
+        container: Option<types::ContainerConfig>,
     ) -> Result<(String, Vec<RunnerInfo>, Vec<types::BatchCreateError>)> {
         let group_id = uuid::Uuid::new_v4().to_string();
         let mut runners = Vec::new();
@@ -1056,6 +1075,7 @@ impl RunnerManager {
                     labels.clone(),
                     mode.clone(),
                     Some(group_id.clone()),
+                    container.clone(),
                 )
                 .await
             {
@@ -1116,6 +1136,7 @@ impl RunnerManager {
                         Some(template.config.labels.clone()),
                         Some(template.config.mode.clone()),
                         Some(group_id.to_string()),
+                        template.config.container.clone(),
                     )
                     .await
                 {
@@ -1400,10 +1421,20 @@ impl RunnerManager {
             || config.work_dir.join(".runner_migrated").exists();
 
         if !already_configured {
-            // First-time setup: download binary and copy to work_dir
-            let cached_runner_dir = ensure_runner_binary(&self.config.cache_dir())
-                .await
-                .context("Failed to download runner binary")?;
+            // First-time setup: download binary and copy to work_dir. Container
+            // runners always need the Linux build — even bind-mounted into a
+            // container launched from Docker Desktop on macOS/Windows, the
+            // container itself runs a Linux kernel.
+            let cached_runner_dir = if config.mode == RunnerMode::Container {
+                let (_, arch) = binary::detect_platform();
+                binary::ensure_runner_binary_for_container(&self.config.cache_dir(), arch)
+                    .await
+                    .context("Failed to download Linux runner binary for container")?
+            } else {
+                ensure_runner_binary(&self.config.cache_dir())
+                    .await
+                    .context("Failed to download runner binary")?
+            };
 
             copy_dir_recursive(&cached_runner_dir, &config.work_dir)
                 .context("Failed to copy runner binary to work dir")?;
@@ -1413,7 +1444,10 @@ impl RunnerManager {
 
         // Kill any orphaned runner processes from a previous daemon session
         // BEFORE reconfiguring, so the old process releases the GitHub session.
-        kill_orphaned_processes(&config.work_dir).await;
+        // Not applicable to container runners — nothing native was ever spawned.
+        if config.mode != RunnerMode::Container {
+            kill_orphaned_processes(&config.work_dir).await;
+        }
 
         let gh = GitHubClient::new(Some(auth_token.to_string()))?;
         let reg = match gh
@@ -1432,11 +1466,24 @@ impl RunnerManager {
             }
         };
 
+        // Container runners connect to Docker once up front; native runners
+        // never touch it.
+        let docker_client = if config.mode == RunnerMode::Container {
+            Some(docker::connect()?)
+        } else {
+            None
+        };
+        let container_cfg = config.container.as_ref();
+
         // If already configured, deregister before re-configuring.
         // The config script refuses to configure an already-configured runner, so we
         // must remove the old configuration first.
         if already_configured {
-            let _ = remove_runner(&config.work_dir, &reg.token).await;
+            if let (Some(dc), Some(cc)) = (&docker_client, container_cfg) {
+                let _ = docker::deregister(dc, &config.work_dir, &cc.image, &reg.token).await;
+            } else {
+                let _ = remove_runner(&config.work_dir, &reg.token).await;
+            }
             clean_runner_config(&config.work_dir);
         }
 
@@ -1444,33 +1491,69 @@ impl RunnerManager {
             "https://github.com/{}/{}",
             config.repo_owner, config.repo_name
         );
-        configure_runner(
-            &config.work_dir,
-            &repo_url,
-            &reg.token,
-            &config.name,
-            &config.labels,
-        )
-        .await
-        .context("Failed to configure runner")?;
 
-        // Spawn the runner script (run.sh/run.cmd)
-        let mut child = start_runner(&config.work_dir)
+        type BoxedRead = Pin<Box<dyn AsyncRead + Send>>;
+        let (running, stdout, stderr, pid, container_id): (
+            RunningProcess,
+            Option<BoxedRead>,
+            Option<BoxedRead>,
+            Option<u32>,
+            Option<String>,
+        ) = if let (Some(dc), Some(cc)) = (&docker_client, container_cfg) {
+            let container = docker::configure_and_start_container(
+                dc,
+                &config.work_dir,
+                &cc.image,
+                &repo_url,
+                &reg.token,
+                &config.name,
+                &config.labels,
+                &cc.extra_env,
+            )
             .await
-            .context("Failed to start runner process")?;
+            .context("Failed to configure/start container runner")?;
+            let container_id = container.container_id.clone();
+            (
+                RunningProcess::Container {
+                    docker: dc.clone(),
+                    container_id: container_id.clone(),
+                },
+                Some(Box::pin(container.stdout) as BoxedRead),
+                Some(Box::pin(container.stderr) as BoxedRead),
+                None,
+                Some(container_id),
+            )
+        } else {
+            configure_runner(
+                &config.work_dir,
+                &repo_url,
+                &reg.token,
+                &config.name,
+                &config.labels,
+            )
+            .await
+            .context("Failed to configure runner")?;
 
-        // 5b. Capture stdout/stderr for log streaming
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+            // Spawn the runner script (run.sh/run.cmd)
+            let mut child = start_runner(&config.work_dir)
+                .await
+                .context("Failed to start runner process")?;
 
-        // 6. Store PID, update state to Online, record start time
-        let pid = child.id();
+            // 5b. Capture stdout/stderr for log streaming
+            let stdout = child.stdout.take().map(|s| Box::pin(s) as BoxedRead);
+            let stderr = child.stderr.take().map(|s| Box::pin(s) as BoxedRead);
+            let pid = child.id();
+            (RunningProcess::Native(child), stdout, stderr, pid, None)
+        };
+
+        // 6. Store PID/container id, update state to Online, record start time
         let started_at = chrono::Utc::now();
         {
             let mut runners = self.runners.write().await;
             if let Some(r) = runners.get_mut(id) {
                 r.state = RunnerState::Online;
                 r.pid = pid;
+                r.container_id = container_id;
                 r.started_at = Some(started_at);
             }
         }
@@ -1849,61 +1932,87 @@ impl RunnerManager {
         };
         self.processes.write().await.insert(id.to_string(), handle);
 
-        // 7. Spawn background monitor task — owns `child` exclusively
+        // 7. Spawn background monitor task — owns `running` exclusively
         let manager = self.clone();
         let runner_id = id.to_string();
         tokio::spawn(async move {
-            let exit_status = tokio::select! {
-                status = child.wait() => status,
-                _ = kill_signal.notified() => {
-                    // Kill signal received — gracefully stop the entire process group.
-                    // The runner script spawns .NET child processes that hold the GitHub session,
-                    // so we must signal the whole group to let them deregister cleanly.
-                    if let Some(pid) = child.id() {
-                        // Gracefully stop the entire process tree
-                        #[cfg(unix)]
-                        {
-                            let pgid = pid as i32;
-                            // SIGTERM the process group for graceful shutdown
-                            unsafe { libc::kill(-pgid, libc::SIGTERM); }
+            let exit_description = match running {
+                RunningProcess::Native(mut child) => {
+                    let exit_status = tokio::select! {
+                        status = child.wait() => status,
+                        _ = kill_signal.notified() => {
+                            // Kill signal received — gracefully stop the entire process group.
+                            // The runner script spawns .NET child processes that hold the GitHub session,
+                            // so we must signal the whole group to let them deregister cleanly.
+                            if let Some(pid) = child.id() {
+                                // Gracefully stop the entire process tree
+                                #[cfg(unix)]
+                                {
+                                    let pgid = pid as i32;
+                                    // SIGTERM the process group for graceful shutdown
+                                    unsafe { libc::kill(-pgid, libc::SIGTERM); }
 
-                            // Wait up to 10s for graceful exit
-                            match tokio::time::timeout(
-                                std::time::Duration::from_secs(10),
-                                child.wait(),
-                            )
-                            .await
-                            {
-                                Ok(status) => status,
-                                Err(_) => {
-                                    tracing::warn!(
-                                        "Runner {} did not exit gracefully, sending SIGKILL",
-                                        runner_id
-                                    );
-                                    unsafe {
-                                        libc::kill(-pgid, libc::SIGKILL);
+                                    // Wait up to 10s for graceful exit
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(10),
+                                        child.wait(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(status) => status,
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                "Runner {} did not exit gracefully, sending SIGKILL",
+                                                runner_id
+                                            );
+                                            unsafe {
+                                                libc::kill(-pgid, libc::SIGKILL);
+                                            }
+                                            child.wait().await
+                                        }
                                     }
+                                }
+                                #[cfg(windows)]
+                                {
+                                    // On Windows, use taskkill /T to kill the process tree
+                                    let _ = std::process::Command::new("taskkill")
+                                        .args(["/T", "/F", "/PID", &pid.to_string()])
+                                        .stdout(std::process::Stdio::null())
+                                        .stderr(std::process::Stdio::null())
+                                        .status();
                                     child.wait().await
                                 }
+                            } else {
+                                // No PID — process already exited
+                                child.wait().await
                             }
                         }
-                        #[cfg(windows)]
-                        {
-                            // On Windows, use taskkill /T to kill the process tree
-                            let _ = std::process::Command::new("taskkill")
-                                .args(["/T", "/F", "/PID", &pid.to_string()])
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .status();
-                            child.wait().await
+                    };
+                    format!("{exit_status:?}")
+                }
+                RunningProcess::Container {
+                    docker,
+                    container_id,
+                } => {
+                    tokio::select! {
+                        result = docker::wait_container(&docker, &container_id) => {
+                            format!("{result:?}")
                         }
-                    } else {
-                        // No PID — process already exited
-                        child.wait().await
+                        _ = kill_signal.notified() => {
+                            // Docker's stop already does SIGTERM-then-SIGKILL
+                            // with a timeout, so no manual escalation needed.
+                            let _ = docker::stop_container(
+                                &docker,
+                                &container_id,
+                                std::time::Duration::from_secs(10),
+                            )
+                            .await;
+                            "stopped by request".to_string()
+                        }
                     }
                 }
             };
-            tracing::info!("Runner {} exited with status: {:?}", runner_id, exit_status);
+            tracing::info!("Runner {} exited: {}", runner_id, exit_description);
 
             // Signal that the process has fully exited
             let _ = exit_tx.send(true);
@@ -1918,6 +2027,7 @@ impl RunnerManager {
                     {
                         r.state = RunnerState::Offline;
                         r.pid = None;
+                        r.container_id = None;
                         r.started_at = None;
                     }
                 }
@@ -2002,7 +2112,14 @@ impl RunnerManager {
                 .get_runner_registration_token(&config.repo_owner, &config.repo_name)
                 .await
             {
-                let _ = remove_runner(&config.work_dir, &reg.token).await;
+                if let Some(cc) = config.container.as_ref() {
+                    if let Ok(dc) = docker::connect() {
+                        let _ =
+                            docker::deregister(&dc, &config.work_dir, &cc.image, &reg.token).await;
+                    }
+                } else {
+                    let _ = remove_runner(&config.work_dir, &reg.token).await;
+                }
             }
         }
 
@@ -2206,7 +2323,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None, None)
+            .create("aGallea/gifted", None, None, None, None, None)
             .await
             .unwrap();
 
@@ -2226,11 +2343,11 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         manager
-            .create("aGallea/gifted", None, None, None, None)
+            .create("aGallea/gifted", None, None, None, None, None)
             .await
             .unwrap();
         manager
-            .create("aGallea/gifted", None, None, None, None)
+            .create("aGallea/gifted", None, None, None, None, None)
             .await
             .unwrap();
 
@@ -2246,7 +2363,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None, None)
+            .create("aGallea/gifted", None, None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -2264,7 +2381,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("aGallea/gifted", None, None, None, None)
+            .create("aGallea/gifted", None, None, None, None, None)
             .await
             .unwrap();
         assert_eq!(runner.state, RunnerState::Creating);
@@ -2297,11 +2414,11 @@ mod tests {
         // Create runners and save
         let manager = RunnerManager::new(config.clone());
         manager
-            .create("owner/repo1", None, None, None, None)
+            .create("owner/repo1", None, None, None, None, None)
             .await
             .unwrap();
         manager
-            .create("owner/repo2", None, None, None, None)
+            .create("owner/repo2", None, None, None, None, None)
             .await
             .unwrap();
         manager.save_to_disk().await.unwrap();
@@ -2508,9 +2625,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp/runner-abc"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Busy,
             pid: Some(1234),
+            container_id: None,
             uptime_secs: Some(60),
             started_at: None,
             jobs_completed: 3,
@@ -2540,7 +2659,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None, None)
+            .create("owner/repo", None, None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -2604,7 +2723,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None, None)
+            .create("owner/repo", None, None, None, None, None)
             .await
             .unwrap();
         // Creating -> Busy is not a valid transition
@@ -2636,6 +2755,7 @@ mod tests {
                 Some(vec!["gpu".to_string(), "custom".to_string()]),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -2661,6 +2781,7 @@ mod tests {
                 Some(vec![]),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -2678,7 +2799,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None, None)
+            .create("owner/repo", None, None, None, None, None)
             .await
             .unwrap();
 
@@ -2701,6 +2822,7 @@ mod tests {
                 Some(vec!["self-hosted".to_string()]),
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -2716,7 +2838,7 @@ mod tests {
         config.ensure_dirs().unwrap();
         let manager = RunnerManager::new(config);
 
-        let result = manager.create("nodash", None, None, None, None).await;
+        let result = manager.create("nodash", None, None, None, None, None).await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("Invalid repo name"), "unexpected: {msg}");
@@ -2744,7 +2866,7 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let runner = manager
-            .create("owner/repo", None, None, None, None)
+            .create("owner/repo", None, None, None, None, None)
             .await
             .unwrap();
         let id = runner.config.id.clone();
@@ -2789,7 +2911,7 @@ mod tests {
         // emit_state_event is private but exercised via update_state (which calls it)
         // We can also trigger it via create + update_state.
         let runner = manager
-            .create("owner/repo", None, None, None, None)
+            .create("owner/repo", None, None, None, None, None)
             .await
             .unwrap();
         manager
@@ -2841,9 +2963,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Online,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: Some(started_at),
             jobs_completed: 0,
@@ -2876,9 +3000,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Offline,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -2911,9 +3037,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -2959,9 +3087,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -2991,9 +3121,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Online,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -3023,9 +3155,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -3057,9 +3191,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: Some("group-a".to_string()),
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -3103,9 +3239,11 @@ mod tests {
                     mode: RunnerMode::App,
                     work_dir: std::path::PathBuf::from("/tmp"),
                     group_id: Some("group-a".to_string()),
+                    container: None,
                 },
                 state: RunnerState::Online,
                 pid: None,
+                container_id: None,
                 uptime_secs: None,
                 started_at: None,
                 jobs_completed: 1,
@@ -3138,9 +3276,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: Some("group-a".to_string()),
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 1,
@@ -3200,9 +3340,11 @@ mod tests {
                     mode: RunnerMode::App,
                     work_dir: std::path::PathBuf::from("/tmp"),
                     group_id: Some("group-a".to_string()),
+                    container: None,
                 },
                 state: RunnerState::Online,
                 pid: None,
+                container_id: None,
                 uptime_secs: None,
                 started_at: None,
                 jobs_completed: 1,
@@ -3236,9 +3378,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: None, // no group
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -3270,9 +3414,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp"),
                 group_id: Some("group-a".to_string()),
+                container: None,
             },
             state: RunnerState::Busy,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -3315,9 +3461,11 @@ mod tests {
                     mode: RunnerMode::App,
                     work_dir: std::path::PathBuf::from("/tmp"),
                     group_id: Some("group-a".to_string()),
+                    container: None,
                 },
                 state: RunnerState::Online,
                 pid: None,
+                container_id: None,
                 uptime_secs: None,
                 started_at: None,
                 jobs_completed: 1,
@@ -3381,11 +3529,11 @@ mod tests {
         let manager = RunnerManager::new(config);
 
         let r1 = manager
-            .create("org/myapp", None, None, None, None)
+            .create("org/myapp", None, None, None, None, None)
             .await
             .unwrap();
         let r2 = manager
-            .create("org/myapp", None, None, None, None)
+            .create("org/myapp", None, None, None, None, None)
             .await
             .unwrap();
 
@@ -3454,6 +3602,7 @@ mod tests {
                 None,
                 None,
                 Some("group-123".to_string()),
+                None,
             )
             .await
             .unwrap();
@@ -3470,6 +3619,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -3480,11 +3630,11 @@ mod tests {
     async fn test_next_runner_number_increments() {
         let manager = create_test_manager();
         let r1 = manager
-            .create("owner/myrepo", None, None, None, None)
+            .create("owner/myrepo", None, None, None, None, None)
             .await
             .unwrap();
         let r2 = manager
-            .create("owner/myrepo", None, None, None, None)
+            .create("owner/myrepo", None, None, None, None, None)
             .await
             .unwrap();
         assert_eq!(r1.config.name, "myrepo-runner-1");
@@ -3495,11 +3645,11 @@ mod tests {
     async fn test_next_runner_number_different_repos() {
         let manager = create_test_manager();
         let r1 = manager
-            .create("owner/repo-a", None, None, None, None)
+            .create("owner/repo-a", None, None, None, None, None)
             .await
             .unwrap();
         let r2 = manager
-            .create("owner/repo-b", None, None, None, None)
+            .create("owner/repo-b", None, None, None, None, None)
             .await
             .unwrap();
         assert_eq!(r1.config.name, "repo-a-runner-1");
@@ -3549,9 +3699,11 @@ mod tests {
                 mode: RunnerMode::App,
                 work_dir: std::path::PathBuf::from("/tmp/runner-abc"),
                 group_id: None,
+                container: None,
             },
             state: RunnerState::Online,
             pid: None,
+            container_id: None,
             uptime_secs: None,
             started_at: None,
             jobs_completed: 0,
@@ -3597,9 +3749,11 @@ mod tests {
                     mode: RunnerMode::App,
                     work_dir: std::path::PathBuf::from("/tmp/test"),
                     group_id: None,
+                    container: None,
                 },
                 state: RunnerState::Online,
                 pid: Some(12345),
+                container_id: None,
                 uptime_secs: None,
                 started_at: Some(chrono::Utc::now()),
                 jobs_completed: 0,
@@ -3746,9 +3900,11 @@ mod tests {
                     mode: RunnerMode::App,
                     work_dir: std::path::PathBuf::from("/tmp/test"),
                     group_id: None,
+                    container: None,
                 },
                 state: RunnerState::Online,
                 pid: None,
+                container_id: None,
                 uptime_secs: None,
                 started_at: None,
                 jobs_completed: 0,
@@ -3802,9 +3958,11 @@ mod tests {
                         mode: RunnerMode::App,
                         work_dir: std::path::PathBuf::from(format!("/tmp/{id}")),
                         group_id: None,
+                        container: None,
                     },
                     state: RunnerState::Online,
                     pid: None,
+                    container_id: None,
                     uptime_secs: None,
                     started_at: None,
                     jobs_completed: 0,

@@ -29,7 +29,9 @@ All clients talk to the daemon over the Unix socket using REST, SSE (log streami
 
 ## How Runners Work
 
-Runners are **native child processes** of the daemon — not Docker containers, not VMs. Each runner is an instance of the [official GitHub Actions runner](https://github.com/actions/runner), the same binary you would install manually.
+By default, runners are **native child processes** of the daemon — not VMs. Each runner is an instance of the [official GitHub Actions runner](https://github.com/actions/runner), the same binary you would install manually.
+
+Runners can also run inside a **Docker container** instead (`RunnerMode::Container`) — see [docs/DOCKER_RUNNERS.md](DOCKER_RUNNERS.md). The runner binary is bind-mounted into the container rather than baked into the image, so the daemon's state machine, log streaming, and job-event parsing (below) work identically regardless of which mode a given runner uses; only the spawn/stop/monitor step differs (`runner::process` for native, `runner::docker` for containers).
 
 ### Runner Creation Flow
 
