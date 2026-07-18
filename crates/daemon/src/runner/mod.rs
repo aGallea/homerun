@@ -1016,6 +1016,22 @@ impl RunnerManager {
                 format!("{repo}-runner-{num}")
             }
         };
+
+        // Runner names must be globally unique. GitHub requires unique runner
+        // names per repo, and the Docker container name (`homerun-runner-{name}`)
+        // has no repo qualifier — so a duplicate name collides at the GitHub
+        // session and/or container level, causing runners to deactivate each
+        // other. Reject up front (case-insensitive, matching GitHub) instead.
+        {
+            let runners = self.runners.read().await;
+            if runners
+                .values()
+                .any(|r| r.config.name.eq_ignore_ascii_case(&name))
+            {
+                bail!("A runner named '{name}' already exists");
+            }
+        }
+
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
@@ -4162,5 +4178,69 @@ mod tests {
             .unwrap();
         assert!(runner.config.labels.contains(&"self-hosted".to_string()));
         assert!(!runner.config.labels.contains(&"docker".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_rejects_duplicate_name() {
+        let manager = create_test_manager();
+        manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let err = manager
+            .create(
+                "owner/repo",
+                Some("my-runner".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("already exists"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_rejects_duplicate_name_case_insensitive_across_repos() {
+        let manager = create_test_manager();
+        // Same name (different case), different repo — still rejected: runner
+        // names must be globally unique (Docker container name is repo-agnostic).
+        manager
+            .create(
+                "owner/repo-a",
+                Some("My-Runner".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let err = manager
+            .create(
+                "owner/repo-b",
+                Some("my-runner".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("already exists"),
+            "unexpected error: {err}"
+        );
     }
 }
