@@ -16,14 +16,7 @@ export interface RunnerConfig {
 }
 
 export type RunnerState =
-  | "creating"
-  | "registering"
-  | "online"
-  | "busy"
-  | "stopping"
-  | "offline"
-  | "error"
-  | "deleting";
+  "creating" | "registering" | "online" | "busy" | "stopping" | "offline" | "error" | "deleting";
 
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 
