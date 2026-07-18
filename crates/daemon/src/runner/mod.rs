@@ -144,6 +144,15 @@ fn default_runner_labels() -> Vec<String> {
     ]
 }
 
+/// Default labels for a container-mode runner. Unlike `default_runner_labels`,
+/// these are independent of the daemon's host OS — the runner is a Linux
+/// container regardless of host. GitHub's `config.sh` auto-adds the real
+/// `self-hosted`/OS/arch labels on top; `docker` is the stable marker workflows
+/// use to target container runners (`runs-on: [self-hosted, docker]`).
+fn default_container_labels() -> Vec<String> {
+    vec!["self-hosted".to_string(), "docker".to_string()]
+}
+
 impl RunnerManager {
     pub fn new(config: Config) -> Self {
         let (log_tx, _) = broadcast::channel(1024);
@@ -1010,17 +1019,16 @@ impl RunnerManager {
         let work_dir = self.config.runners_dir().join(&id);
         std::fs::create_dir_all(&work_dir)?;
 
-        let resolved_labels = if let Some(user_labels) = labels {
-            if user_labels.is_empty() {
-                // No labels provided — use platform defaults
-                default_runner_labels()
-            } else {
-                // User explicitly chose labels — use as-is
-                user_labels
-            }
+        // Container runners are Linux regardless of host, and need a stable
+        // `docker` marker for routing; native runners keep host platform labels.
+        let platform_defaults = if matches!(mode.as_ref(), Some(RunnerMode::Container)) {
+            default_container_labels()
         } else {
-            // None — use platform defaults
             default_runner_labels()
+        };
+        let resolved_labels = match labels {
+            Some(user_labels) if !user_labels.is_empty() => user_labels,
+            _ => platform_defaults,
         };
 
         let runner = RunnerInfo {
@@ -4097,5 +4105,62 @@ mod tests {
         let disk_entries = on_disk.get("backfill-runner").unwrap();
         assert_eq!(disk_entries[0].job_number, 1);
         assert_eq!(disk_entries[1].job_number, 2);
+    }
+
+    #[tokio::test]
+    async fn test_container_mode_empty_labels_default_to_docker() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create(
+                "owner/repo",
+                None,
+                None,
+                Some(RunnerMode::Container),
+                None,
+                Some(types::ContainerConfig {
+                    image: "img:latest".to_string(),
+                    extra_env: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            runner.config.labels,
+            vec!["self-hosted".to_string(), "docker".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_container_mode_user_labels_preserved() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create(
+                "owner/repo",
+                None,
+                Some(vec!["self-hosted".to_string(), "rust".to_string()]),
+                Some(RunnerMode::Container),
+                None,
+                Some(types::ContainerConfig {
+                    image: "img:latest".to_string(),
+                    extra_env: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            runner.config.labels,
+            vec!["self-hosted".to_string(), "rust".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_non_container_mode_does_not_get_docker_label() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, Some(RunnerMode::App), None, None)
+            .await
+            .unwrap();
+        assert!(runner.config.labels.contains(&"self-hosted".to_string()));
+        assert!(!runner.config.labels.contains(&"docker".to_string()));
     }
 }
