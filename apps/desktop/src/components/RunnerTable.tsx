@@ -388,7 +388,6 @@ function RunnerRow({
               </span>
             )}
             {!indented && runner.config.mode === "service" && <SvcBadge />}
-            {!indented && runner.config.mode === "container" && <DockerBadge />}
             <span
               className="font-mono"
               style={{
@@ -405,13 +404,17 @@ function RunnerRow({
           {!inGroup && (
             <div
               style={{
-                fontSize: 11,
-                color: "var(--text-secondary)",
-                marginTop: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginTop: 3,
                 paddingLeft: runner.config.mode === "service" ? 32 : 0,
               }}
             >
-              {runner.config.repo_owner}/{runner.config.repo_name}
+              {runner.config.mode === "container" && <DockerBadge />}
+              <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                {runner.config.repo_owner}/{runner.config.repo_name}
+              </span>
             </div>
           )}
         </div>
