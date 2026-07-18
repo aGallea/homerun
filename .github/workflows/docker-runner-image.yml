@@ -3,6 +3,10 @@ name: Docker Runner Image
 on:
   push:
     tags: ["v*"]
+  # Allow publishing the runner images (base + rust) on demand, without
+  # waiting for a release tag — e.g. to make a new/updated image available to
+  # runners before the next release. Uses github.ref_name for the extra tag.
+  workflow_dispatch:
 
 permissions:
   contents: read
