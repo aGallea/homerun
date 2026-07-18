@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build-and-push:
-    name: Build and push base runner image
+    name: Build and push runner images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -38,3 +38,13 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/homerun-runner:ubuntu-24.04
             ghcr.io/${{ github.repository_owner }}/homerun-runner:${{ github.ref_name }}
+
+      - name: Build and push (rust)
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/runner-rust
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/homerun-runner:rust
+            ghcr.io/${{ github.repository_owner }}/homerun-runner:rust-${{ github.ref_name }}
