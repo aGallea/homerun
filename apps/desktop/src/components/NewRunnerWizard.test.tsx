@@ -158,6 +158,31 @@ describe("NewRunnerWizard", () => {
     );
   });
 
+  it("Rust preset fills the rust image and rust label", async () => {
+    const { props } = await renderWizard();
+    await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("org/frontend"));
+    await waitFor(() => expect(screen.getByText("Container")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Container"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rust" }));
+    const imageInput = screen.getByLabelText("Image") as HTMLInputElement;
+    expect(imageInput.value).toBe("ghcr.io/agallea/homerun-runner:rust");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launch Runner" }));
+
+    await waitFor(() => expect(props.onCreate).toHaveBeenCalledTimes(1));
+    expect(props.onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "container",
+        container: { image: "ghcr.io/agallea/homerun-runner:rust" },
+        labels: expect.arrayContaining(["rust"]),
+      }),
+    );
+  });
+
   it("disables Container mode when Docker isn't available", async () => {
     vi.mocked(api.getDockerStatus).mockResolvedValue({ available: false });
     await renderWizard();

@@ -12,7 +12,9 @@ import type {
 } from "../api/types";
 
 const DEFAULT_CONTAINER_IMAGE = "ghcr.io/agallea/homerun-runner:ubuntu-24.04";
+const RUST_CONTAINER_IMAGE = "ghcr.io/agallea/homerun-runner:rust";
 type RunnerModeChoice = "app" | "service" | "container";
+type ContainerPreset = "base" | "rust" | "custom";
 
 interface NewRunnerWizardProps {
   onClose: () => void;
@@ -64,6 +66,7 @@ export function NewRunnerWizard({
   const [labelsInput, setLabelsInput] = useState(DEFAULT_LABELS.join(", "));
   const [mode, setMode] = useState<RunnerModeChoice>("app");
   const [containerImage, setContainerImage] = useState(DEFAULT_CONTAINER_IMAGE);
+  const [preset, setPreset] = useState<ContainerPreset>("base");
   const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null);
   const [count, setCount] = useState(1);
   const [launching, setLaunching] = useState(false);
@@ -86,6 +89,23 @@ export function NewRunnerWizard({
       cancelled = true;
     };
   }, []);
+
+  const applyPreset = (p: ContainerPreset) => {
+    setPreset(p);
+    if (p === "base") {
+      setContainerImage(DEFAULT_CONTAINER_IMAGE);
+      setLabelsInput("self-hosted, docker");
+    } else if (p === "rust") {
+      setContainerImage(RUST_CONTAINER_IMAGE);
+      setLabelsInput("self-hosted, docker, rust");
+    }
+    // "custom": leave the current image/labels for the user to edit.
+  };
+
+  useEffect(() => {
+    if (mode === "container") applyPreset(preset);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   const filteredRepos = useMemo(() => {
     const q = search.toLowerCase();
@@ -240,6 +260,8 @@ export function NewRunnerWizard({
               dockerAvailable={dockerAvailable}
               containerImage={containerImage}
               onContainerImage={setContainerImage}
+              preset={preset}
+              onPreset={applyPreset}
               count={count}
               onCount={setCount}
             />
@@ -407,6 +429,8 @@ interface StepConfigureProps {
   dockerAvailable: boolean | null;
   containerImage: string;
   onContainerImage: (v: string) => void;
+  preset: ContainerPreset;
+  onPreset: (p: ContainerPreset) => void;
   count: number;
   onCount: (v: number) => void;
 }
@@ -422,6 +446,8 @@ function StepConfigure({
   dockerAvailable,
   containerImage,
   onContainerImage,
+  preset,
+  onPreset,
   count,
   onCount,
 }: StepConfigureProps) {
@@ -577,6 +603,35 @@ function StepConfigure({
           })}
         </div>
       </div>
+
+      {mode === "container" && (
+        <div className="form-group">
+          <label className="form-label">Image preset</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["base", "rust", "custom"] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => onPreset(p)}
+                style={{
+                  flex: 1,
+                  padding: "8px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textTransform: "capitalize",
+                  background: preset === p ? "rgba(59, 130, 246, 0.08)" : "var(--bg-tertiary)",
+                  border: `1.5px solid ${preset === p ? "var(--accent-blue)" : "var(--border)"}`,
+                  borderRadius: 8,
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                }}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {mode === "container" && (
         <div className="form-group">
