@@ -83,6 +83,13 @@ pub async fn configure_and_start_container(
 ) -> Result<ContainerProcess> {
     let labels_str = labels.join(",");
     let mut env = vec![
+        // The GitHub runner's config.sh/run.sh refuse to run as root unless
+        // this is set. Container images very commonly run as root (the
+        // first-party base image does), and root inside a container is the
+        // norm — the runner's guard is meant for host installs. Set it first
+        // so a user can still override via `extra_env` if their image runs as
+        // a non-root user and they'd rather keep the guard active.
+        "RUNNER_ALLOW_RUNASROOT=1".to_string(),
         format!("HOMERUN_RUNNER_URL={url}"),
         format!("HOMERUN_RUNNER_TOKEN={token}"),
         format!("HOMERUN_RUNNER_NAME={name}"),
@@ -134,7 +141,11 @@ async fn remove_container(docker: &Docker, container_id: &str) -> Result<()> {
 /// behavior of logging (not failing) when GitHub-side removal doesn't
 /// succeed — the runner may need manual cleanup on GitHub.
 pub async fn deregister(docker: &Docker, work_dir: &Path, image: &str, token: &str) -> Result<()> {
-    let env = vec![format!("HOMERUN_RUNNER_TOKEN={token}")];
+    // config.sh remove hits the same root guard as config.sh/run.sh.
+    let env = vec![
+        "RUNNER_ALLOW_RUNASROOT=1".to_string(),
+        format!("HOMERUN_RUNNER_TOKEN={token}"),
+    ];
     let cmd = vec![
         "cd /workspace && exec ./config.sh remove --token \"$HOMERUN_RUNNER_TOKEN\"".to_string(),
     ];

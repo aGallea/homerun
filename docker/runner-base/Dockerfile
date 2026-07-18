@@ -24,4 +24,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Run as a non-root user by default: defense-in-depth (a job's code doesn't
+# get container-root) and it keeps files the runner writes into the
+# bind-mounted workspace owned by a normal uid rather than root. ubuntu:24.04
+# already ships a `ubuntu` user at uid 1000. Bring-your-own images that run as
+# root still work — HomeRun sets RUNNER_ALLOW_RUNASROOT for them.
+RUN mkdir -p /workspace && chown ubuntu:ubuntu /workspace
+USER ubuntu
+
 WORKDIR /workspace

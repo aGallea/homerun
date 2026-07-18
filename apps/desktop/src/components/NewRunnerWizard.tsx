@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useRepos } from "../hooks/useRepos";
 import { api } from "../api/commands";
+import { openExternal } from "../utils/openExternal";
 import type {
   BatchCreateResponse,
   ContainerConfig,
@@ -481,7 +482,11 @@ function StepConfigure({
                 key={m}
                 onClick={() => !disabled && onMode(m)}
                 disabled={disabled}
-                title={disabled ? "Docker isn't reachable — start Docker Desktop to use this mode" : undefined}
+                title={
+                  disabled
+                    ? "Docker isn't reachable — start Docker Desktop to use this mode"
+                    : undefined
+                }
                 style={{
                   flex: 1,
                   padding: "12px",
@@ -593,6 +598,12 @@ function StepConfigure({
               href="https://github.com/aGallea/homerun/blob/master/docs/DOCKER_RUNNERS.md"
               target="_blank"
               rel="noreferrer"
+              onClick={(e) => {
+                e.preventDefault();
+                void openExternal(
+                  "https://github.com/aGallea/homerun/blob/master/docs/DOCKER_RUNNERS.md",
+                );
+              }}
             >
               Docker Runners
             </a>
