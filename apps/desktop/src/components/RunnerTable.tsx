@@ -4,6 +4,7 @@ import type { RunnerInfo } from "../api/types";
 import { StatusBadge } from "./StatusBadge";
 import { RunnerActions } from "./RunnerActions";
 import { RunnerGroupRow } from "./RunnerGroupRow";
+import { DockerBadge } from "./DockerBadge";
 
 // Persists across navigations (module-level)
 const persistedExpandedGroups = new Set<string>();
@@ -383,9 +384,11 @@ function RunnerRow({
                 }}
               >
                 {runner.config.mode === "service" && <SvcBadge />}
+                {runner.config.mode === "container" && <DockerBadge />}
               </span>
             )}
             {!indented && runner.config.mode === "service" && <SvcBadge />}
+            {!indented && runner.config.mode === "container" && <DockerBadge />}
             <span
               className="font-mono"
               style={{
