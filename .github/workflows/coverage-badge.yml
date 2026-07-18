@@ -10,7 +10,7 @@ env:
 jobs:
   update-badge:
     name: Update coverage badge
-    runs-on: self-hosted
+    runs-on: [self-hosted, rust]
     defaults:
       run:
         shell: bash

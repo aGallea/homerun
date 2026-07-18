@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: self-hosted
+    runs-on: [self-hosted, rust]
     defaults:
       run:
         shell: bash
