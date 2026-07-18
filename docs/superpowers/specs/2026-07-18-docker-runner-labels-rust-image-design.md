@@ -30,9 +30,9 @@ while testing it:
 
 ## Non-Goals
 
-- Rewiring this repo's own `ci.yml` routing (bare `runs-on: self-hosted`) to
-  target container runners. That changes routing for existing macOS runners and
-  is left to the maintainer.
+- Migrating `release-build.yml` (macOS/Windows release builds) to GitHub-hosted
+  cloud runners, or adding a Linux release. That is a separate release-infra
+  project with its own spec. This spec leaves `release-build.yml` untouched.
 - Auto-deriving labels from arbitrary image tags.
 
 ## Design
@@ -112,10 +112,32 @@ Expand the docs with:
   a runner from it (with the `rust` label), and a `runs-on: [self-hosted, rust]`
   workflow snippet.
 
+### 6. Dogfood: route CI/automation jobs to container runners
+
+Rewire the self-hosted jobs in the CI and automation workflows to the new label
+scheme so HomeRun's own CI runs on container runners. `release-build.yml` is
+intentionally left untouched (its cloud-runner migration is a separate spec).
+
+| Workflow · job                        | Needs                      | `runs-on`               |
+| ------------------------------------- | -------------------------- | ----------------------- |
+| `ci.yml` · pre-commit                 | Rust + Node + Python       | `[self-hosted, rust]`   |
+| `ci.yml` · react (test + coverage)    | Node                       | `[self-hosted, docker]` |
+| `ci.yml` · rust (fmt/clippy/test/cov) | Rust                       | `[self-hosted, rust]`   |
+| `ci.yml` · typescript (tsc + build)   | Node                       | `[self-hosted, docker]` |
+| `coverage-badge.yml` · badge          | Rust + Node                | `[self-hosted, rust]`   |
+| `release-please.yml` · release-please | Rust (`generate-lockfile`) | `[self-hosted, rust]`   |
+
+The `rust` image inherits Node/Python from the base image, so combined Rust+Node
+jobs run on a single `rust` runner. **Operational consequence:** running full CI
+now requires at least one `rust` and one base (`docker`) container runner online.
+
 ## Acceptance Criteria
 
 - Creating a container runner with empty labels yields GitHub labels including
   `docker` and **not** `macOS` (verified against the GitHub runners API).
+- Every self-hosted job in `ci.yml`, `coverage-badge.yml`, and
+  `release-please.yml` uses `[self-hosted, rust]` or `[self-hosted, docker]`;
+  `release-build.yml` is unchanged.
 - Wizard Rust preset creates a runner whose image is `…:rust` and whose labels
   include `rust`.
 - `docker/runner-rust/Dockerfile` builds; `rustc`/`cargo` are on PATH as the
@@ -135,3 +157,6 @@ Expand the docs with:
   Desktop), same flow already validated for the base image.
 - **Chip:** component test that `DockerBadge` renders for `mode==="container"`
   and is absent otherwise.
+- **CI routing:** validated by a live PR run once a `rust` and a `docker`
+  container runner are online — each job lands on a matching runner and passes
+  (manual, since it depends on live runners).
