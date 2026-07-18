@@ -5,7 +5,10 @@
 pub fn resolve_shell_path() -> Option<String> {
     use std::process::Stdio;
 
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    // Fall back to /bin/sh (guaranteed on any Unix) rather than a specific
+    // shell like zsh — zsh is the macOS default but is absent on minimal Linux
+    // (e.g. a container), where the fallback would otherwise fail to spawn.
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let output = std::process::Command::new(&shell)
         .args(["-l", "-c", "echo $PATH"])
         .stdout(Stdio::piped())
@@ -141,8 +144,8 @@ mod tests {
     #[test]
     fn resolve_shell_path_returns_some_on_unix() {
         // On a typical Unix system with a valid $SHELL, we expect Some.
-        // If SHELL is unset the function falls back to /bin/zsh which
-        // should also produce a PATH on macOS / Linux dev machines.
+        // If SHELL is unset the function falls back to /bin/sh, which exists on
+        // any Unix (macOS, Linux dev machines, and minimal containers alike).
         let result = resolve_shell_path();
         assert!(result.is_some(), "expected Some on Unix, got None");
         let path = result.unwrap();
