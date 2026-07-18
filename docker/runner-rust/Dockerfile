@@ -5,6 +5,16 @@
 # this same FROM-the-base pattern to build your own toolchain images.
 FROM ghcr.io/agallea/homerun-runner:ubuntu-24.04
 
+# Build dependencies for common Rust crates with native components (e.g.
+# openssl-sys, used transitively via reqwest): pkg-config finds system libs and
+# libssl-dev provides the OpenSSL headers the base image's runtime libssl3 lacks.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+USER ubuntu
+
 # The base image ends with `USER ubuntu`, so this RUN executes as the non-root
 # ubuntu user and rustup installs into /home/ubuntu/.cargo.
 #
