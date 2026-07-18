@@ -38,7 +38,7 @@ curl --unix-socket ~/.homerun/daemon.sock \
   }'
 ```
 
-**TUI / `homerun --no-tui`:** currently read-only for container runners — you can list, monitor, and act on them (start/stop/restart/delete) the same as any runner, but the interactive/CLI *creation* flow doesn't yet expose the Container mode or image picker. Create container runners from the desktop app or the API for now.
+**TUI / `homerun --no-tui`:** currently read-only for container runners — you can list, monitor, and act on them (start/stop/restart/delete) the same as any runner, but the interactive/CLI _creation_ flow doesn't yet expose the Container mode or image picker. Create container runners from the desktop app or the API for now.
 
 ## Base images vs. custom images
 
@@ -60,16 +60,16 @@ You don't need to install the runner itself, `git`, or anything runner-specific 
 
 Fields on a container runner's config (`container` object in the API; only `image` is currently exposed in the desktop wizard):
 
-| Field       | Type                     | Required | Notes                                                                 |
-| ----------- | ------------------------ | -------- | ---------------------------------------------------------------------- |
-| `image`     | string                   | yes      | Any pullable registry ref, or a locally built/tagged image name.       |
-| `extra_env` | array of `[key, value]`  | no       | Extra environment variables injected into the container. API-only for now — not yet in the desktop UI. |
+| Field       | Type                    | Required | Notes                                                                                                  |
+| ----------- | ----------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `image`     | string                  | yes      | Any pullable registry ref, or a locally built/tagged image name.                                       |
+| `extra_env` | array of `[key, value]` | no       | Extra environment variables injected into the container. API-only for now — not yet in the desktop UI. |
 
 Not yet configurable (planned, see [roadmap](../README.md#roadmap)): per-runner CPU/memory limits, ephemeral (per-job) lifecycle.
 
 ## How it works
 
-A container runner uses the same registration/lifecycle flow as a native runner — the daemon still gets a registration token from GitHub, still runs `config.sh` then `run.sh`, and still streams logs and job events the same way. The only thing that changes is *where* those scripts execute.
+A container runner uses the same registration/lifecycle flow as a native runner — the daemon still gets a registration token from GitHub, still runs `config.sh` then `run.sh`, and still streams logs and job events the same way. The only thing that changes is _where_ those scripts execute.
 
 The runner binary itself is **never baked into the image**. HomeRun downloads the Linux build of the [official runner](https://github.com/actions/runner) once (cached alongside the native runner cache), copies it into the runner's own work directory, and bind-mounts that directory into the container at `/workspace`. This means:
 
@@ -134,3 +134,56 @@ If the image only has an `amd64` build, Docker Desktop runs it under QEMU emulat
 - **Kubernetes.** Running runners as pods in a cluster is a separate, larger feature — see the [roadmap](../README.md#roadmap).
 - **Per-runner CPU/memory limits** and **`extra_env`** in the creation UI (both exist in the underlying config already and are reachable via the API).
 - **Creating** container runners from the TUI/CLI (viewing and managing them works today).
+
+## Labels and job routing
+
+Container runners are created with the labels `self-hosted` and `docker` by
+default. GitHub also auto-adds the container's real `self-hosted`, `Linux`, and
+architecture (`ARM64`/`X64`) labels. Target container runners from a workflow
+with the `docker` marker:
+
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted, docker]
+```
+
+Purpose-built images add their own toolchain label so you can route by toolchain
+— e.g. the Rust image below carries `rust`:
+
+```yaml
+jobs:
+  test:
+    runs-on: [self-hosted, rust]
+```
+
+## Build your own runner image
+
+The runner binary is bind-mounted at start time, so an image only needs an OS,
+`bash`, glibc, and whatever toolchain your jobs use. The first-party **Rust**
+image is a worked example — extend the base image and add a toolchain:
+
+```dockerfile
+# docker/runner-rust/Dockerfile
+FROM ghcr.io/agallea/homerun-runner:ubuntu-24.04
+
+# The base image runs as the non-root `ubuntu` user, so rustup installs into
+# /home/ubuntu/.cargo.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"
+```
+
+Build and tag it, then create a runner from it:
+
+```bash
+docker build -t ghcr.io/agallea/homerun-runner:rust docker/runner-rust/
+```
+
+In the New Runner wizard, pick **Container** mode and the **Rust** preset (or
+enter a **Custom** image). The runner registers with the `rust` label, and
+`runs-on: [self-hosted, rust]` jobs land on it.
+
+To run HomeRun's own CI you keep at least one **`rust`** runner and one base
+**`docker`** runner online — see `.github/workflows/ci.yml` for how jobs are
+routed.
