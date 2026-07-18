@@ -7,6 +7,10 @@ FROM ghcr.io/agallea/homerun-runner:ubuntu-24.04
 
 # The base image ends with `USER ubuntu`, so this RUN executes as the non-root
 # ubuntu user and rustup installs into /home/ubuntu/.cargo.
+#
+# `--profile minimal` omits rustfmt/clippy, but real Rust CI needs them (plus
+# llvm-tools-preview for coverage via cargo-llvm-cov), so add them explicitly.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain stable --profile minimal
+    | sh -s -- -y --default-toolchain stable --profile minimal \
+        -c rustfmt -c clippy -c llvm-tools-preview
 ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"
