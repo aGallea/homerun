@@ -129,7 +129,10 @@ pub async fn stop_container(docker: &Docker, container_id: &str, timeout: Durati
     remove_container(docker, container_id).await
 }
 
-async fn remove_container(docker: &Docker, container_id: &str) -> Result<()> {
+/// Force-removes a container by id or name. Best-effort: ignores
+/// "not found"/"already removed". Used both when stopping a runner and when a
+/// container exits on its own, so exited containers don't accumulate.
+pub async fn remove_container(docker: &Docker, container_id: &str) -> Result<()> {
     let options = RemoveContainerOptionsBuilder::new().force(true).build();
     let _ = docker.remove_container(container_id, Some(options)).await;
     Ok(())
@@ -389,6 +392,17 @@ mod tests {
         let docker = broken_docker_client();
         let result = wait_container(&docker, "nonexistent-container").await;
         assert!(result.is_err());
+    }
+
+    /// `remove_container` is best-effort cleanup — it must never error even
+    /// when Docker is unreachable or the container is already gone, so the
+    /// natural-exit cleanup path never fails the monitor task.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_remove_container_is_best_effort_without_daemon() {
+        let docker = broken_docker_client();
+        let result = remove_container(&docker, "nonexistent-container").await;
+        assert!(result.is_ok());
     }
 
     #[cfg(unix)]

@@ -2027,6 +2027,10 @@ impl RunnerManager {
                 } => {
                     tokio::select! {
                         result = docker::wait_container(&docker, &container_id) => {
+                            // The container exited on its own — remove it so
+                            // exited containers don't pile up (the kill path
+                            // below removes via stop_container).
+                            let _ = docker::remove_container(&docker, &container_id).await;
                             format!("{result:?}")
                         }
                         _ = kill_signal.notified() => {
