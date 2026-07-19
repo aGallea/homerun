@@ -1008,6 +1008,13 @@ impl RunnerManager {
         }
         let (owner, repo) = (parts[0], parts[1]);
 
+        // Container mode is meaningless without an image to run — reject it here
+        // rather than let the start path silently fall back to native execution
+        // of a Linux runner binary.
+        if matches!(mode.as_ref(), Some(RunnerMode::Container)) && container.is_none() {
+            bail!("Container mode requires a container image configuration");
+        }
+
         let id = uuid::Uuid::new_v4().to_string();
         let name = match name {
             Some(n) => n,
@@ -4242,5 +4249,42 @@ mod tests {
             err.to_string().contains("already exists"),
             "unexpected error: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_container_mode_requires_container_config() {
+        let manager = create_test_manager();
+        let err = manager
+            .create(
+                "owner/repo",
+                Some("c-runner".to_string()),
+                None,
+                Some(RunnerMode::Container),
+                None,
+                None, // no container config
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("Container mode requires"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_non_container_mode_allows_missing_container_config() {
+        let manager = create_test_manager();
+        // App/Service mode with no container config is fine.
+        manager
+            .create(
+                "owner/repo",
+                Some("app-runner".to_string()),
+                None,
+                Some(RunnerMode::App),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
     }
 }
