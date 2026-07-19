@@ -33,15 +33,27 @@ pub async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Valu
         .collect();
     if !container_runners.is_empty() {
         if let Ok(dc) = docker::connect() {
-            for (runner_id, container_id) in container_runners {
-                if let Ok(stats) = docker::container_stats(&dc, &container_id).await {
-                    runner_metrics.push(RunnerMetrics {
-                        runner_id,
-                        cpu_percent: stats.cpu_percent,
-                        memory_bytes: stats.memory_bytes,
-                    });
-                }
-            }
+            // Each container_stats is an await round-trip to the Docker daemon;
+            // fetch them concurrently so the endpoint's latency doesn't grow
+            // linearly with the number of container runners. (The Docker handle
+            // is cheap to clone — it's an Arc internally.)
+            let stats_futures = container_runners
+                .into_iter()
+                .map(|(runner_id, container_id)| {
+                    let dc = dc.clone();
+                    async move {
+                        docker::container_stats(&dc, &container_id)
+                            .await
+                            .ok()
+                            .map(|stats| RunnerMetrics {
+                                runner_id,
+                                cpu_percent: stats.cpu_percent,
+                                memory_bytes: stats.memory_bytes,
+                            })
+                    }
+                });
+            let results = futures::future::join_all(stats_futures).await;
+            runner_metrics.extend(results.into_iter().flatten());
         }
     }
 
