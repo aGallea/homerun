@@ -9,6 +9,39 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.9.0](https://github.com/aGallea/homerun/compare/v0.8.4...v0.9.0) (2026-07-19)
+
+
+### Features
+
+* **desktop:** add Base/Rust/Custom image presets to the runner wizard ([90abf3b](https://github.com/aGallea/homerun/commit/90abf3b53061f97906234fec2eb680cb6c4ce535))
+* **desktop:** move Docker chip below the runner name, leading the repo line ([a9d4f41](https://github.com/aGallea/homerun/commit/a9d4f412035ec77b5d24592a8d72a97a814c6088))
+* **desktop:** show a Docker pill on container-backed runners ([c95d8b5](https://github.com/aGallea/homerun/commit/c95d8b5485c537c36f52deff64287551b22ff5ce))
+* **docker:** add first-party Rust runner image and publish it ([cb9c7dd](https://github.com/aGallea/homerun/commit/cb9c7dd47555db6f41ef072b12c7fef735699abe))
+* **runner:** add Docker container mode for self-hosted runners ([26dd0a4](https://github.com/aGallea/homerun/commit/26dd0a4042616d1fe9600fb886770b0d73043eb5))
+* **runner:** add Docker container mode for self-hosted runners ([963549a](https://github.com/aGallea/homerun/commit/963549acfd1737ffe285c7d47262c0a2f32c6e66))
+* **runner:** container runners default to self-hosted,docker labels ([0147647](https://github.com/aGallea/homerun/commit/0147647fe6b9b30fa541ec0112ecde84a3508616))
+* **runner:** reject creating a runner with a duplicate name ([e80a4d0](https://github.com/aGallea/homerun/commit/e80a4d0c8aa81501b4160768b231b02363d75868))
+
+
+### Bug Fixes
+
+* **daemon:** fall back to /bin/sh, not /bin/zsh, resolving shell PATH ([97309a3](https://github.com/aGallea/homerun/commit/97309a32ed523abfc21f5560f35b1aa7f5f7e37f))
+* **desktop:** render Docker chip below the name for grouped runners too ([c46e21d](https://github.com/aGallea/homerun/commit/c46e21d90a37de94a203caff7b8927efb400b422))
+* **desktop:** skip metrics poll while a request is in flight ([7771007](https://github.com/aGallea/homerun/commit/77710075f51731d73c82f8ec0660a7dd1c0ae1cb))
+* **docker:** add pkg-config and libssl-dev to the Rust runner image ([5a5148b](https://github.com/aGallea/homerun/commit/5a5148bf06e91c1f9c9e16a1d3653b0edf31b3cb))
+* **docker:** add rustfmt, clippy, llvm-tools to the Rust runner image ([a6f501b](https://github.com/aGallea/homerun/commit/a6f501b15e924881f28e6368abb3c362e2e6a3f6))
+* **metrics:** compute container CPU% from a real interval, not one-shot ([11092e0](https://github.com/aGallea/homerun/commit/11092e078bd58f90ce5799c61606fa77d2c0c54e))
+* **runner:** reject Container mode without a container config ([754e12b](https://github.com/aGallea/homerun/commit/754e12b66110f75312f13dc89ce8d4130851ffe1))
+* **runner:** remove container-backed runner's container on natural exit ([ee206f0](https://github.com/aGallea/homerun/commit/ee206f0442f718739d3bd3de309de17ffaf9e97c))
+* **runner:** run container runners as non-root and open links via shell ([9d3772a](https://github.com/aGallea/homerun/commit/9d3772add6adab5bd8b48dcca371291a86e79369))
+* **runner:** validate container image and name at create time ([b3549c9](https://github.com/aGallea/homerun/commit/b3549c9a87eb8d7d59538d586c534cf2ffd2caec))
+
+
+### Performance Improvements
+
+* **metrics:** fetch container stats concurrently instead of serially ([5d8aa9e](https://github.com/aGallea/homerun/commit/5d8aa9ef07912f629f39c9b6757692ade3b92bc2))
+
 ## [0.8.4](https://github.com/aGallea/homerun/compare/v0.8.3...v0.8.4) (2026-05-02)
 
 
