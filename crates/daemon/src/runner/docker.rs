@@ -226,19 +226,50 @@ pub struct ContainerStats {
     pub memory_bytes: u64,
 }
 
-/// One-shot resource usage snapshot for a container, computed with the same
-/// CPU-percent formula `docker stats` itself uses:
-/// `(cpu_delta / system_delta) * online_cpus * 100`.
+/// Docker's CPU-percent formula: the fraction of total system CPU time the
+/// container consumed over the sample interval, scaled to the number of cores.
+/// `(cpu_delta / system_delta) * online_cpus * 100` — one fully-busy core = 100%.
+/// Uses saturating subtraction so a counter reset can't produce a negative
+/// delta, and returns 0 when no system time elapsed (avoids NaN/inf).
+fn compute_cpu_percent(
+    cpu_total: u64,
+    precpu_total: u64,
+    system_total: u64,
+    presystem_total: u64,
+    online_cpus: u32,
+) -> f64 {
+    let cpu_delta = cpu_total.saturating_sub(precpu_total) as f64;
+    let system_delta = system_total.saturating_sub(presystem_total) as f64;
+    let online = online_cpus.max(1) as f64;
+    if system_delta > 0.0 {
+        (cpu_delta / system_delta) * online * 100.0
+    } else {
+        0.0
+    }
+}
+
+/// Current CPU/memory usage for a container, using the same CPU-percent formula
+/// as `docker stats`: `(cpu_delta / system_delta) * online_cpus * 100`.
+///
+/// Streams two stat frames instead of a single one-shot read. A one-shot read
+/// leaves `precpu_stats` zeroed, so its delta spans the container's whole
+/// lifetime — a lifetime average, not current usage. The second streamed
+/// frame's `precpu` is the first frame, giving a real (~1s) interval. Callers
+/// fetch containers' stats concurrently, so the ~1s wait is paid once overall.
 pub async fn container_stats(docker: &Docker, container_id: &str) -> Result<ContainerStats> {
-    let options = StatsOptionsBuilder::new()
-        .stream(false)
-        .one_shot(true)
-        .build();
+    let options = StatsOptionsBuilder::new().stream(true).build();
     let mut stream = docker.stats(container_id, Some(options));
-    let response = stream
+
+    // Discard the first frame (zeroed precpu); keep the second (valid precpu).
+    let _first = stream
         .next()
         .await
         .ok_or_else(|| anyhow::anyhow!("no stats returned for container {container_id}"))?
+        .with_context(|| format!("Failed to fetch stats for container {container_id}"))?;
+    let response = stream
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("stats stream ended early for container {container_id}"))?
         .with_context(|| format!("Failed to fetch stats for container {container_id}"))?;
 
     let memory_bytes = response
@@ -258,17 +289,13 @@ pub async fn container_stats(docker: &Docker, container_id: &str) -> Result<Cont
                     .and_then(|u| u.total_usage)
                     .unwrap_or(0)
             };
-            let cpu_delta = total(cpu).saturating_sub(total(precpu)) as f64;
-            let system_delta =
-                cpu.system_cpu_usage
-                    .unwrap_or(0)
-                    .saturating_sub(precpu.system_cpu_usage.unwrap_or(0)) as f64;
-            let online_cpus = cpu.online_cpus.unwrap_or(1).max(1) as f64;
-            if system_delta > 0.0 {
-                (cpu_delta / system_delta) * online_cpus * 100.0
-            } else {
-                0.0
-            }
+            compute_cpu_percent(
+                total(cpu),
+                total(precpu),
+                cpu.system_cpu_usage.unwrap_or(0),
+                precpu.system_cpu_usage.unwrap_or(0),
+                cpu.online_cpus.unwrap_or(1),
+            )
         })
         .unwrap_or(0.0);
 
@@ -403,6 +430,37 @@ mod tests {
         let docker = broken_docker_client();
         let result = remove_container(&docker, "nonexistent-container").await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_compute_cpu_percent_one_full_core() {
+        // One fully-busy core: the container used one core's worth of time
+        // while the system advanced across all 4 cores (cpu_delta = interval,
+        // system_delta = 4 * interval) → 100%.
+        let pct = compute_cpu_percent(1_000, 0, 4_000, 0, 4);
+        assert!((pct - 100.0).abs() < 1e-9, "got {pct}");
+    }
+
+    #[test]
+    fn test_compute_cpu_percent_half_core_single_cpu() {
+        // Half a core on a 1-CPU system: cpu_delta=50, system_delta=100 → 50%.
+        let pct = compute_cpu_percent(150, 100, 200, 100, 1);
+        assert!((pct - 50.0).abs() < 1e-9, "got {pct}");
+    }
+
+    #[test]
+    fn test_compute_cpu_percent_zero_system_delta_is_zero() {
+        // No system time elapsed (e.g. identical frames) → 0, not NaN/inf.
+        let pct = compute_cpu_percent(1_000, 500, 5_000, 5_000, 4);
+        assert_eq!(pct, 0.0);
+    }
+
+    #[test]
+    fn test_compute_cpu_percent_counter_reset_saturates_to_zero() {
+        // If the cumulative counters appear to go backwards (reset), the
+        // saturating subtraction keeps the delta at 0 rather than underflowing.
+        let pct = compute_cpu_percent(100, 200, 1_000, 2_000, 2);
+        assert_eq!(pct, 0.0);
     }
 
     #[cfg(unix)]
