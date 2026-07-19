@@ -81,7 +81,7 @@ HomeRun runs on **macOS** and **Windows**, with Linux support planned.
    └─────┘   └─────┘   └─────┘
 ```
 
-Runners are native child processes of the daemon — not Docker containers. Each runner is an instance of the [official GitHub Actions runner binary](https://github.com/actions/runner). All GitHub communication is outbound HTTPS. No inbound ports needed.
+By default, runners are native child processes of the daemon. Each runner is an instance of the [official GitHub Actions runner binary](https://github.com/actions/runner). Runners can also run inside a Docker container instead — see [Docker Runners](docs/DOCKER_RUNNERS.md). All GitHub communication is outbound HTTPS. No inbound ports needed.
 
 For the full architecture deep-dive (runner lifecycle, state machine, process management, auth flow), see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

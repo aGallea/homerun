@@ -9,6 +9,7 @@ vi.mock("../api/commands", () => ({
   api: {
     listRepos: vi.fn(),
     getAuthStatus: vi.fn(),
+    getDockerStatus: vi.fn(),
   },
 }));
 
@@ -63,6 +64,7 @@ beforeEach(() => {
     authenticated: true,
     user: { login: "test", avatar_url: "" },
   });
+  vi.mocked(api.getDockerStatus).mockResolvedValue({ available: true });
 });
 
 describe("NewRunnerWizard", () => {
@@ -128,6 +130,69 @@ describe("NewRunnerWizard", () => {
         mode: "app",
       }),
     );
+  });
+
+  it("selects Container mode and sends the image in onCreate", async () => {
+    const { props } = await renderWizard();
+    await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("org/frontend"));
+    await waitFor(() => expect(screen.getByText("Container")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("Container"));
+    const imageInput = screen.getByLabelText("Image") as HTMLInputElement;
+    expect(imageInput.value).toBe("ghcr.io/agallea/homerun-runner:ubuntu-24.04");
+    fireEvent.change(imageInput, { target: { value: "ghcr.io/acme/custom-runner:latest" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launch Runner" }));
+
+    await waitFor(() => {
+      expect(props.onCreate).toHaveBeenCalledTimes(1);
+    });
+    expect(props.onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "container",
+        container: { image: "ghcr.io/acme/custom-runner:latest" },
+      }),
+    );
+  });
+
+  it("Rust preset fills the rust image and rust label", async () => {
+    const { props } = await renderWizard();
+    await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("org/frontend"));
+    await waitFor(() => expect(screen.getByText("Container")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Container"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rust" }));
+    const imageInput = screen.getByLabelText("Image") as HTMLInputElement;
+    expect(imageInput.value).toBe("ghcr.io/agallea/homerun-runner:rust");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launch Runner" }));
+
+    await waitFor(() => expect(props.onCreate).toHaveBeenCalledTimes(1));
+    expect(props.onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "container",
+        container: { image: "ghcr.io/agallea/homerun-runner:rust" },
+        labels: expect.arrayContaining(["rust"]),
+      }),
+    );
+  });
+
+  it("disables Container mode when Docker isn't available", async () => {
+    vi.mocked(api.getDockerStatus).mockResolvedValue({ available: false });
+    await renderWizard();
+    await waitFor(() => expect(screen.getByText("org/frontend")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("org/frontend"));
+    await waitFor(() => expect(screen.getByText("Container")).toBeInTheDocument());
+
+    const containerButton = screen.getByText("Container").closest("button");
+    expect(containerButton).toBeDisabled();
   });
 
   it("calls onCreateBatch when count > 1", async () => {

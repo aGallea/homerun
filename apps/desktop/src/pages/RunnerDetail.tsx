@@ -7,6 +7,7 @@ import { api } from "../api/commands";
 import type { LogEntry } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
+import { DockerBadge } from "../components/DockerBadge";
 import { useJobSteps } from "../hooks/useJobSteps";
 import { useJobHistory } from "../hooks/useJobHistory";
 
@@ -414,6 +415,7 @@ export function RunnerDetail() {
           </span>
         </div>
         <div className="flex items-center gap-16">
+          {config.mode === "container" && <DockerBadge />}
           <StatusPill state={state} currentJob={current_job} />
           {uptime_secs != null && (
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>

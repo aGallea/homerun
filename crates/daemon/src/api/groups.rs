@@ -24,7 +24,13 @@ pub async fn create_batch(
 
     let (group_id, runners, errors) = state
         .runner_manager
-        .create_batch(&req.repo_full_name, req.count, req.labels, req.mode)
+        .create_batch(
+            &req.repo_full_name,
+            req.count,
+            req.labels,
+            req.mode,
+            req.container,
+        )
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 

@@ -12,4 +12,5 @@ pub mod scanner;
 pub mod service;
 pub mod shutdown;
 pub mod steps;
+pub mod system;
 pub mod updates;

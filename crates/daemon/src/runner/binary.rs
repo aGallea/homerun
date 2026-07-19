@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
+#[cfg(test)]
 use crate::platform::process::run_script;
 
 /// Global lock to prevent concurrent downloads/extractions of the runner binary.
@@ -53,12 +54,39 @@ pub async fn get_latest_runner_version() -> Result<String> {
 /// Otherwise downloads the archive, extracts it, and cleans up.
 /// Returns the path to the versioned runner directory.
 pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
+    let (os, arch) = detect_platform();
     let version = get_latest_runner_version()
         .await
         .context("Failed to determine latest runner version")?;
-
     let runner_dir = cache_dir.join(format!("runner-{version}"));
-    let run_script_path = runner_dir.join(run_script());
+    fetch_and_cache(runner_dir, &version, os, arch).await
+}
+
+/// Ensures a **Linux** GitHub Actions runner binary is downloaded and
+/// extracted to cache_dir, for bind-mounting into a Docker container.
+///
+/// Always resolves to `os = "linux"` regardless of the daemon's host OS —
+/// a Docker container, even one launched from Docker Desktop on
+/// macOS/Windows, runs a Linux kernel and needs the Linux runner build.
+/// Cached under a distinct `runner-{version}-linux-{arch}` directory so it
+/// never collides with (or reuses) the host-native cache entry.
+pub async fn ensure_runner_binary_for_container(cache_dir: &Path, arch: &str) -> Result<PathBuf> {
+    let version = get_latest_runner_version()
+        .await
+        .context("Failed to determine latest runner version")?;
+    let runner_dir = cache_dir.join(format!("runner-{version}-linux-{arch}"));
+    fetch_and_cache(runner_dir, &version, "linux", arch).await
+}
+
+/// Shared download/extract/cache logic for a given `(os, arch)` runner build,
+/// written directly into `runner_dir` (already versioned by the caller).
+async fn fetch_and_cache(
+    runner_dir: PathBuf,
+    version: &str,
+    os: &str,
+    arch: &str,
+) -> Result<PathBuf> {
+    let run_script_path = runner_dir.join(if os == "win" { "run.cmd" } else { "run.sh" });
 
     // Fast path: already cached, no lock needed
     if run_script_path.exists() {
@@ -79,8 +107,7 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
         .await
         .with_context(|| format!("Failed to create runner directory {:?}", runner_dir))?;
 
-    let (os, arch) = detect_platform();
-    let url = runner_download_url(&version, os, arch);
+    let url = runner_download_url(version, os, arch);
 
     tracing::info!("Downloading runner from {}", url);
 
@@ -106,8 +133,23 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
 
     tracing::info!("Extracting runner archive to {:?}", runner_dir);
 
-    #[cfg(unix)]
-    {
+    // Branch on the archive's actual format (`ext`, derived from the *target*
+    // os), not the host OS: container mode always downloads a Linux
+    // `tar.gz`, even when the daemon itself runs on Windows. Windows 10
+    // (1803+) ships `tar.exe` (bsdtar), so shelling out to `tar` works on
+    // both platforms for the `tar.gz` case.
+    if ext == "zip" {
+        let archive_clone = archive_path.clone();
+        let dir_clone = runner_dir.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let file = std::fs::File::open(&archive_clone)?;
+            let mut archive = zip::ZipArchive::new(file)?;
+            archive.extract(&dir_clone)?;
+            Ok(())
+        })
+        .await
+        .context("Zip extraction task panicked")??;
+    } else {
         let status = tokio::process::Command::new("tar")
             .arg("xzf")
             .arg(&archive_path)
@@ -120,20 +162,6 @@ pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
         if !status.success() {
             anyhow::bail!("tar extraction failed with status: {}", status);
         }
-    }
-
-    #[cfg(windows)]
-    {
-        let archive_clone = archive_path.clone();
-        let dir_clone = runner_dir.clone();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            let file = std::fs::File::open(&archive_clone)?;
-            let mut archive = zip::ZipArchive::new(file)?;
-            archive.extract(&dir_clone)?;
-            Ok(())
-        })
-        .await
-        .context("Zip extraction task panicked")??;
     }
 
     tokio::fs::remove_file(&archive_path)

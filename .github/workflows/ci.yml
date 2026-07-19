@@ -24,7 +24,7 @@ env:
 jobs:
   pre-commit:
     name: Pre-commit checks
-    runs-on: self-hosted
+    runs-on: [self-hosted, rust]
     defaults:
       run:
         shell: bash
@@ -92,7 +92,7 @@ jobs:
 
   react-test:
     name: React (test + coverage)
-    runs-on: self-hosted
+    runs-on: [self-hosted, docker]
     defaults:
       run:
         shell: bash
@@ -120,7 +120,7 @@ jobs:
   rust:
     name: Rust (fmt + clippy + test + coverage)
     needs: [react-test]
-    runs-on: self-hosted
+    runs-on: [self-hosted, rust]
     defaults:
       run:
         shell: bash
@@ -185,7 +185,7 @@ jobs:
 
   typescript:
     name: TypeScript (type check + build)
-    runs-on: self-hosted
+    runs-on: [self-hosted, docker]
     defaults:
       run:
         shell: bash

@@ -26,6 +26,13 @@ use hyper_util::rt::TokioExecutor;
 // --- Response types (mirror daemon's API responses) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerConfig {
+    pub image: String,
+    #[serde(default)]
+    pub extra_env: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunnerConfig {
     pub id: String,
     pub name: String,
@@ -36,6 +43,8 @@ pub struct RunnerConfig {
     pub work_dir: PathBuf,
     #[serde(default)]
     pub group_id: Option<String>,
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +62,8 @@ pub struct RunnerInfo {
     pub config: RunnerConfig,
     pub state: String,
     pub pid: Option<u32>,
+    #[serde(default)]
+    pub container_id: Option<String>,
     pub uptime_secs: Option<u64>,
     pub jobs_completed: u32,
     pub jobs_failed: u32,
@@ -203,6 +214,8 @@ pub struct CreateRunnerRequest {
     pub name: Option<String>,
     pub labels: Option<Vec<String>>,
     pub mode: Option<String>,
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +224,15 @@ pub struct CreateBatchRequest {
     pub count: u8,
     pub labels: Option<Vec<String>>,
     pub mode: Option<String>,
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DockerStatusResponse {
+    pub available: bool,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -580,6 +602,11 @@ impl DaemonClient {
 
     pub async fn get_metrics(&self) -> Result<MetricsResponse, String> {
         let body = self.request("GET", "/metrics", None).await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn docker_status(&self) -> Result<DockerStatusResponse, String> {
+        let body = self.request("GET", "/system/docker-status", None).await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 

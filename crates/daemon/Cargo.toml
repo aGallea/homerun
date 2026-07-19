@@ -32,6 +32,7 @@ libc = "0.2"
 tokio-util = { version = "0.7", features = ["rt"] }
 clap = { version = "4", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+bollard = "0.21.0"
 
 [dev-dependencies]
 tempfile = "3"

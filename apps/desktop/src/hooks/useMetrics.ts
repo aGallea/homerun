@@ -7,8 +7,15 @@ export function useMetrics(pollInterval = 2000) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialFetch = useRef(true);
+  const inFlight = useRef(false);
 
   const refresh = useCallback(async () => {
+    // Skip if a request is already outstanding — the metrics endpoint can take
+    // ~1s when container runners exist (it waits a Docker stats interval), and
+    // the poll fires every ~2s, so without this a slow response would pile up
+    // overlapping requests.
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
       const data = await api.getMetrics();
       setMetrics(data);
@@ -17,6 +24,7 @@ export function useMetrics(pollInterval = 2000) {
       setError(String(e));
       setMetrics(null);
     } finally {
+      inFlight.current = false;
       if (initialFetch.current) {
         initialFetch.current = false;
         setLoading(false);

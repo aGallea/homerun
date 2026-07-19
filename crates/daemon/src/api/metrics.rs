@@ -1,5 +1,7 @@
 use axum::{extract::State, Json};
 
+use crate::metrics::RunnerMetrics;
+use crate::runner::docker;
 use crate::server::AppState;
 
 pub async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -7,7 +9,7 @@ pub async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Valu
     let runners = state.runner_manager.list().await;
     // Refresh process list once so all runners read from the same snapshot
     state.metrics.refresh_processes();
-    let runner_metrics: Vec<_> = runners
+    let mut runner_metrics: Vec<RunnerMetrics> = runners
         .iter()
         .filter_map(|r| {
             r.pid.and_then(|pid| {
@@ -18,6 +20,43 @@ pub async fn get_metrics(State(state): State<AppState>) -> Json<serde_json::Valu
             })
         })
         .collect();
+
+    // Container-backed runners aren't in the sysinfo process tree — fetch
+    // their usage from the Docker stats API instead.
+    let container_runners: Vec<_> = runners
+        .iter()
+        .filter_map(|r| {
+            r.container_id
+                .as_ref()
+                .map(|cid| (r.config.id.clone(), cid.clone()))
+        })
+        .collect();
+    if !container_runners.is_empty() {
+        if let Ok(dc) = docker::connect() {
+            // Each container_stats is an await round-trip to the Docker daemon;
+            // fetch them concurrently so the endpoint's latency doesn't grow
+            // linearly with the number of container runners. (The Docker handle
+            // is cheap to clone — it's an Arc internally.)
+            let stats_futures = container_runners
+                .into_iter()
+                .map(|(runner_id, container_id)| {
+                    let dc = dc.clone();
+                    async move {
+                        docker::container_stats(&dc, &container_id)
+                            .await
+                            .ok()
+                            .map(|stats| RunnerMetrics {
+                                runner_id,
+                                cpu_percent: stats.cpu_percent,
+                                memory_bytes: stats.memory_bytes,
+                            })
+                    }
+                });
+            let results = futures::future::join_all(stats_futures).await;
+            runner_metrics.extend(results.into_iter().flatten());
+        }
+    }
+
     let runner_pids = state.runner_manager.runner_pids_and_names().await;
     let uptime = state.daemon_start_time.elapsed();
     let daemon = state

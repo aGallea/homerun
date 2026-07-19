@@ -7,6 +7,19 @@ use serde::{Deserialize, Serialize};
 pub enum RunnerMode {
     App,
     Service,
+    Container,
+}
+
+/// Configuration for a `RunnerMode::Container` runner. The runner binary
+/// itself is never baked into the image — it's bind-mounted from the same
+/// cache `ensure_runner_binary` already maintains for native runners — so
+/// `image` only needs to provide an OS + toolchain (a first-party base image
+/// or any user-supplied registry ref).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContainerConfig {
+    pub image: String,
+    #[serde(default)]
+    pub extra_env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +33,8 @@ pub struct RunnerConfig {
     pub work_dir: std::path::PathBuf,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub container: Option<ContainerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +99,8 @@ pub struct RunnerInfo {
     pub config: RunnerConfig,
     pub state: RunnerState,
     pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub container_id: Option<String>,
     pub uptime_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -109,6 +126,8 @@ pub struct CreateRunnerRequest {
     pub name: Option<String>,
     pub labels: Option<Vec<String>>,
     pub mode: Option<RunnerMode>,
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +142,8 @@ pub struct CreateBatchRequest {
     pub count: u8,
     pub labels: Option<Vec<String>>,
     pub mode: Option<RunnerMode>,
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -197,9 +218,41 @@ mod tests {
             mode: RunnerMode::App,
             work_dir: std::path::PathBuf::from("/tmp"),
             group_id: None,
+            container: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("group_id"));
+    }
+
+    #[test]
+    fn test_runner_config_deserialize_without_container() {
+        let json = r#"{"id":"abc-123","name":"test-runner-1","repo_owner":"owner","repo_name":"repo","labels":["self-hosted"],"mode":"container","work_dir":"/tmp/runners/abc-123"}"#;
+        let config: RunnerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.container, None);
+    }
+
+    #[test]
+    fn test_runner_config_roundtrip_with_container() {
+        let config = RunnerConfig {
+            id: "abc".to_string(),
+            name: "test".to_string(),
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            labels: vec![],
+            mode: RunnerMode::Container,
+            work_dir: std::path::PathBuf::from("/tmp"),
+            group_id: None,
+            container: Some(ContainerConfig {
+                image: "ghcr.io/agallea/homerun-runner:ubuntu-24.04".to_string(),
+                extra_env: vec![],
+            }),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let round_tripped: RunnerConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            round_tripped.container.map(|c| c.image),
+            Some("ghcr.io/agallea/homerun-runner:ubuntu-24.04".to_string())
+        );
     }
 
     #[test]
