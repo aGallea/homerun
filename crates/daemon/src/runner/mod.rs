@@ -1008,11 +1008,17 @@ impl RunnerManager {
         }
         let (owner, repo) = (parts[0], parts[1]);
 
-        // Container mode is meaningless without an image to run — reject it here
-        // rather than let the start path silently fall back to native execution
-        // of a Linux runner binary.
-        if matches!(mode.as_ref(), Some(RunnerMode::Container)) && container.is_none() {
-            bail!("Container mode requires a container image configuration");
+        // Container mode needs a real image to run — reject a missing or empty
+        // config here rather than let the start path fall back to native
+        // execution of a Linux runner binary (or fail opaquely at image pull).
+        if matches!(mode.as_ref(), Some(RunnerMode::Container)) {
+            match container.as_ref() {
+                None => bail!("Container mode requires a container image configuration"),
+                Some(c) if c.image.trim().is_empty() => {
+                    bail!("Container mode requires a non-empty container image")
+                }
+                _ => {}
+            }
         }
 
         let id = uuid::Uuid::new_v4().to_string();
@@ -1023,6 +1029,20 @@ impl RunnerManager {
                 format!("{repo}-runner-{num}")
             }
         };
+
+        // A container runner's name becomes the Docker container name
+        // (`homerun-runner-{name}`), which must match Docker's grammar; reject
+        // invalid characters here instead of failing opaquely at container start.
+        if matches!(mode.as_ref(), Some(RunnerMode::Container))
+            && !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        {
+            bail!(
+                "Container runner name may only contain letters, digits, '_', '.' or '-' \
+                 (it is used as the Docker container name)"
+            );
+        }
 
         // Runner names must be globally unique. GitHub requires unique runner
         // names per repo, and the Docker container name (`homerun-runner-{name}`)
@@ -4290,5 +4310,48 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_create_container_mode_rejects_empty_image() {
+        let manager = create_test_manager();
+        let err = manager
+            .create(
+                "owner/repo",
+                Some("c-empty".to_string()),
+                None,
+                Some(RunnerMode::Container),
+                None,
+                Some(types::ContainerConfig {
+                    image: "   ".to_string(),
+                    extra_env: vec![],
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("non-empty"), "unexpected: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_create_container_mode_rejects_docker_invalid_name() {
+        let manager = create_test_manager();
+        let err = manager
+            .create(
+                "owner/repo",
+                Some("bad name/slash".to_string()),
+                None,
+                Some(RunnerMode::Container),
+                None,
+                Some(types::ContainerConfig {
+                    image: "img:latest".to_string(),
+                    extra_env: vec![],
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("may only contain"),
+            "unexpected: {err}"
+        );
     }
 }
