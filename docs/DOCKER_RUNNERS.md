@@ -167,10 +167,21 @@ image is a worked example — extend the base image and add a toolchain:
 # docker/runner-rust/Dockerfile
 FROM ghcr.io/agallea/homerun-runner:ubuntu-24.04
 
+# Build deps for crates with native components (e.g. openssl-sys via reqwest):
+# pkg-config + the OpenSSL headers the base image's runtime libssl3 lacks.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+USER ubuntu
+
 # The base image runs as the non-root `ubuntu` user, so rustup installs into
-# /home/ubuntu/.cargo.
+# /home/ubuntu/.cargo. `--profile minimal` omits rustfmt/clippy, but real Rust
+# CI needs them (and llvm-tools-preview for coverage), so add them explicitly.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain stable --profile minimal
+    | sh -s -- -y --default-toolchain stable --profile minimal \
+        -c rustfmt -c clippy -c llvm-tools-preview
 ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"
 ```
 
