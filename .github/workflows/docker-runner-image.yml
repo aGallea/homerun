@@ -41,7 +41,10 @@ jobs:
       - name: Compute image tags
         id: meta
         run: |
-          REPO="ghcr.io/${{ github.repository_owner }}/homerun-runner"
+          # GHCR repository names must be lowercase; github.repository_owner
+          # preserves the account's original case (e.g. "aGallea").
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO="ghcr.io/${OWNER}/homerun-runner"
           SAFE_REF="${GITHUB_REF_NAME//\//-}"
           if [ "${{ github.ref_type }}" = "tag" ] || [ "${{ github.ref_name }}" = "master" ]; then
             BASE_TAGS="${REPO}:ubuntu-24.04"$'\n'"${REPO}:${SAFE_REF}"
