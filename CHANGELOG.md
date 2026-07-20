@@ -9,6 +9,14 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.9.1](https://github.com/aGallea/homerun/compare/v0.9.0...v0.9.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **ci:** lowercase GHCR owner in runner-image tags ([18f6741](https://github.com/aGallea/homerun/commit/18f67414faff747c4dc726ac986503a870859a0d))
+* **ci:** lowercase GHCR owner in runner-image tags ([506a981](https://github.com/aGallea/homerun/commit/506a9814aa670a130327013189b8f05845351542))
+
 ## [0.9.0](https://github.com/aGallea/homerun/compare/v0.8.4...v0.9.0) (2026-07-19)
 
 
