@@ -3,6 +3,10 @@ name: Release Build
 on:
   push:
     tags: ["v*"]
+  # Manual trigger to validate the build jobs (macOS/Windows/Linux) on any ref
+  # without cutting a release. The release + tap-update jobs are gated to tag
+  # pushes below, so a dispatch only builds and uploads artifacts.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,19 +21,18 @@ env:
 jobs:
   build-macos:
     name: Build macOS (${{ matrix.arch }})
-    runs-on: [self-hosted, macOS]
-    timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
             arch: aarch64
+            runner: macos-14 # Apple Silicon
           - target: x86_64-apple-darwin
             arch: x86_64
+            runner: macos-13 # Intel
 
     steps:
       - uses: actions/checkout@v6
@@ -63,7 +66,10 @@ jobs:
           mkdir -p cli-dist
           cp target/${{ matrix.target }}/release/homerun cli-dist/
           cp target/${{ matrix.target }}/release/homerund cli-dist/
-          tar -czf homerun-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C cli-dist .
+          # ref_name is a tag (no slash) for releases; sanitize so a
+          # workflow_dispatch from a slash-containing branch still names files.
+          REF="${GITHUB_REF_NAME//\//-}"
+          tar -czf "homerun-${REF}-${{ matrix.target }}.tar.gz" -C cli-dist .
 
       - name: Upload CLI tarball artifact
         uses: actions/upload-artifact@v4
@@ -71,10 +77,6 @@ jobs:
           name: cli-${{ matrix.arch }}
           path: homerun-*.tar.gz
           if-no-files-found: error
-
-      - name: Clean Tauri build cache
-        working-directory: apps/desktop/src-tauri
-        run: cargo clean
 
       - name: Build Tauri app
         working-directory: apps/desktop
@@ -126,7 +128,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path cli-dist
           Copy-Item target/release/homerun.exe cli-dist/
           Copy-Item target/release/homerund.exe cli-dist/
-          Compress-Archive -Path cli-dist/* -DestinationPath homerun-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip
+          $ref = "${env:GITHUB_REF_NAME}" -replace '/', '-'
+          Compress-Archive -Path cli-dist/* -DestinationPath "homerun-$ref-x86_64-pc-windows-msvc.zip"
         shell: pwsh
 
       - name: Upload CLI zip artifact
@@ -154,13 +157,88 @@ jobs:
           path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
 
+  build-linux:
+    name: Build Linux (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            build-essential \
+            file \
+            wget
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build homerund sidecar
+        run: |
+          cargo build --release -p homerund
+          mkdir -p apps/desktop/src-tauri/binaries
+          cp target/release/homerund \
+            apps/desktop/src-tauri/binaries/homerund-x86_64-unknown-linux-gnu
+
+      - name: Build homerun CLI
+        run: cargo build --release -p homerun
+
+      - name: Package CLI binaries
+        run: |
+          mkdir -p cli-dist
+          cp target/release/homerun cli-dist/
+          cp target/release/homerund cli-dist/
+          REF="${GITHUB_REF_NAME//\//-}"
+          tar -czf "homerun-${REF}-x86_64-unknown-linux-gnu.tar.gz" -C cli-dist .
+
+      - name: Upload CLI tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux-x64
+          path: homerun-*.tar.gz
+          if-no-files-found: error
+
+      - name: Build Tauri app (AppImage + deb)
+        working-directory: apps/desktop
+        run: npx tauri build
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeRun-linux-x64-appimage
+          path: apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: warn
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeRun-linux-x64-deb
+          path: apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: warn
+
   release:
     name: Create GitHub Release
-    needs: [build-macos, build-windows]
-    runs-on: self-hosted
-    defaults:
-      run:
-        shell: bash
+    needs: [build-macos, build-windows, build-linux]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -182,15 +260,15 @@ jobs:
             artifacts/*.zip
             artifacts/*.msi
             artifacts/*.exe
+            artifacts/*.AppImage
+            artifacts/*.deb
           draft: false
 
   update-tap:
     name: Update Homebrew Tap
     needs: release
-    runs-on: self-hosted
-    defaults:
-      run:
-        shell: bash
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -203,10 +281,10 @@ jobs:
           GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          SHA_CLI_ARM=$(shasum -a 256 artifacts/homerun-v${VERSION}-aarch64-apple-darwin.tar.gz | awk '{print $1}')
-          SHA_CLI_X86=$(shasum -a 256 artifacts/homerun-v${VERSION}-x86_64-apple-darwin.tar.gz | awk '{print $1}')
-          SHA_DMG_ARM=$(shasum -a 256 artifacts/HomeRun_${VERSION}_aarch64.dmg | awk '{print $1}')
-          SHA_DMG_X86=$(shasum -a 256 artifacts/HomeRun_${VERSION}_x64.dmg | awk '{print $1}')
+          SHA_CLI_ARM=$(sha256sum artifacts/homerun-v${VERSION}-aarch64-apple-darwin.tar.gz | awk '{print $1}')
+          SHA_CLI_X86=$(sha256sum artifacts/homerun-v${VERSION}-x86_64-apple-darwin.tar.gz | awk '{print $1}')
+          SHA_DMG_ARM=$(sha256sum artifacts/HomeRun_${VERSION}_aarch64.dmg | awk '{print $1}')
+          SHA_DMG_X86=$(sha256sum artifacts/HomeRun_${VERSION}_x64.dmg | awk '{print $1}')
 
           gh api repos/aGallea/homebrew-homerun/dispatches \
             --method POST \
