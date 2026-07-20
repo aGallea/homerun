@@ -32,7 +32,10 @@ jobs:
             runner: macos-14 # Apple Silicon
           - target: x86_64-apple-darwin
             arch: x86_64
-            runner: macos-13 # Intel
+            # Cross-compile the Intel target on an Apple Silicon runner —
+            # GitHub's Intel (macos-13) hosted runners are scarce/being retired
+            # and can queue indefinitely; arm64 macOS builds both targets fine.
+            runner: macos-14
 
     steps:
       - uses: actions/checkout@v6
