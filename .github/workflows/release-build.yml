@@ -66,7 +66,10 @@ jobs:
           mkdir -p cli-dist
           cp target/${{ matrix.target }}/release/homerun cli-dist/
           cp target/${{ matrix.target }}/release/homerund cli-dist/
-          tar -czf homerun-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C cli-dist .
+          # ref_name is a tag (no slash) for releases; sanitize so a
+          # workflow_dispatch from a slash-containing branch still names files.
+          REF="${GITHUB_REF_NAME//\//-}"
+          tar -czf "homerun-${REF}-${{ matrix.target }}.tar.gz" -C cli-dist .
 
       - name: Upload CLI tarball artifact
         uses: actions/upload-artifact@v4
@@ -125,7 +128,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path cli-dist
           Copy-Item target/release/homerun.exe cli-dist/
           Copy-Item target/release/homerund.exe cli-dist/
-          Compress-Archive -Path cli-dist/* -DestinationPath homerun-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip
+          $ref = "${env:GITHUB_REF_NAME}" -replace '/', '-'
+          Compress-Archive -Path cli-dist/* -DestinationPath "homerun-$ref-x86_64-pc-windows-msvc.zip"
         shell: pwsh
 
       - name: Upload CLI zip artifact
@@ -202,7 +206,8 @@ jobs:
           mkdir -p cli-dist
           cp target/release/homerun cli-dist/
           cp target/release/homerund cli-dist/
-          tar -czf homerun-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz -C cli-dist .
+          REF="${GITHUB_REF_NAME//\//-}"
+          tar -czf "homerun-${REF}-x86_64-unknown-linux-gnu.tar.gz" -C cli-dist .
 
       - name: Upload CLI tarball artifact
         uses: actions/upload-artifact@v4
