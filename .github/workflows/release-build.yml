@@ -257,6 +257,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          # Use the PAT that release-please used to create the release; the
+          # default github-actions token can't update a release owned by it
+          # on a hosted runner ("Resource not accessible by integration").
+          token: ${{ secrets.RELEASE_TOKEN }}
           files: |
             artifacts/*.dmg
             artifacts/*.tar.gz
