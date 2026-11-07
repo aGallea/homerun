@@ -20,11 +20,12 @@ use crate::runner::steps::{StepsResponse, WorkerLogWatcher};
 use crate::runner::types::{RunnerConfig, RunnerInfo, RunnerMode};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Write;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::AsyncRead;
-use tokio::sync::{broadcast, watch, Notify, RwLock};
+use tokio::sync::{broadcast, watch, Mutex, Notify, RwLock};
 
 /// A runner's underlying execution unit — a native child process, or a
 /// Docker container. `RunnerManager`'s state machine, log streaming, and
@@ -66,6 +67,21 @@ pub struct LogEntry {
 
 const RECENT_LOGS_MAX: usize = 500;
 
+fn should_apply_job_context(
+    state: &RunnerState,
+    current_job: Option<&str>,
+    current_job_started_at: Option<&chrono::DateTime<chrono::Utc>>,
+    has_context: bool,
+    expected_job: &str,
+    expected_job_started_at_micros: i64,
+) -> bool {
+    *state == RunnerState::Busy
+        && current_job == Some(expected_job)
+        && current_job_started_at.map(|started_at| started_at.timestamp_micros())
+            == Some(expected_job_started_at_micros)
+        && !has_context
+}
+
 /// Handle for communicating with a runner's monitoring task.
 /// The monitoring task owns the `Child` exclusively — no shared lock needed.
 #[derive(Clone)]
@@ -74,6 +90,15 @@ struct ProcessHandle {
     kill_signal: Arc<Notify>,
     /// Becomes `true` once the child process has fully exited.
     exited: watch::Receiver<bool>,
+}
+
+#[derive(Default)]
+struct LifecycleOperations {
+    starting: HashSet<String>,
+    stopping: HashSet<String>,
+    updating: HashSet<String>,
+    deleting: HashSet<String>,
+    shutting_down: bool,
 }
 
 #[derive(Clone)]
@@ -86,6 +111,20 @@ pub struct RunnerManager {
     recent_logs: Arc<RwLock<HashMap<String, VecDeque<LogEntry>>>>,
     name_counters: Arc<RwLock<HashMap<String, u32>>>,
     auth_token: Arc<RwLock<Option<String>>>,
+    /// User intent, independent from the transient process state. A runner that
+    /// crashes remains desired-running until the user explicitly stops/deletes it.
+    desired_running: Arc<RwLock<HashSet<String>>>,
+    /// Prevent duplicate recovery loops for the same runner.
+    recovering: Arc<Mutex<HashSet<String>>>,
+    /// Coordinate start and delete reservations under one lock. A deletion
+    /// blocks new starts before waiting for an already-running start pipeline.
+    lifecycle_operations: Arc<Mutex<LifecycleOperations>>,
+    /// Serialize configuration PATCH operations through their persistence commit,
+    /// so a failed write can never roll back a newer same-valued update.
+    update_lock: Arc<Mutex<()>>,
+    /// Serialize persistence writes. Multiple async lifecycle tasks can request
+    /// a save concurrently, and unsynchronized writes can truncate runners.json.
+    persistence_lock: Arc<Mutex<()>>,
     auth_manager: Option<AuthManager>,
     step_watcher: WorkerLogWatcher,
     pub step_log_cache: step_log_cache::StepLogCache,
@@ -166,6 +205,11 @@ impl RunnerManager {
             recent_logs: Arc::new(RwLock::new(HashMap::new())),
             name_counters: Arc::new(RwLock::new(HashMap::new())),
             auth_token: Arc::new(RwLock::new(None)),
+            desired_running: Arc::new(RwLock::new(HashSet::new())),
+            recovering: Arc::new(Mutex::new(HashSet::new())),
+            lifecycle_operations: Arc::new(Mutex::new(LifecycleOperations::default())),
+            update_lock: Arc::new(Mutex::new(())),
+            persistence_lock: Arc::new(Mutex::new(())),
             auth_manager: None,
             step_watcher: WorkerLogWatcher::new(),
             step_log_cache: step_log_cache::StepLogCache::new(),
@@ -195,13 +239,14 @@ impl RunnerManager {
                 interval.tick().await;
 
                 // Collect busy runners missing job_context
-                let needs_context: Vec<(String, String, String, String, String)> = {
+                let needs_context: Vec<(String, String, String, String, String, i64)> = {
                     let map = runners.read().await;
                     map.values()
                         .filter(|r| {
                             r.state == RunnerState::Busy
                                 && r.job_context.is_none()
                                 && r.current_job.is_some()
+                                && r.job_started_at.is_some()
                         })
                         .map(|r| {
                             (
@@ -210,6 +255,10 @@ impl RunnerManager {
                                 r.config.repo_owner.clone(),
                                 r.config.repo_name.clone(),
                                 r.current_job.clone().unwrap(),
+                                r.job_started_at
+                                    .as_ref()
+                                    .expect("filtered job start timestamp")
+                                    .timestamp_micros(),
                             )
                         })
                         .collect()
@@ -230,21 +279,40 @@ impl RunnerManager {
                     continue;
                 };
 
-                for (runner_id, runner_name, owner, repo, job_name) in needs_context {
+                for (runner_id, runner_name, owner, repo, job_name, job_started_at_micros) in
+                    needs_context
+                {
                     match gh
                         .get_active_run_for_runner(&owner, &repo, &runner_name, &job_name)
                         .await
                     {
                         Ok(Some(ctx)) => {
-                            tracing::info!(
-                                runner = %runner_id,
-                                branch = %ctx.branch,
-                                pr = ?ctx.pr_number,
-                                "Job context fetched"
-                            );
                             let mut map = runners.write().await;
-                            if let Some(r) = map.get_mut(&runner_id) {
-                                r.job_context = Some(ctx);
+                            if let Some(runner) = map.get_mut(&runner_id) {
+                                if should_apply_job_context(
+                                    &runner.state,
+                                    runner.current_job.as_deref(),
+                                    runner.job_started_at.as_ref(),
+                                    runner.job_context.is_some(),
+                                    &job_name,
+                                    job_started_at_micros,
+                                ) {
+                                    tracing::info!(
+                                        runner = %runner_id,
+                                        branch = %ctx.branch,
+                                        pr = ?ctx.pr_number,
+                                        "Job context fetched"
+                                    );
+                                    runner.job_context = Some(ctx);
+                                } else {
+                                    tracing::debug!(
+                                        runner = %runner_id,
+                                        expected_job = %job_name,
+                                        current_job = ?runner.current_job,
+                                        state = ?runner.state,
+                                        "Discarding stale job context result"
+                                    );
+                                }
                             }
                         }
                         Ok(None) => {
@@ -471,20 +539,74 @@ impl RunnerManager {
 
     /// Save all runner configs to disk as JSON.
     pub async fn save_to_disk(&self) -> Result<()> {
-        let runners = self.runners.read().await;
-        let persisted: Vec<PersistedRunner> = runners
-            .values()
-            .map(|r| PersistedRunner {
-                config: r.config.clone(),
-                was_running: r.state == RunnerState::Online || r.state == RunnerState::Busy,
-            })
-            .collect();
+        let _persistence_guard = self.persistence_lock.lock().await;
+        self.save_to_disk_locked().await
+    }
+
+    /// Persist a snapshot while the caller holds `persistence_lock`.
+    async fn save_to_disk_locked(&self) -> Result<()> {
+        let persisted = {
+            let desired_running = self.desired_running.read().await;
+            let runners = self.runners.read().await;
+            runners
+                .values()
+                .map(|runner| PersistedRunner {
+                    config: runner.config.clone(),
+                    was_running: desired_running.contains(&runner.config.id),
+                })
+                .collect::<Vec<_>>()
+        };
         let json = serde_json::to_string_pretty(&persisted)?;
         let path = self.config.runners_json_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, json)?;
+
+        // Never truncate the live state file in place. A daemon crash or power
+        // loss during a direct write otherwise leaves invalid JSON and prevents
+        // every runner from loading on the next launch.
+        let temp_path = path.with_extension(format!("json.tmp-{}", std::process::id()));
+        let write_result = (|| -> Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&temp_path)
+                .with_context(|| {
+                    format!("creating temporary runner state {}", temp_path.display())
+                })?;
+            file.write_all(json.as_bytes())
+                .context("writing temporary runner state")?;
+            file.sync_all().context("syncing temporary runner state")?;
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(error);
+        }
+
+        #[cfg(not(windows))]
+        std::fs::rename(&temp_path, &path)
+            .with_context(|| format!("replacing runner state {}", path.display()))?;
+
+        #[cfg(windows)]
+        {
+            // Windows rename does not replace an existing destination. Keep a
+            // recoverable backup while swapping the fully-synced temporary file.
+            let backup_path = path.with_extension("json.bak");
+            let _ = std::fs::remove_file(&backup_path);
+            if path.exists() {
+                std::fs::rename(&path, &backup_path).context("backing up previous runner state")?;
+            }
+            if let Err(error) = std::fs::rename(&temp_path, &path) {
+                if backup_path.exists() {
+                    let _ = std::fs::rename(&backup_path, &path);
+                }
+                return Err(error).context("installing new runner state");
+            }
+            let _ = std::fs::remove_file(&backup_path);
+        }
+
         Ok(())
     }
 
@@ -494,12 +616,24 @@ impl RunnerManager {
     /// (these need to be restarted if the restore preference is enabled).
     pub async fn load_from_disk(&self) -> Result<Vec<String>> {
         let path = self.config.runners_json_path();
+        #[cfg(windows)]
+        if !path.exists() {
+            let backup_path = path.with_extension("json.bak");
+            if backup_path.exists() {
+                tracing::warn!(
+                    "Recovering runner state from interrupted Windows swap: {}",
+                    backup_path.display()
+                );
+                std::fs::rename(&backup_path, &path).context("restoring backed-up runner state")?;
+            }
+        }
         if !path.exists() {
             return Ok(Vec::new());
         }
         let json = std::fs::read_to_string(&path)?;
         let persisted: Vec<PersistedRunner> = serde_json::from_str(&json)?;
         let mut need_restart = Vec::new();
+        let mut desired_running = HashSet::new();
         let mut runners = self.runners.write().await;
         for entry in persisted {
             let id = entry.config.id.clone();
@@ -524,6 +658,9 @@ impl RunnerManager {
             } else {
                 (RunnerState::Offline, None)
             };
+            if entry.was_running || (is_service && state == RunnerState::Online) {
+                desired_running.insert(id.clone());
+            }
             runners.insert(
                 id,
                 RunnerInfo {
@@ -545,6 +682,7 @@ impl RunnerManager {
             );
         }
         drop(runners);
+        *self.desired_running.write().await = desired_running;
 
         // Load job history from disk
         match history::load_all(&self.config.history_dir()) {
@@ -600,52 +738,48 @@ impl RunnerManager {
     }
 
     /// Spawn a background task that monitors an orphaned runner process by PID.
-    /// When the process exits, transitions the runner to Offline.
-    /// Also tails the runner's _diag/Runner_*.log to detect job start/complete events.
-    pub fn monitor_orphaned_process(&self, runner_id: &str, pid: u32) {
+    /// The process handle is installed before this method returns, so API calls
+    /// can never observe an Online reattached runner without being able to stop it.
+    pub async fn monitor_orphaned_process(&self, runner_id: &str, pid: u32) {
         let manager = self.clone();
         let rid = runner_id.to_string();
         let kill_signal = Arc::new(Notify::new());
         let (exit_tx, exit_rx) = watch::channel(false);
-
         let handle = ProcessHandle {
             kill_signal: kill_signal.clone(),
             exited: exit_rx,
         };
+        let work_dir = self
+            .runners
+            .read()
+            .await
+            .get(&rid)
+            .map(|runner| runner.config.work_dir.clone());
 
-        // Get the work_dir for diag log tailing
-        let work_dir = {
-            let runners = self.runners.clone();
-            let rid = rid.clone();
-            tokio::spawn(async move {
-                let map = runners.read().await;
-                map.get(&rid).map(|r| r.config.work_dir.clone())
-            })
-        };
+        self.processes.write().await.insert(rid.clone(), handle);
 
-        // Store handle so stop_process works on reattached runners
-        let processes = self.processes.clone();
         tokio::spawn(async move {
-            processes.write().await.insert(rid.clone(), handle);
-
-            // Spawn diag log watcher for job events
-            let work_dir = work_dir.await.ok().flatten();
-            if let Some(ref wd) = work_dir {
-                let diag_dir = wd.join("_diag");
-                let mgr = manager.clone();
-                let rid2 = rid.clone();
-                let sw = mgr.step_watcher.clone();
-                let wd2 = wd.clone();
+            if let Some(ref work_dir) = work_dir {
+                let diag_dir = work_dir.join("_diag");
+                let watcher_manager = manager.clone();
+                let watcher_id = rid.clone();
+                let step_watcher = manager.step_watcher.clone();
+                let watcher_work_dir = work_dir.clone();
                 tokio::spawn(async move {
-                    Self::tail_diag_logs(mgr, &rid2, &diag_dir, &wd2, sw).await;
+                    Self::tail_diag_logs(
+                        watcher_manager,
+                        &watcher_id,
+                        &diag_dir,
+                        &watcher_work_dir,
+                        step_watcher,
+                    )
+                    .await;
                 });
             }
 
-            // Poll until the process dies or we get a kill signal
             loop {
                 tokio::select! {
                     _ = kill_signal.notified() => {
-                        // Kill requested — signal the process group
                         #[cfg(unix)]
                         {
                             let pgid = pid as i32;
@@ -664,9 +798,13 @@ impl RunnerManager {
                         break;
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
-                        // Check if process is still alive
                         #[cfg(unix)]
-                        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+                        let alive = {
+                            let result = unsafe { libc::kill(pid as i32, 0) };
+                            result == 0
+                                || std::io::Error::last_os_error().raw_os_error()
+                                    == Some(libc::EPERM)
+                        };
                         #[cfg(windows)]
                         let alive = {
                             use sysinfo::{Pid, ProcessesToUpdate, ProcessRefreshKind, System};
@@ -685,19 +823,38 @@ impl RunnerManager {
                 }
             }
 
-            // Process exited — transition to Offline
-            {
+            let (exists, unexpected) = {
                 let mut runners = manager.runners.write().await;
-                if let Some(r) = runners.get_mut(&rid) {
-                    r.state = RunnerState::Offline;
-                    r.pid = None;
-                    r.started_at = None;
+                if let Some(runner) = runners.get_mut(&rid) {
+                    let unexpected =
+                        runner.state == RunnerState::Online || runner.state == RunnerState::Busy;
+                    if runner.state != RunnerState::Deleting {
+                        runner.state = RunnerState::Offline;
+                        runner.pid = None;
+                        runner.container_id = None;
+                        runner.started_at = None;
+                        runner.current_job = None;
+                        runner.job_context = None;
+                        runner.job_started_at = None;
+                        runner.error_message = unexpected.then(|| {
+                            "Runner process exited unexpectedly; recovery is scheduled".to_string()
+                        });
+                    }
+                    (true, unexpected)
+                } else {
+                    (false, false)
                 }
+            };
+            manager.processes.write().await.remove(&rid);
+            if exists {
+                manager.emit_state_event(&rid, "offline");
             }
-            manager.emit_state_event(&rid, "offline");
-            let _ = manager.save_to_disk().await;
+            if unexpected && manager.is_desired_running(&rid).await {
+                manager.schedule_recovery(rid.clone());
+            } else {
+                let _ = manager.save_to_disk().await;
+            }
             let _ = exit_tx.send(true);
-            processes.write().await.remove(&rid);
         });
     }
 
@@ -993,6 +1150,66 @@ impl RunnerManager {
 
     // ── CRUD ───────────────────────────────────────────────────────
 
+    /// Validate fields that do not require mutating manager state. API handlers
+    /// call this before authentication so malformed requests still return 400,
+    /// while valid unauthenticated requests never persist orphaned runners.
+    pub fn validate_create_request(
+        repo_full_name: &str,
+        name: Option<&str>,
+        mode: Option<&RunnerMode>,
+        container: Option<&types::ContainerConfig>,
+    ) -> Result<()> {
+        let Some((owner, repo)) = repo_full_name.split_once('/') else {
+            bail!("Invalid repo name: expected 'owner/repo'");
+        };
+        if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+            bail!("Invalid repo name: expected non-empty 'owner/repo'");
+        }
+        if owner
+            .chars()
+            .chain(repo.chars())
+            .any(|character| character.is_whitespace() || character.is_control())
+        {
+            bail!("Invalid repo name: whitespace and control characters are not allowed");
+        }
+
+        if let Some(name) = name {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                bail!("Runner name cannot be empty");
+            }
+            if trimmed.chars().count() > 100 {
+                bail!("Runner name must be at most 100 characters");
+            }
+            if trimmed.chars().any(char::is_control) {
+                bail!("Runner name cannot contain control characters");
+            }
+        }
+
+        if matches!(mode, Some(RunnerMode::Container)) {
+            match container {
+                None => bail!("Container mode requires a container image configuration"),
+                Some(config) if config.image.trim().is_empty() => {
+                    bail!("Container mode requires a non-empty container image")
+                }
+                _ => {}
+            }
+
+            if let Some(name) = name {
+                if !name.trim().chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')
+                }) {
+                    bail!(
+                        "Container runner name may only contain letters, digits, '_', '.' or '-' \
+                         (it is used as the Docker container name)"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn create(
         &self,
         repo_full_name: &str,
@@ -1002,65 +1219,71 @@ impl RunnerManager {
         group_id: Option<String>,
         container: Option<types::ContainerConfig>,
     ) -> Result<RunnerInfo> {
-        let parts: Vec<&str> = repo_full_name.split('/').collect();
-        if parts.len() != 2 {
-            bail!("Invalid repo name: expected 'owner/repo'");
-        }
-        let (owner, repo) = (parts[0], parts[1]);
+        self.create_with_intent(
+            repo_full_name,
+            name,
+            labels,
+            mode,
+            group_id,
+            container,
+            false,
+        )
+        .await
+    }
 
-        // Container mode needs a real image to run — reject a missing or empty
-        // config here rather than let the start path fall back to native
-        // execution of a Linux runner binary (or fail opaquely at image pull).
-        if matches!(mode.as_ref(), Some(RunnerMode::Container)) {
-            match container.as_ref() {
-                None => bail!("Container mode requires a container image configuration"),
-                Some(c) if c.image.trim().is_empty() => {
-                    bail!("Container mode requires a non-empty container image")
-                }
-                _ => {}
-            }
-        }
+    pub(crate) async fn create_desired_running(
+        &self,
+        repo_full_name: &str,
+        name: Option<String>,
+        labels: Option<Vec<String>>,
+        mode: Option<RunnerMode>,
+        group_id: Option<String>,
+        container: Option<types::ContainerConfig>,
+    ) -> Result<RunnerInfo> {
+        self.create_with_intent(
+            repo_full_name,
+            name,
+            labels,
+            mode,
+            group_id,
+            container,
+            true,
+        )
+        .await
+    }
+
+    // This private adapter mirrors the public creation inputs and adds one
+    // atomic persistence flag. Keeping the arguments explicit avoids a second,
+    // duplicative request type solely for internal transaction handling.
+    #[allow(clippy::too_many_arguments)]
+    async fn create_with_intent(
+        &self,
+        repo_full_name: &str,
+        name: Option<String>,
+        labels: Option<Vec<String>>,
+        mode: Option<RunnerMode>,
+        group_id: Option<String>,
+        container: Option<types::ContainerConfig>,
+        desired: bool,
+    ) -> Result<RunnerInfo> {
+        Self::validate_create_request(
+            repo_full_name,
+            name.as_deref(),
+            mode.as_ref(),
+            container.as_ref(),
+        )?;
+        let (owner, repo) = repo_full_name
+            .split_once('/')
+            .expect("validated repository name must contain one slash");
 
         let id = uuid::Uuid::new_v4().to_string();
         let name = match name {
-            Some(n) => n,
+            Some(name) => name.trim().to_string(),
             None => {
                 let num = self.next_runner_number(repo).await;
                 format!("{repo}-runner-{num}")
             }
         };
-
-        // A container runner's name becomes the Docker container name
-        // (`homerun-runner-{name}`), which must match Docker's grammar; reject
-        // invalid characters here instead of failing opaquely at container start.
-        if matches!(mode.as_ref(), Some(RunnerMode::Container))
-            && !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        {
-            bail!(
-                "Container runner name may only contain letters, digits, '_', '.' or '-' \
-                 (it is used as the Docker container name)"
-            );
-        }
-
-        // Runner names must be globally unique. GitHub requires unique runner
-        // names per repo, and the Docker container name (`homerun-runner-{name}`)
-        // has no repo qualifier — so a duplicate name collides at the GitHub
-        // session and/or container level, causing runners to deactivate each
-        // other. Reject up front (case-insensitive, matching GitHub) instead.
-        {
-            let runners = self.runners.read().await;
-            if runners
-                .values()
-                .any(|r| r.config.name.eq_ignore_ascii_case(&name))
-            {
-                bail!("A runner named '{name}' already exists");
-            }
-        }
-
-        let work_dir = self.config.runners_dir().join(&id);
-        std::fs::create_dir_all(&work_dir)?;
 
         // Container runners are Linux regardless of host, and need a stable
         // `docker` marker for routing; native runners keep host platform labels.
@@ -1070,14 +1293,25 @@ impl RunnerManager {
             default_runner_labels()
         };
         let resolved_labels = match labels {
-            Some(user_labels) if !user_labels.is_empty() => user_labels,
-            _ => platform_defaults,
+            Some(user_labels) => {
+                let normalized = types::normalize_labels(user_labels)?;
+                if normalized.is_empty() {
+                    platform_defaults
+                } else {
+                    normalized
+                }
+            }
+            None => platform_defaults,
         };
+
+        let work_dir = self.config.runners_dir().join(&id);
+        std::fs::create_dir_all(&work_dir)?;
 
         let runner = RunnerInfo {
             config: RunnerConfig {
                 id: id.clone(),
                 name,
+                display_name: None,
                 repo_owner: owner.to_string(),
                 repo_name: repo.to_string(),
                 labels: resolved_labels,
@@ -1101,8 +1335,67 @@ impl RunnerManager {
             estimated_job_duration_secs: None,
         };
 
-        self.runners.write().await.insert(id, runner.clone());
-        self.save_to_disk().await?;
+        // Desired-running creation also reserves the start under the same
+        // lifecycle mutex used by daemon shutdown. This closes the gap where
+        // shutdown could begin after persistence but before the API reserved
+        // the runner's start operation.
+        // Every creation participates in the lifecycle barrier so shutdown
+        // cannot race a persistence transaction. Desired-running creation also
+        // reserves its start before releasing this mutex.
+        let mut creation_operations = self.lifecycle_operations.lock().await;
+        if creation_operations.shutting_down {
+            let _ = std::fs::remove_dir_all(&runner.config.work_dir);
+            bail!("Daemon shutdown is in progress");
+        }
+
+        let _persistence_guard = self.persistence_lock.lock().await;
+        {
+            let mut runners = self.runners.write().await;
+            if runners.values().any(|existing| {
+                let same_name = existing
+                    .config
+                    .name
+                    .eq_ignore_ascii_case(&runner.config.name);
+                let same_repository = existing.config.repo_owner.eq_ignore_ascii_case(owner)
+                    && existing.config.repo_name.eq_ignore_ascii_case(repo);
+                let docker_name_collision = existing.config.mode == RunnerMode::Container
+                    && runner.config.mode == RunnerMode::Container;
+                same_name && (same_repository || docker_name_collision)
+            }) {
+                drop(runners);
+                let _ = std::fs::remove_dir_all(&runner.config.work_dir);
+                bail!(
+                    "A conflicting runner named '{}' already exists",
+                    runner.config.name
+                );
+            }
+            runners.insert(id.clone(), runner.clone());
+        }
+        if desired && !creation_operations.starting.insert(id.clone()) {
+            self.runners.write().await.remove(&id);
+            let _ = std::fs::remove_dir_all(&runner.config.work_dir);
+            bail!("Runner '{id}' already has a start operation in progress");
+        }
+        if desired {
+            self.desired_running.write().await.insert(id.clone());
+        }
+
+        if let Err(error) = self.save_to_disk_locked().await {
+            self.runners.write().await.remove(&id);
+            if desired {
+                self.desired_running.write().await.remove(&id);
+                creation_operations.starting.remove(&id);
+            }
+            let _ = std::fs::remove_dir_all(&runner.config.work_dir);
+            drop(_persistence_guard);
+            drop(creation_operations);
+            return Err(error).context("persisting newly-created runner");
+        }
+
+        // Keep lifecycle admission locked through the durable write. Shutdown
+        // therefore cannot overtake a creation that it failed to reject.
+        drop(_persistence_guard);
+        drop(creation_operations);
         Ok(runner)
     }
 
@@ -1110,6 +1403,7 @@ impl RunnerManager {
         &self,
         repo_full_name: &str,
         count: u8,
+        name_prefix: Option<String>,
         labels: Option<Vec<String>>,
         mode: Option<RunnerMode>,
         container: Option<types::ContainerConfig>,
@@ -1120,9 +1414,11 @@ impl RunnerManager {
 
         for i in 0..count {
             match self
-                .create(
+                .create_desired_running(
                     repo_full_name,
-                    None,
+                    name_prefix
+                        .as_ref()
+                        .map(|prefix| format!("{prefix}-{}", i + 1)),
                     labels.clone(),
                     mode.clone(),
                     Some(group_id.clone()),
@@ -1181,7 +1477,7 @@ impl RunnerManager {
 
             for _ in 0..to_add {
                 match self
-                    .create(
+                    .create_desired_running(
                         &repo_full_name,
                         None,
                         Some(template.config.labels.clone()),
@@ -1226,11 +1522,23 @@ impl RunnerManager {
                 if removed_count >= to_remove {
                     break;
                 }
-                if runner.state == RunnerState::Busy {
+                if matches!(
+                    runner.state,
+                    RunnerState::Busy | RunnerState::Stopping | RunnerState::Deleting
+                ) {
+                    // Keep the existing response field for backwards compatibility;
+                    // it represents runners that cannot be safely removed yet.
                     skipped_busy.push(runner.config.id.clone());
                     continue;
                 }
-                if let Err(e) = self.delete(&runner.config.id).await {
+
+                let token = self.auth_token.read().await.clone();
+                let delete_result = if let Some(token) = token {
+                    self.full_delete(&runner.config.id, &token).await
+                } else {
+                    self.delete(&runner.config.id).await
+                };
+                if let Err(e) = delete_result {
                     tracing::error!(
                         "Failed to delete runner {} during scale-down: {e}",
                         runner.config.id
@@ -1360,31 +1668,324 @@ impl RunnerManager {
         })
     }
 
-    pub async fn delete(&self, id: &str) -> Result<()> {
-        let mut runners = self.runners.write().await;
-        if let Some(runner) = runners.remove(id) {
-            let _ = std::fs::remove_dir_all(&runner.config.work_dir);
+    pub async fn has_active_process(&self, id: &str) -> bool {
+        self.processes.read().await.contains_key(id)
+    }
+
+    pub(crate) async fn begin_start_operation(&self, id: &str) -> Result<()> {
+        let mut operations = self.lifecycle_operations.lock().await;
+        if operations.shutting_down {
+            bail!("Daemon shutdown is in progress");
         }
-        drop(runners);
-        // Also remove any tracked process handle
+        if operations.deleting.contains(id) {
+            bail!("Runner '{id}' is being deleted");
+        }
+        if operations.stopping.contains(id) {
+            bail!("Runner '{id}' has a stop operation in progress");
+        }
+        if operations.updating.contains(id) {
+            bail!("Runner '{id}' is being updated");
+        }
+        if !self.runners.read().await.contains_key(id) {
+            bail!("Runner not found");
+        }
+        if !operations.starting.insert(id.to_string()) {
+            bail!("Runner '{id}' already has a start operation in progress");
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn finish_start_operation(&self, id: &str) {
+        self.lifecycle_operations.lock().await.starting.remove(id);
+    }
+
+    /// Atomically stop admitting new starts and return the number of starts
+    /// that were already admitted. Existing starts keep their reservation so
+    /// shutdown can wait for them before deciding which processes to stop.
+    pub(crate) async fn begin_shutdown_operation(&self) -> Result<usize> {
+        let mut operations = self.lifecycle_operations.lock().await;
+        if operations.shutting_down {
+            bail!("Daemon shutdown is already in progress");
+        }
+        operations.shutting_down = true;
+        Ok(operations.starting.len())
+    }
+
+    /// Re-open lifecycle admission when shutdown cannot complete. Callers must
+    /// first drain operations admitted before the barrier so reopening cannot
+    /// overlap an older mutation that shutdown had already accepted.
+    pub(crate) async fn cancel_shutdown_operation(&self) {
+        self.lifecycle_operations.lock().await.shutting_down = false;
+    }
+
+    /// Wait for all lifecycle mutations admitted before the shutdown barrier.
+    /// New mutations cannot appear after `begin_shutdown_operation`.
+    pub(crate) async fn wait_for_lifecycle_operations_to_finish(&self) {
+        loop {
+            let operations = self.lifecycle_operations.lock().await;
+            let pending = operations.starting.len()
+                + operations.stopping.len()
+                + operations.updating.len()
+                + operations.deleting.len();
+            drop(operations);
+            if pending == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    pub(crate) async fn begin_stop_operation(&self, id: &str) -> Result<()> {
+        let mut operations = self.lifecycle_operations.lock().await;
+        if operations.shutting_down {
+            bail!("Daemon shutdown is in progress");
+        }
+        if operations.deleting.contains(id) {
+            bail!("Runner '{id}' is being deleted");
+        }
+        if operations.starting.contains(id) {
+            bail!("Runner '{id}' has a start operation in progress");
+        }
+        if operations.updating.contains(id) {
+            bail!("Runner '{id}' is being updated");
+        }
+        if !self.runners.read().await.contains_key(id) {
+            bail!("Runner not found");
+        }
+        if !operations.stopping.insert(id.to_string()) {
+            bail!("Runner '{id}' already has a stop operation in progress");
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn finish_stop_operation(&self, id: &str) {
+        self.lifecycle_operations.lock().await.stopping.remove(id);
+    }
+
+    async fn begin_update_operation(&self, id: &str) -> Result<()> {
+        let mut operations = self.lifecycle_operations.lock().await;
+        if operations.shutting_down {
+            bail!("Daemon shutdown is in progress");
+        }
+        if operations.deleting.contains(id) {
+            bail!("Runner '{id}' is being deleted");
+        }
+        if operations.starting.contains(id) {
+            bail!("Runner '{id}' has a start operation in progress");
+        }
+        if operations.stopping.contains(id) {
+            bail!("Runner '{id}' has a stop operation in progress");
+        }
+        if !self.runners.read().await.contains_key(id) {
+            bail!("Runner not found");
+        }
+        if !operations.updating.insert(id.to_string()) {
+            bail!("Runner '{id}' already has an update in progress");
+        }
+        Ok(())
+    }
+
+    async fn finish_update_operation(&self, id: &str) {
+        self.lifecycle_operations.lock().await.updating.remove(id);
+    }
+
+    async fn begin_delete_operation(&self, id: &str) -> Result<()> {
+        let mut operations = self.lifecycle_operations.lock().await;
+        if operations.shutting_down {
+            bail!("Daemon shutdown is in progress");
+        }
+        if !self.runners.read().await.contains_key(id) {
+            bail!("Runner not found");
+        }
+        if !operations.deleting.insert(id.to_string()) {
+            bail!("Runner '{id}' already has a deletion in progress");
+        }
+        Ok(())
+    }
+
+    async fn finish_delete_operation(&self, id: &str) {
+        self.lifecycle_operations.lock().await.deleting.remove(id);
+    }
+
+    async fn wait_for_mutations_to_finish(&self, id: &str) -> Result<()> {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            loop {
+                let operations = self.lifecycle_operations.lock().await;
+                if !operations.starting.contains(id)
+                    && !operations.stopping.contains(id)
+                    && !operations.updating.contains(id)
+                {
+                    break;
+                }
+                drop(operations);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("Timed out waiting for runner '{id}' lifecycle operation to finish")
+        })?;
+        Ok(())
+    }
+
+    pub async fn delete(&self, id: &str) -> Result<()> {
+        self.begin_delete_operation(id).await?;
+        let result = self.delete_reserved(id).await;
+        self.finish_delete_operation(id).await;
+        result
+    }
+
+    async fn prepare_delete_reserved(&self, id: &str) -> Result<()> {
+        // The deletion reservation already blocks new Start/Stop/PATCH operations.
+        // Wait before changing desired-running so a timeout leaves the runner and
+        // its recovery intent exactly as they were before the delete request.
+        self.wait_for_mutations_to_finish(id).await?;
+        self.set_desired_running(id, false).await?;
+
+        let runner = self
+            .get(id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        if runner.state == RunnerState::Online
+            || runner.state == RunnerState::Busy
+            || self.has_active_process(id).await
+        {
+            self.stop_process_internal(id, true).await?;
+        }
+        Ok(())
+    }
+
+    async fn remove_reserved(&self, id: &str) -> Result<()> {
+        let _persistence_guard = self.persistence_lock.lock().await;
+        let removed = self.runners.write().await.remove(id);
+        if let Err(error) = self.save_to_disk_locked().await {
+            if let Some(runner) = removed {
+                self.runners.write().await.insert(id.to_string(), runner);
+            }
+            return Err(error).context("persisting runner deletion");
+        }
+        drop(_persistence_guard);
+
+        // Destructive cleanup happens only after the durable state no longer
+        // references this runner. A failed write therefore cannot resurrect a
+        // deleted runner with a missing work directory on the next launch.
         self.processes.write().await.remove(id);
         self.delete_job_history(id).await;
-        self.save_to_disk().await?;
+        if let Some(runner) = removed {
+            let _ = std::fs::remove_dir_all(&runner.config.work_dir);
+        }
+        Ok(())
+    }
+
+    async fn delete_reserved(&self, id: &str) -> Result<()> {
+        self.wait_for_mutations_to_finish(id).await?;
+        let runner = self
+            .get(id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        if runner.config.work_dir.join(".runner").exists()
+            || runner.config.work_dir.join(".runner_migrated").exists()
+        {
+            bail!("Authentication required to deregister configured runner before deletion");
+        }
+        self.prepare_delete_reserved(id).await?;
+        self.remove_reserved(id).await?;
+        self.emit_state_event(id, "deleting");
         Ok(())
     }
 
     pub async fn update(&self, id: &str, req: types::UpdateRunnerRequest) -> Result<RunnerInfo> {
-        let mut runners = self.runners.write().await;
-        let runner = runners
-            .get_mut(id)
-            .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
-        if let Some(labels) = req.labels {
-            runner.config.labels = labels;
+        let _update_guard = self.update_lock.lock().await;
+        self.begin_update_operation(id).await?;
+        let result = self.update_reserved(id, req).await;
+        self.finish_update_operation(id).await;
+        result
+    }
+
+    async fn update_reserved(
+        &self,
+        id: &str,
+        req: types::UpdateRunnerRequest,
+    ) -> Result<RunnerInfo> {
+        let normalized_labels = req.labels.map(types::normalize_labels).transpose()?;
+        let requested_mode = req.mode;
+        let display_name = match req.display_name {
+            Some(value) => Some(types::normalize_display_name(value)?),
+            None => None,
+        };
+        let _persistence_guard = self.persistence_lock.lock().await;
+        let previous = {
+            let mut runners = self.runners.write().await;
+            let runner = runners
+                .get_mut(id)
+                .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+
+            let stopped = matches!(
+                runner.state,
+                RunnerState::Creating | RunnerState::Offline | RunnerState::Error
+            );
+            if let Some(ref requested_mode) = requested_mode {
+                if requested_mode != &runner.config.mode {
+                    if !stopped {
+                        bail!("Runner mode can only be changed while the runner is stopped");
+                    }
+                    if *requested_mode == RunnerMode::Container
+                        || runner.config.mode == RunnerMode::Container
+                    {
+                        bail!(
+                            "Container execution mode cannot be changed after creation; create a new runner instead"
+                        );
+                    }
+                }
+            }
+            if normalized_labels.is_some() && !stopped {
+                bail!("Runner labels can only be changed while the runner is stopped");
+            }
+
+            let previous_config = (
+                runner.config.labels.clone(),
+                runner.config.mode.clone(),
+                runner.config.display_name.clone(),
+            );
+            if let Some(labels) = normalized_labels {
+                runner.config.labels = labels;
+            }
+            if let Some(requested_mode) = requested_mode {
+                runner.config.mode = requested_mode;
+            }
+            if let Some(display_name) = display_name {
+                runner.config.display_name = display_name;
+            }
+            let applied_config = (
+                runner.config.labels.clone(),
+                runner.config.mode.clone(),
+                runner.config.display_name.clone(),
+            );
+            (previous_config, applied_config)
+        };
+
+        if let Err(error) = self.save_to_disk_locked().await {
+            let mut runners = self.runners.write().await;
+            if let Some(runner) = runners.get_mut(id) {
+                let current_config = (
+                    runner.config.labels.clone(),
+                    runner.config.mode.clone(),
+                    runner.config.display_name.clone(),
+                );
+                // Do not undo a newer concurrent configuration update. Runtime
+                // fields are intentionally never replaced during rollback.
+                if current_config == previous.1 {
+                    runner.config.labels = previous.0 .0;
+                    runner.config.mode = previous.0 .1;
+                    runner.config.display_name = previous.0 .2;
+                }
+            }
+            return Err(error).context("persisting runner update");
         }
-        if let Some(mode) = req.mode {
-            runner.config.mode = mode;
-        }
-        Ok(runner.clone())
+        drop(_persistence_guard);
+        self.get(id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Runner not found"))
     }
 
     pub async fn update_state(&self, id: &str, state: RunnerState) -> Result<()> {
@@ -1435,21 +2036,25 @@ impl RunnerManager {
     /// 7. Store PID, update state to Online
     /// 8. Spawn background monitor task
     pub async fn register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
-        // 1. Transition Creating -> Registering
-        self.update_state(id, RunnerState::Registering).await?;
-        self.emit_state_event(id, "registering");
+        self.begin_start_operation(id).await?;
 
-        // Continue with the common flow
-        self.do_register_and_start(id, auth_token).await
+        let result = async {
+            self.set_desired_running(id, true).await?;
+            // 1. Transition Creating -> Registering
+            self.update_state(id, RunnerState::Registering).await?;
+            self.emit_state_event(id, "registering");
+            self.do_register_and_start(id, auth_token).await
+        }
+        .await;
+        self.finish_start_operation(id).await;
+        result
     }
 
-    /// Start a runner that is already in the Registering state.
-    /// Used by the start/restart API endpoints.
-    pub async fn register_and_start_from_registering(
-        &self,
-        id: &str,
-        auth_token: &str,
-    ) -> Result<()> {
+    /// Start a Creating/Offline/Error runner while the caller retains the start
+    /// reservation. Manual API callers persist desired-running intent before spawning
+    /// this work; startup restore and recovery already have that intent.
+    pub(crate) async fn start_existing_reserved(&self, id: &str, auth_token: &str) -> Result<()> {
+        self.update_state(id, RunnerState::Registering).await?;
         self.emit_state_event(id, "registering");
         self.do_register_and_start(id, auth_token).await
     }
@@ -1460,10 +2065,36 @@ impl RunnerManager {
     async fn do_register_and_start(&self, id: &str, auth_token: &str) -> Result<()> {
         self.set_auth_token(Some(auth_token.to_string())).await;
 
+        // API unit tests use a dedicated sentinel token. Do not let their
+        // background auto-start tasks download/configure a real GitHub Actions
+        // runner: parallel tests would otherwise contend on the process-wide
+        // runner download lock and keep lifecycle reservations for up to a minute.
+        // This branch is compiled only in tests and cannot affect production.
+        #[cfg(test)]
+        if auth_token == "ghp_test_token" {
+            self.update_state_with_error(
+                id,
+                RunnerState::Error,
+                Some("Runner startup skipped for test authentication".to_string()),
+            )
+            .await?;
+            self.emit_state_event(id, "error");
+            return Ok(());
+        }
+
         let runner = self
             .get(id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+        if runner.state != RunnerState::Registering {
+            bail!(
+                "Runner '{id}' must be Registering before start, found {:?}",
+                runner.state
+            );
+        }
+        if self.has_active_process(id).await {
+            bail!("Runner '{id}' already has an active process");
+        }
         let config = &runner.config;
 
         // Check both .runner and .runner_migrated (newer runner versions rename
@@ -1509,6 +2140,7 @@ impl RunnerManager {
             Err(e) => {
                 if crate::github::is_bad_credentials(&e) {
                     tracing::warn!("GitHub token is invalid (Bad credentials), logging out");
+                    self.set_auth_token(None).await;
                     if let Some(ref auth) = self.auth_manager {
                         let _ = auth.logout().await;
                     }
@@ -1526,14 +2158,22 @@ impl RunnerManager {
         };
         let container_cfg = config.container.as_ref();
 
-        // If already configured, deregister before re-configuring.
-        // The config script refuses to configure an already-configured runner, so we
-        // must remove the old configuration first.
+        // If already configured, deregister before re-configuring. GitHub
+        // requires a dedicated remove token; a registration token is not valid for
+        // `config.sh remove` and previously left stale runners behind silently.
         if already_configured {
+            let removal = gh
+                .get_runner_remove_token(&config.repo_owner, &config.repo_name)
+                .await
+                .context("Failed to get runner removal token")?;
             if let (Some(dc), Some(cc)) = (&docker_client, container_cfg) {
-                let _ = docker::deregister(dc, &config.work_dir, &cc.image, &reg.token).await;
+                docker::deregister(dc, &config.work_dir, &cc.image, &removal.token)
+                    .await
+                    .context("Failed to deregister existing container runner")?;
             } else {
-                let _ = remove_runner(&config.work_dir, &reg.token).await;
+                remove_runner(&config.work_dir, &removal.token)
+                    .await
+                    .context("Failed to deregister existing runner")?;
             }
             clean_runner_config(&config.work_dir);
         }
@@ -1597,19 +2237,48 @@ impl RunnerManager {
             (RunningProcess::Native(child), stdout, stderr, pid, None)
         };
 
-        // 6. Store PID/container id, update state to Online, record start time
+        // Publish the process handle and Online state in one critical section.
+        // Stop/restart/delete can now safely act as soon as Online is observable.
+        let kill_signal = Arc::new(Notify::new());
+        let (exit_tx, exit_rx) = watch::channel(false);
+        let handle = ProcessHandle {
+            kill_signal: kill_signal.clone(),
+            exited: exit_rx,
+        };
         let started_at = chrono::Utc::now();
         {
             let mut runners = self.runners.write().await;
-            if let Some(r) = runners.get_mut(id) {
-                r.state = RunnerState::Online;
-                r.pid = pid;
-                r.container_id = container_id;
-                r.started_at = Some(started_at);
+            let runner = runners
+                .get_mut(id)
+                .ok_or_else(|| anyhow::anyhow!("Runner not found while publishing process"))?;
+            if runner.state != RunnerState::Registering {
+                bail!(
+                    "Runner '{id}' changed to {:?} before its process could be published",
+                    runner.state
+                );
             }
+            let mut processes = self.processes.write().await;
+            if processes.contains_key(id) {
+                bail!("Runner '{id}' already has an active process");
+            }
+            processes.insert(id.to_string(), handle);
+            runner.state = RunnerState::Online;
+            runner.pid = pid;
+            runner.container_id = container_id;
+            runner.started_at = Some(started_at);
+            runner.current_job = None;
+            runner.job_context = None;
+            runner.job_started_at = None;
+            runner.error_message = None;
         }
         self.emit_state_event(id, "online");
-        let _ = self.save_to_disk().await;
+        if let Err(error) = self.save_to_disk().await {
+            tracing::error!(
+                runner = %id,
+                error = %error,
+                "Runner is online, but its state could not be persisted"
+            );
+        }
 
         // 5c. Spawn log reader tasks
         if let Some(stdout) = stdout {
@@ -1973,17 +2642,7 @@ impl RunnerManager {
             });
         }
 
-        // Store process handle with kill signal + exit watch
-        let kill_signal = Arc::new(Notify::new());
-        let (exit_tx, exit_rx) = watch::channel(false);
-
-        let handle = ProcessHandle {
-            kill_signal: kill_signal.clone(),
-            exited: exit_rx,
-        };
-        self.processes.write().await.insert(id.to_string(), handle);
-
-        // 7. Spawn background monitor task — owns `running` exclusively
+        // Spawn background monitor task — owns `running` exclusively.
         let manager = self.clone();
         let runner_id = id.to_string();
         tokio::spawn(async move {
@@ -2069,117 +2728,353 @@ impl RunnerManager {
             };
             tracing::info!("Runner {} exited: {}", runner_id, exit_description);
 
-            // Signal that the process has fully exited
-            let _ = exit_tx.send(true);
-
-            // Update state to Offline
-            {
+            // Update state before notifying stop callers. This guarantees that a
+            // successful stop wait never returns while the old process is still
+            // represented as running.
+            let unexpected = {
                 let mut runners = manager.runners.write().await;
                 if let Some(r) = runners.get_mut(&runner_id) {
-                    if r.state == RunnerState::Online
-                        || r.state == RunnerState::Busy
-                        || r.state == RunnerState::Stopping
-                    {
+                    let unexpected = r.state == RunnerState::Online || r.state == RunnerState::Busy;
+                    if unexpected || r.state == RunnerState::Stopping {
                         r.state = RunnerState::Offline;
                         r.pid = None;
                         r.container_id = None;
                         r.started_at = None;
+                        r.current_job = None;
+                        r.job_context = None;
+                        r.job_started_at = None;
+                        r.error_message = unexpected.then(|| {
+                            "Runner process exited unexpectedly; recovery is scheduled".to_string()
+                        });
                     }
+                    unexpected
+                } else {
+                    false
                 }
-            }
+            };
             manager.processes.write().await.remove(&runner_id);
             manager.emit_state_event(&runner_id, "offline");
+
+            let should_recover = unexpected && manager.is_desired_running(&runner_id).await;
+            if should_recover {
+                manager.schedule_recovery(runner_id.clone());
+            } else {
+                let _ = manager.save_to_disk().await;
+            }
+            let _ = exit_tx.send(true);
         });
 
         Ok(())
     }
 
-    /// Stop a running runner process.
-    ///
+    pub(crate) async fn set_desired_running(&self, runner_id: &str, desired: bool) -> Result<()> {
+        let _persistence_guard = self.persistence_lock.lock().await;
+        if desired && !self.runners.read().await.contains_key(runner_id) {
+            bail!("Runner not found");
+        }
+
+        let previous = {
+            let mut desired_running = self.desired_running.write().await;
+            let previous = desired_running.contains(runner_id);
+            if desired {
+                desired_running.insert(runner_id.to_string());
+            } else {
+                desired_running.remove(runner_id);
+            }
+            previous
+        };
+        if let Err(error) = self.save_to_disk_locked().await {
+            let mut desired_running = self.desired_running.write().await;
+            if previous {
+                desired_running.insert(runner_id.to_string());
+            } else {
+                desired_running.remove(runner_id);
+            }
+            return Err(error).context("persisting desired runner state");
+        }
+        Ok(())
+    }
+
+    async fn is_desired_running(&self, runner_id: &str) -> bool {
+        self.desired_running.read().await.contains(runner_id)
+    }
+
+    /// Keep retrying a runner that the user expects to be online. Retries are
+    /// de-duplicated and back off to one attempt per minute. Explicit Stop or
+    /// Delete clears `desired_running`, which cancels the loop.
+    pub fn schedule_recovery(&self, runner_id: String) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            {
+                let mut recovering = manager.recovering.lock().await;
+                if !recovering.insert(runner_id.clone()) {
+                    return;
+                }
+            }
+
+            const BACKOFF_SECS: [u64; 5] = [2, 5, 15, 30, 60];
+            let mut attempt = 0usize;
+
+            loop {
+                let delay_secs = BACKOFF_SECS[attempt.min(BACKOFF_SECS.len() - 1)];
+                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+
+                if !manager.is_desired_running(&runner_id).await {
+                    break;
+                }
+
+                let Some(info) = manager.get(&runner_id).await else {
+                    break;
+                };
+                match info.state {
+                    RunnerState::Offline | RunnerState::Error => {}
+                    RunnerState::Registering => {
+                        // A manual start is in flight. Keep this de-duplicated loop
+                        // alive so it can resume if that attempt fails.
+                        continue;
+                    }
+                    RunnerState::Online | RunnerState::Busy => break,
+                    RunnerState::Stopping => continue,
+                    RunnerState::Creating | RunnerState::Deleting => break,
+                }
+
+                let Some(token) = manager.auth_token.read().await.clone() else {
+                    {
+                        let mut runners = manager.runners.write().await;
+                        if let Some(runner) = runners.get_mut(&runner_id) {
+                            let next_delay =
+                                BACKOFF_SECS[(attempt + 1).min(BACKOFF_SECS.len() - 1)];
+                            runner.state = RunnerState::Error;
+                            runner.error_message = Some(format!(
+                                "Runner is waiting for authentication; retrying in {next_delay}s"
+                            ));
+                        }
+                    }
+                    manager.emit_state_event(&runner_id, "error");
+                    let _ = manager.save_to_disk().await;
+                    attempt += 1;
+                    continue;
+                };
+
+                if let Err(error) = manager.begin_start_operation(&runner_id).await {
+                    tracing::debug!(
+                        runner = %runner_id,
+                        error = %error,
+                        "Recovery deferred by another lifecycle operation"
+                    );
+                    continue;
+                }
+
+                match manager.start_existing_reserved(&runner_id, &token).await {
+                    Ok(()) => {
+                        manager.finish_start_operation(&runner_id).await;
+                        tracing::info!(
+                            runner = %runner_id,
+                            attempt = attempt + 1,
+                            "Runner recovered after an unexpected exit"
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        attempt += 1;
+                        let next_delay = BACKOFF_SECS[attempt.min(BACKOFF_SECS.len() - 1)];
+                        tracing::error!(
+                            runner = %runner_id,
+                            attempt,
+                            error = %error,
+                            "Automatic runner recovery failed"
+                        );
+                        let _ = manager
+                            .update_state_with_error(
+                                &runner_id,
+                                RunnerState::Error,
+                                Some(format!(
+                                    "Automatic recovery attempt {attempt} failed: {error:#}. Retrying in {next_delay}s"
+                                )),
+                            )
+                            .await;
+                        manager.emit_state_event(&runner_id, "error");
+                        manager.finish_start_operation(&runner_id).await;
+                    }
+                }
+            }
+
+            manager.recovering.lock().await.remove(&runner_id);
+        });
+    }
+
+    async fn begin_stop(&self, id: &str, clear_desired: bool) -> Result<()> {
+        // Hold the persistence transaction across mutation, durable write, and
+        // rollback so no other save can publish an intermediate stop state.
+        let _persistence_guard = self.persistence_lock.lock().await;
+        let (previous_state, was_desired) = {
+            let mut desired_running = self.desired_running.write().await;
+            let mut runners = self.runners.write().await;
+            let runner = runners
+                .get_mut(id)
+                .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
+            if !runner.state.can_transition_to(&RunnerState::Stopping) {
+                bail!(
+                    "Invalid state transition: {:?} -> {:?}",
+                    runner.state,
+                    RunnerState::Stopping
+                );
+            }
+            let previous_state = runner.state.clone();
+            let was_desired = desired_running.contains(id);
+            runner.state = RunnerState::Stopping;
+            runner.error_message = None;
+            if clear_desired {
+                desired_running.remove(id);
+            }
+            (previous_state, was_desired)
+        };
+
+        if let Err(error) = self.save_to_disk_locked().await {
+            let mut desired_running = self.desired_running.write().await;
+            let mut runners = self.runners.write().await;
+            if let Some(runner) = runners.get_mut(id) {
+                if runner.state == RunnerState::Stopping {
+                    runner.state = previous_state;
+                }
+            }
+            if was_desired {
+                desired_running.insert(id.to_string());
+            } else {
+                desired_running.remove(id);
+            }
+            return Err(error).context("persisting stop transition");
+        }
+
+        drop(_persistence_guard);
+        self.emit_state_event(id, "stopping");
+        Ok(())
+    }
+
+    /// Stop a running runner process because the user explicitly requested it.
+    pub async fn stop_process(&self, id: &str) -> Result<()> {
+        self.begin_stop_operation(id).await?;
+        let result = self.stop_process_internal(id, true).await;
+        self.finish_stop_operation(id).await;
+        result
+    }
+
+    /// Stop a process while retaining the user's desired-running intent. This is
+    /// used by daemon shutdown flows so a later launch can restore it.
+    pub async fn stop_process_preserving_intent(&self, id: &str) -> Result<()> {
+        self.begin_stop_operation(id).await?;
+        let result = self.stop_process_internal(id, false).await;
+        self.finish_stop_operation(id).await;
+        result
+    }
+
     /// Signals the monitoring task to kill the child via `Notify`, then waits
     /// for the `watch` channel to confirm the process has fully exited.
     /// No shared lock on `Child` — eliminates the deadlock from issue #31.
-    pub async fn stop_process(&self, id: &str) -> Result<()> {
-        // Transition to Stopping
-        self.update_state(id, RunnerState::Stopping).await?;
-        self.emit_state_event(id, "stopping");
+    pub(crate) async fn stop_process_internal(&self, id: &str, clear_desired: bool) -> Result<()> {
+        // State and desired-running intent are changed atomically. A rejected
+        // transition must never silently disable future recovery.
+        self.begin_stop(id, clear_desired).await?;
 
-        // Get the process handle
         let handle = self.processes.read().await.get(id).cloned();
-
         if let Some(handle) = handle {
-            // Signal the monitoring task to kill the child
             handle.kill_signal.notify_one();
 
-            // Wait for the process to fully exit (with timeout)
             let mut exited = handle.exited;
-            let timeout =
-                tokio::time::timeout(std::time::Duration::from_secs(15), exited.wait_for(|&v| v))
-                    .await;
-
-            if timeout.is_err() {
-                tracing::warn!("Timed out waiting for runner {} to exit", id);
-            }
-        }
-
-        // Ensure state is Offline (monitor task may have already done this,
-        // but handle the case where there was no process handle)
-        {
-            let mut runners = self.runners.write().await;
-            if let Some(r) = runners.get_mut(id) {
-                if r.state == RunnerState::Stopping {
-                    r.state = RunnerState::Offline;
-                    r.pid = None;
-                    r.started_at = None;
+            match tokio::time::timeout(std::time::Duration::from_secs(15), exited.wait_for(|&v| v))
+                .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => bail!("Failed while waiting for runner '{id}' to exit: {error}"),
+                Err(_) => {
+                    // Never claim Offline while the old process may still own the
+                    // GitHub runner session; doing so permits a duplicate start.
+                    bail!(
+                        "Timed out waiting for runner '{id}' to exit; it remains in Stopping state"
+                    )
                 }
             }
+
+            // The monitor normally applies this transition before sending the
+            // watch notification. Keep a defensive fallback for reconstructed or
+            // test handles that only signal process exit.
+            let mut runners = self.runners.write().await;
+            if let Some(runner) = runners.get_mut(id) {
+                if runner.state == RunnerState::Stopping {
+                    runner.state = RunnerState::Offline;
+                    runner.pid = None;
+                    runner.container_id = None;
+                    runner.started_at = None;
+                    runner.current_job = None;
+                    runner.job_context = None;
+                    runner.job_started_at = None;
+                    runner.error_message = None;
+                }
+            }
+            drop(runners);
+            self.emit_state_event(id, "offline");
+            self.save_to_disk().await?;
+        } else {
+            // No tracked process exists. Complete the state transition locally.
+            let mut runners = self.runners.write().await;
+            if let Some(runner) = runners.get_mut(id) {
+                runner.state = RunnerState::Offline;
+                runner.pid = None;
+                runner.container_id = None;
+                runner.started_at = None;
+                runner.current_job = None;
+                runner.job_context = None;
+                runner.job_started_at = None;
+                runner.error_message = None;
+            }
+            drop(runners);
+            self.emit_state_event(id, "offline");
+            self.save_to_disk().await?;
         }
-        self.emit_state_event(id, "offline");
+
         Ok(())
     }
 
     /// Full delete flow: stop process, deregister from GitHub, remove work dir.
     pub async fn full_delete(&self, id: &str, auth_token: &str) -> Result<()> {
+        self.begin_delete_operation(id).await?;
+        let result = self.full_delete_reserved(id, auth_token).await;
+        self.finish_delete_operation(id).await;
+        result
+    }
+
+    async fn full_delete_reserved(&self, id: &str, auth_token: &str) -> Result<()> {
+        self.prepare_delete_reserved(id).await?;
         let runner = self
             .get(id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Runner not found"))?;
-
-        // Stop if running
-        if runner.state == RunnerState::Online || runner.state == RunnerState::Busy {
-            let _ = self.stop_process(id).await;
-        }
-
-        // Try to transition to Deleting
-        {
-            let mut runners = self.runners.write().await;
-            if let Some(r) = runners.get_mut(id) {
-                // Force the state for deletion
-                r.state = RunnerState::Deleting;
-            }
-        }
-        self.emit_state_event(id, "deleting");
-
-        // Deregister from GitHub
+        // Only configured runners have a GitHub registration to remove. Use the
+        // dedicated removal token and propagate failures so local deletion never
+        // silently leaves a stale remote runner behind.
         let config = &runner.config;
-        if let Ok(gh) = GitHubClient::new(Some(auth_token.to_string())) {
-            if let Ok(reg) = gh
-                .get_runner_registration_token(&config.repo_owner, &config.repo_name)
+        let configured = config.work_dir.join(".runner").exists()
+            || config.work_dir.join(".runner_migrated").exists();
+        if configured {
+            let gh = GitHubClient::new(Some(auth_token.to_string()))?;
+            let removal = gh
+                .get_runner_remove_token(&config.repo_owner, &config.repo_name)
                 .await
-            {
-                if let Some(cc) = config.container.as_ref() {
-                    if let Ok(dc) = docker::connect() {
-                        let _ =
-                            docker::deregister(&dc, &config.work_dir, &cc.image, &reg.token).await;
-                    }
-                } else {
-                    let _ = remove_runner(&config.work_dir, &reg.token).await;
-                }
+                .context("Failed to get runner removal token")?;
+            if let Some(cc) = config.container.as_ref() {
+                let dc = docker::connect()?;
+                docker::deregister(&dc, &config.work_dir, &cc.image, &removal.token)
+                    .await
+                    .context("Failed to deregister container runner")?;
+            } else {
+                remove_runner(&config.work_dir, &removal.token)
+                    .await
+                    .context("Failed to deregister runner")?;
             }
         }
 
-        // Remove runner entry and work dir
-        self.delete(id).await?;
+        self.remove_reserved(id).await?;
+        self.emit_state_event(id, "deleting");
         Ok(())
     }
 
@@ -2429,6 +3324,669 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_validates_display_name_before_mutating_other_fields() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let original_labels = runner.config.labels.clone();
+
+        let result = manager
+            .update(
+                &runner.config.id,
+                types::UpdateRunnerRequest {
+                    labels: Some(vec!["changed".to_string()]),
+                    mode: Some(RunnerMode::Service),
+                    display_name: Some(Some("bad\nname".to_string())),
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        let unchanged = manager.get(&runner.config.id).await.unwrap();
+        assert_eq!(unchanged.config.labels, original_labels);
+        assert_eq!(unchanged.config.mode, RunnerMode::App);
+        assert_eq!(unchanged.config.display_name, None);
+    }
+
+    #[tokio::test]
+    async fn test_create_desired_running_persists_intent_atomically() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create_desired_running("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+
+        assert!(manager.is_desired_running(&runner.config.id).await);
+        let persisted: Vec<PersistedRunner> = serde_json::from_str(
+            &std::fs::read_to_string(manager.config.runners_json_path()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].config.id, runner.config.id);
+        assert!(persisted[0].was_running);
+
+        // Desired-running creation must return with its start already admitted.
+        assert_eq!(manager.begin_shutdown_operation().await.unwrap(), 1);
+        manager.finish_start_operation(&runner.config.id).await;
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_waits_for_creation_persistence_transaction() {
+        let manager = create_test_manager();
+        let persistence_guard = manager.persistence_lock.lock().await;
+
+        let create_manager = manager.clone();
+        let create_task = tokio::spawn(async move {
+            create_manager
+                .create("owner/repo", None, None, None, None, None)
+                .await
+        });
+
+        // create_with_intent acquires lifecycle admission before persistence.
+        // Keep the persistence transaction blocked until that admission lock
+        // is definitely held, then prove shutdown cannot overtake it.
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if manager.lifecycle_operations.try_lock().is_err() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("creation never acquired lifecycle admission");
+
+        let shutdown_manager = manager.clone();
+        let mut shutdown_task =
+            tokio::spawn(async move { shutdown_manager.begin_shutdown_operation().await });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut shutdown_task,)
+                .await
+                .is_err()
+        );
+
+        drop(persistence_guard);
+        let runner = create_task.await.unwrap().unwrap();
+        assert_eq!(shutdown_task.await.unwrap().unwrap(), 0);
+        assert!(manager.get(&runner.config.id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_shutdown_reopens_lifecycle_admission() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(manager.begin_shutdown_operation().await.unwrap(), 0);
+        assert!(manager
+            .begin_start_operation(&runner.config.id)
+            .await
+            .is_err());
+
+        manager.cancel_shutdown_operation().await;
+        manager
+            .begin_start_operation(&runner.config.id)
+            .await
+            .unwrap();
+        manager.finish_start_operation(&runner.config.id).await;
+
+        // A later shutdown can install a fresh barrier normally.
+        assert_eq!(manager.begin_shutdown_operation().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_test_auth_start_skips_external_runner_setup() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager
+            .register_and_start(&id, "ghp_test_token")
+            .await
+            .unwrap();
+
+        let runner = manager.get(&id).await.unwrap();
+        assert_eq!(runner.state, RunnerState::Error);
+        assert!(!manager.has_active_process(&id).await);
+        assert!(runner
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("skipped for test authentication"));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_barrier_rejects_new_starts() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(manager.begin_shutdown_operation().await.unwrap(), 0);
+        let error = manager
+            .begin_start_operation(&runner.config.id)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("shutdown"));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_barrier_rejects_other_mutations() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager.begin_shutdown_operation().await.unwrap();
+        assert!(manager.begin_stop_operation(&id).await.is_err());
+        assert!(manager.begin_update_operation(&id).await.is_err());
+        assert!(manager.begin_delete_operation(&id).await.is_err());
+        assert!(manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_waits_for_previously_admitted_start() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager.begin_start_operation(&id).await.unwrap();
+        assert_eq!(manager.begin_shutdown_operation().await.unwrap(), 1);
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(25),
+            manager.wait_for_lifecycle_operations_to_finish(),
+        )
+        .await
+        .is_err());
+
+        manager.finish_start_operation(&id).await;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            manager.wait_for_lifecycle_operations_to_finish(),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_desired_running_is_persisted_independently_from_error_state() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+
+        manager.set_desired_running(&id, true).await.unwrap();
+        manager
+            .update_state(&id, RunnerState::Registering)
+            .await
+            .unwrap();
+        manager
+            .update_state_with_error(&id, RunnerState::Error, Some("transient".to_string()))
+            .await
+            .unwrap();
+        manager.save_to_disk().await.unwrap();
+
+        let persisted: Vec<PersistedRunner> = serde_json::from_str(
+            &std::fs::read_to_string(manager.config.runners_json_path()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert!(persisted[0].was_running);
+
+        manager.set_desired_running(&id, false).await.unwrap();
+        let persisted: Vec<PersistedRunner> = serde_json::from_str(
+            &std::fs::read_to_string(manager.config.runners_json_path()).unwrap(),
+        )
+        .unwrap();
+        assert!(!persisted[0].was_running);
+    }
+
+    #[tokio::test]
+    async fn test_create_rejects_blank_and_control_character_names() {
+        let manager = create_test_manager();
+        assert!(manager
+            .create(
+                "owner/repo",
+                Some("   ".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_err());
+        assert!(manager
+            .create(
+                "owner/repo",
+                Some(
+                    "bad
+name"
+                        .to_string()
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_err());
+        assert!(manager.list().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_explicit_name_creation_is_unique() {
+        let manager = create_test_manager();
+        let first_manager = manager.clone();
+        let second_manager = manager.clone();
+        let first = tokio::spawn(async move {
+            first_manager
+                .create(
+                    "owner/repo",
+                    Some("shared-name".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            second_manager
+                .create(
+                    "owner/repo",
+                    Some("shared-name".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+        });
+        let results = [first.await.unwrap(), second.await.unwrap()];
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(manager.list().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_same_native_runner_name_is_allowed_across_repositories() {
+        let manager = create_test_manager();
+        manager
+            .create(
+                "owner/one",
+                Some("shared-name".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        manager
+            .create(
+                "owner/two",
+                Some("shared-name".to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(manager.list().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_same_container_runner_name_is_rejected_across_repositories() {
+        let manager = create_test_manager();
+        let container = types::ContainerConfig {
+            image: "ghcr.io/agallea/homerun-runner:ubuntu-24.04".to_string(),
+            extra_env: vec![],
+        };
+        manager
+            .create(
+                "owner/one",
+                Some("shared-name".to_string()),
+                None,
+                Some(RunnerMode::Container),
+                None,
+                Some(container.clone()),
+            )
+            .await
+            .unwrap();
+        let duplicate = manager
+            .create(
+                "owner/two",
+                Some("shared-name".to_string()),
+                None,
+                Some(RunnerMode::Container),
+                None,
+                Some(container),
+            )
+            .await;
+        assert!(duplicate.is_err());
+        assert_eq!(manager.list().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_delete_reservation_blocks_new_start_operations() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager.begin_delete_operation(&id).await.unwrap();
+        assert!(manager.begin_start_operation(&id).await.is_err());
+        manager.finish_delete_operation(&id).await;
+
+        manager.begin_start_operation(&id).await.unwrap();
+        manager.finish_start_operation(&id).await;
+    }
+
+    #[tokio::test]
+    async fn test_persisted_mutations_wait_for_their_persistence_transaction() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        let persistence_guard = manager.persistence_lock.lock().await;
+        let update = {
+            let manager = manager.clone();
+            let id = id.clone();
+            tokio::spawn(async move {
+                manager
+                    .update(
+                        &id,
+                        types::UpdateRunnerRequest {
+                            labels: None,
+                            mode: None,
+                            display_name: Some(Some("durable alias".to_string())),
+                        },
+                    )
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert_eq!(manager.get(&id).await.unwrap().config.display_name, None);
+        drop(persistence_guard);
+        update.await.unwrap().unwrap();
+        assert_eq!(
+            manager
+                .get(&id)
+                .await
+                .unwrap()
+                .config
+                .display_name
+                .as_deref(),
+            Some("durable alias")
+        );
+
+        manager.set_desired_running(&id, true).await.unwrap();
+        let persistence_guard = manager.persistence_lock.lock().await;
+        let clear_intent = {
+            let manager = manager.clone();
+            let id = id.clone();
+            tokio::spawn(async move { manager.set_desired_running(&id, false).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(manager.is_desired_running(&id).await);
+        drop(persistence_guard);
+        clear_intent.await.unwrap().unwrap();
+        assert!(!manager.is_desired_running(&id).await);
+
+        manager
+            .update_state(&id, RunnerState::Registering)
+            .await
+            .unwrap();
+        manager
+            .update_state(&id, RunnerState::Online)
+            .await
+            .unwrap();
+        manager.set_desired_running(&id, true).await.unwrap();
+        let persistence_guard = manager.persistence_lock.lock().await;
+        let stopping = {
+            let manager = manager.clone();
+            let id = id.clone();
+            tokio::spawn(async move { manager.begin_stop(&id, true).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let current = manager.get(&id).await.unwrap();
+        assert_eq!(current.state, RunnerState::Online);
+        assert!(manager.is_desired_running(&id).await);
+        drop(persistence_guard);
+        stopping.await.unwrap().unwrap();
+        assert_eq!(manager.get(&id).await.unwrap().state, RunnerState::Stopping);
+        assert!(!manager.is_desired_running(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_delete_waits_for_an_admitted_stop_operation() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager.begin_stop_operation(&id).await.unwrap();
+        assert!(manager.begin_start_operation(&id).await.is_err());
+        assert!(manager
+            .update(
+                &id,
+                types::UpdateRunnerRequest {
+                    labels: None,
+                    mode: None,
+                    display_name: Some(Some("blocked".to_string())),
+                },
+            )
+            .await
+            .is_err());
+        manager.begin_delete_operation(&id).await.unwrap();
+
+        let waiter = {
+            let manager = manager.clone();
+            let id = id.clone();
+            tokio::spawn(async move { manager.wait_for_mutations_to_finish(&id).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+        manager.finish_stop_operation(&id).await;
+        waiter.await.unwrap().unwrap();
+        manager.finish_delete_operation(&id).await;
+    }
+
+    #[tokio::test]
+    async fn test_update_reservation_blocks_start_and_delete_waits_for_update() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager.begin_update_operation(&id).await.unwrap();
+        assert!(manager.begin_start_operation(&id).await.is_err());
+        manager.begin_delete_operation(&id).await.unwrap();
+
+        let waiter = {
+            let manager = manager.clone();
+            let id = id.clone();
+            tokio::spawn(async move { manager.wait_for_mutations_to_finish(&id).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+
+        manager.finish_update_operation(&id).await;
+        waiter.await.unwrap().unwrap();
+        manager.finish_delete_operation(&id).await;
+    }
+
+    #[tokio::test]
+    async fn test_delete_clears_intent_restored_by_inflight_start() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+        manager.begin_start_operation(&id).await.unwrap();
+        manager.set_desired_running(&id, true).await.unwrap();
+
+        let deletion = {
+            let manager = manager.clone();
+            let id = id.clone();
+            tokio::spawn(async move { manager.delete(&id).await })
+        };
+        loop {
+            if manager
+                .lifecycle_operations
+                .lock()
+                .await
+                .deleting
+                .contains(&id)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // The deletion reservation blocks recovery/start admission, so Delete
+        // must not mutate user intent while waiting for the admitted start to drain.
+        assert!(manager.is_desired_running(&id).await);
+        manager.finish_start_operation(&id).await;
+        deletion.await.unwrap().unwrap();
+
+        assert!(!manager.is_desired_running(&id).await);
+        assert!(manager.get(&id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_local_delete_rejects_configured_runner_without_changing_intent() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+        std::fs::write(runner.config.work_dir.join(".runner"), "configured").unwrap();
+        manager.set_desired_running(&id, true).await.unwrap();
+
+        let error = manager.delete(&id).await.unwrap_err();
+
+        assert!(error.to_string().contains("Authentication required"));
+        assert!(manager.get(&id).await.is_some());
+        assert!(manager.is_desired_running(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_full_delete_skips_remote_api_for_unconfigured_runner() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id;
+
+        manager.full_delete(&id, "not-a-real-token").await.unwrap();
+
+        assert!(manager.get(&id).await.is_none());
+        assert!(!manager.is_desired_running(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_update_rejects_mode_change_and_active_label_change() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+
+        let mode_result = manager
+            .update(
+                &id,
+                types::UpdateRunnerRequest {
+                    labels: None,
+                    mode: Some(RunnerMode::Container),
+                    display_name: None,
+                },
+            )
+            .await;
+        assert!(mode_result.is_err());
+        assert_eq!(manager.get(&id).await.unwrap().config.mode, RunnerMode::App);
+
+        manager
+            .update_state(&id, RunnerState::Registering)
+            .await
+            .unwrap();
+        manager
+            .update_state(&id, RunnerState::Online)
+            .await
+            .unwrap();
+        let label_result = manager
+            .update(
+                &id,
+                types::UpdateRunnerRequest {
+                    labels: Some(vec!["changed".to_string()]),
+                    mode: None,
+                    display_name: None,
+                },
+            )
+            .await;
+        assert!(label_result.is_err());
+
+        let mode_result = manager
+            .update(
+                &id,
+                types::UpdateRunnerRequest {
+                    labels: None,
+                    mode: Some(RunnerMode::Service),
+                    display_name: None,
+                },
+            )
+            .await;
+        assert!(mode_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_failed_stop_transition_preserves_desired_running_intent() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+        manager.set_desired_running(&id, true).await.unwrap();
+
+        let result = manager.stop_process(&id).await;
+        assert!(result.is_err());
+        assert!(manager.is_desired_running(&id).await);
+        assert_eq!(manager.get(&id).await.unwrap().state, RunnerState::Creating);
+    }
+
+    #[tokio::test]
     async fn test_runner_state_transitions() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::with_base_dir(dir.path().join(".homerun"));
@@ -2674,6 +4232,7 @@ mod tests {
             config: RunnerConfig {
                 id: "abc".to_string(),
                 name: "test-runner".to_string(),
+                display_name: None,
                 repo_owner: "owner".to_string(),
                 repo_name: "repo".to_string(),
                 labels: vec!["self-hosted".to_string()],
@@ -2707,7 +4266,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_mode() {
+    async fn test_update_native_mode_while_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::with_base_dir(dir.path().join(".homerun"));
         config.ensure_dirs().unwrap();
@@ -2719,19 +4278,18 @@ mod tests {
             .unwrap();
         let id = runner.config.id.clone();
 
-        // Default mode is App; update to Service
-        manager
+        let updated = manager
             .update(
                 &id,
                 crate::runner::types::UpdateRunnerRequest {
                     labels: None,
                     mode: Some(crate::runner::types::RunnerMode::Service),
+                    display_name: None,
                 },
             )
             .await
             .unwrap();
 
-        let updated = manager.get(&id).await.unwrap();
         assert_eq!(
             updated.config.mode,
             crate::runner::types::RunnerMode::Service
@@ -2751,6 +4309,7 @@ mod tests {
                 crate::runner::types::UpdateRunnerRequest {
                     labels: Some(vec!["self-hosted".to_string()]),
                     mode: None,
+                    display_name: None,
                 },
             )
             .await;
@@ -2940,14 +4499,10 @@ mod tests {
             .await
             .unwrap();
 
-        // full_delete with invalid token: GitHub deregistration will fail but runner
-        // should still be removed from the local store.
+        // The runner was never configured, so full_delete must skip the remote
+        // API entirely and remove it even when the supplied token is invalid.
         let result = manager.full_delete(&id, "invalid-token").await;
-        // We expect success (the function ignores deregistration errors)
-        assert!(
-            result.is_ok(),
-            "full_delete should succeed even with invalid token"
-        );
+        assert!(result.is_ok(), "unconfigured full_delete should stay local");
         assert!(
             manager.get(&id).await.is_none(),
             "runner should be removed from the manager"
@@ -3012,6 +4567,7 @@ mod tests {
             config: RunnerConfig {
                 id: "x".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3049,6 +4605,7 @@ mod tests {
             config: RunnerConfig {
                 id: "x".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3086,6 +4643,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-1".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3136,6 +4694,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-1".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3170,6 +4729,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-1".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3204,6 +4764,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-1".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3240,6 +4801,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-2".to_string(),
                 name: "n2".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3288,6 +4850,7 @@ mod tests {
                 config: RunnerConfig {
                     id: "runner-1".to_string(),
                     name: "n1".to_string(),
+                    display_name: None,
                     repo_owner: "o".to_string(),
                     repo_name: "r".to_string(),
                     labels: vec![],
@@ -3325,6 +4888,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-2".to_string(),
                 name: "n2".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3389,6 +4953,7 @@ mod tests {
                 config: RunnerConfig {
                     id: "runner-1".to_string(),
                     name: "n1".to_string(),
+                    display_name: None,
                     repo_owner: "o".to_string(),
                     repo_name: "r".to_string(),
                     labels: vec![],
@@ -3427,6 +4992,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-1".to_string(),
                 name: "n".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3463,6 +5029,7 @@ mod tests {
             config: RunnerConfig {
                 id: "runner-2".to_string(),
                 name: "n2".to_string(),
+                display_name: None,
                 repo_owner: "o".to_string(),
                 repo_name: "r".to_string(),
                 labels: vec![],
@@ -3510,6 +5077,7 @@ mod tests {
                 config: RunnerConfig {
                     id: "runner-1".to_string(),
                     name: "n1".to_string(),
+                    display_name: None,
                     repo_owner: "o".to_string(),
                     repo_name: "r".to_string(),
                     labels: vec![],
@@ -3748,6 +5316,7 @@ mod tests {
             config: RunnerConfig {
                 id: "abc".to_string(),
                 name: "test-runner".to_string(),
+                display_name: None,
                 repo_owner: "owner".to_string(),
                 repo_name: "repo".to_string(),
                 labels: vec![],
@@ -3798,6 +5367,7 @@ mod tests {
                 config: RunnerConfig {
                     id: runner_id.to_string(),
                     name: "test".to_string(),
+                    display_name: None,
                     repo_owner: "owner".to_string(),
                     repo_name: "repo".to_string(),
                     labels: vec![],
@@ -3826,6 +5396,7 @@ mod tests {
             .write()
             .await
             .insert(runner_id.to_string(), handle);
+        manager.set_desired_running(runner_id, true).await.unwrap();
 
         // Spawn a task that simulates the monitoring task:
         // waits for kill signal, then marks exited
@@ -3844,6 +5415,61 @@ mod tests {
         let runner = manager.get(runner_id).await.unwrap();
         assert_eq!(runner.state, RunnerState::Offline);
         assert_eq!(runner.pid, None);
+        assert!(!manager.is_desired_running(runner_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_stop_process_preserving_intent_keeps_restore_state() {
+        let manager = create_test_manager();
+        let runner = manager
+            .create("owner/repo", None, None, None, None, None)
+            .await
+            .unwrap();
+        let id = runner.config.id.clone();
+        manager
+            .update_state(&id, RunnerState::Registering)
+            .await
+            .unwrap();
+        manager
+            .update_state(&id, RunnerState::Online)
+            .await
+            .unwrap();
+        manager.set_desired_running(&id, true).await.unwrap();
+
+        manager.stop_process_preserving_intent(&id).await.unwrap();
+
+        assert_eq!(manager.get(&id).await.unwrap().state, RunnerState::Offline);
+        assert!(manager.is_desired_running(&id).await);
+        let persisted: Vec<PersistedRunner> = serde_json::from_str(
+            &std::fs::read_to_string(manager.config.runners_json_path()).unwrap(),
+        )
+        .unwrap();
+        assert!(persisted[0].was_running);
+    }
+
+    #[test]
+    fn test_validate_create_request_rejects_malformed_repository_names() {
+        for invalid in [
+            "repo",
+            "/repo",
+            "owner/",
+            "owner/repo/extra",
+            " owner/repo",
+            "owner /repo",
+            "owner/ repo",
+            "owner/repo ",
+        ] {
+            assert!(RunnerManager::validate_create_request(invalid, None, None, None).is_err());
+        }
+
+        for invalid in [
+            format!("owner/{}repo", char::from(9)),
+            format!("owner/repo{}", char::from(10)),
+        ] {
+            assert!(RunnerManager::validate_create_request(&invalid, None, None, None).is_err());
+        }
+
+        assert!(RunnerManager::validate_create_request("owner/repo", None, None, None).is_ok());
     }
 
     #[tokio::test]
@@ -3949,6 +5575,7 @@ mod tests {
                 config: RunnerConfig {
                     id: runner_id.to_string(),
                     name: "test-runner".to_string(),
+                    display_name: None,
                     repo_owner: "owner".to_string(),
                     repo_name: "repo".to_string(),
                     labels: vec![],
@@ -4007,6 +5634,7 @@ mod tests {
                     config: RunnerConfig {
                         id: id.to_string(),
                         name: name.to_string(),
+                        display_name: None,
                         repo_owner: "owner".to_string(),
                         repo_name: "repo".to_string(),
                         labels: vec![],
@@ -4243,13 +5871,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_rejects_duplicate_name_case_insensitive_across_repos() {
+    async fn test_create_rejects_duplicate_name_case_insensitive_within_repo() {
         let manager = create_test_manager();
-        // Same name (different case), different repo — still rejected: runner
-        // names must be globally unique (Docker container name is repo-agnostic).
+        // GitHub runner names are scoped to a repository. Case-insensitive
+        // duplicates must still be rejected inside that repository.
         manager
             .create(
-                "owner/repo-a",
+                "owner/repo",
                 Some("My-Runner".to_string()),
                 None,
                 None,
@@ -4260,7 +5888,7 @@ mod tests {
             .unwrap();
         let err = manager
             .create(
-                "owner/repo-b",
+                "owner/repo",
                 Some("my-runner".to_string()),
                 None,
                 None,
@@ -4353,5 +5981,53 @@ mod tests {
             err.to_string().contains("may only contain"),
             "unexpected: {err}"
         );
+    }
+
+    #[test]
+    fn test_job_context_compare_and_set_rejects_stale_results() {
+        let started_at = chrono::Utc::now();
+        let stale_started_at = started_at - chrono::Duration::seconds(1);
+        let expected_micros = started_at.timestamp_micros();
+
+        assert!(should_apply_job_context(
+            &RunnerState::Busy,
+            Some("build"),
+            Some(&started_at),
+            false,
+            "build",
+            expected_micros,
+        ));
+        assert!(!should_apply_job_context(
+            &RunnerState::Online,
+            None,
+            None,
+            false,
+            "build",
+            expected_micros,
+        ));
+        assert!(!should_apply_job_context(
+            &RunnerState::Busy,
+            Some("test"),
+            Some(&started_at),
+            false,
+            "build",
+            expected_micros,
+        ));
+        assert!(!should_apply_job_context(
+            &RunnerState::Busy,
+            Some("build"),
+            Some(&stale_started_at),
+            false,
+            "build",
+            expected_micros,
+        ));
+        assert!(!should_apply_job_context(
+            &RunnerState::Busy,
+            Some("build"),
+            Some(&started_at),
+            true,
+            "build",
+            expected_micros,
+        ));
     }
 }

@@ -5,7 +5,7 @@ mod window;
 
 use client::DaemonClient;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItem, SubmenuBuilder};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -14,31 +14,30 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let client = DaemonClient::default_socket();
+    let client = match DaemonClient::default_socket() {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("Failed to resolve HomeRun daemon connection: {error}");
+            return;
+        }
+    };
+    let sidecar_client = client.clone_connection();
+    let event_client = client.clone_connection();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_positioner::init())
         .manage(AppState {
             client: Mutex::new(client),
         })
-        .setup(|app| {
+        .setup(move |app| {
             // -- Build menu --
-            let check_updates = MenuItem::with_id(
-                app,
-                "check_updates",
-                "Check for Updates...",
-                true,
-                None::<&str>,
-            )?;
-            let settings = MenuItem::with_id(
-                app,
-                "settings",
-                "Settings...",
-                true,
-                Some("CmdOrCtrl+,"),
-            )?;
+            let check_updates =
+                MenuItem::with_id(app, "check_updates", "View Releases...", true, None::<&str>)?;
+            let settings =
+                MenuItem::with_id(app, "settings", "Settings...", true, Some("CmdOrCtrl+,"))?;
 
             let about_metadata = AboutMetadata {
                 name: Some("HomeRun".into()),
@@ -82,13 +81,8 @@ pub fn run() {
                 .close_window()
                 .build()?;
 
-            let github_item = MenuItem::with_id(
-                app,
-                "open_github",
-                "HomeRun on GitHub",
-                true,
-                None::<&str>,
-            )?;
+            let github_item =
+                MenuItem::with_id(app, "open_github", "HomeRun on GitHub", true, None::<&str>)?;
             let report_issue = MenuItem::with_id(
                 app,
                 "report_issue",
@@ -116,10 +110,9 @@ pub fn run() {
                 use tauri_plugin_opener::OpenerExt;
                 match event.id().as_ref() {
                     "check_updates" => {
-                        let _ = app_handle.opener().open_url(
-                            "https://github.com/aGallea/homerun/releases",
-                            None::<&str>,
-                        );
+                        let _ = app_handle
+                            .opener()
+                            .open_url("https://github.com/lgg/homerun/releases", None::<&str>);
                     }
                     "toggle_mini" => {
                         let _ = crate::window::toggle_mini_window(app_handle);
@@ -128,14 +121,13 @@ pub fn run() {
                         let _ = app_handle.emit("navigate", "/settings");
                     }
                     "open_github" => {
-                        let _ = app_handle.opener().open_url(
-                            "https://github.com/aGallea/homerun",
-                            None::<&str>,
-                        );
+                        let _ = app_handle
+                            .opener()
+                            .open_url("https://github.com/lgg/homerun", None::<&str>);
                     }
                     "report_issue" => {
                         let _ = app_handle.opener().open_url(
-                            "https://github.com/aGallea/homerun/issues/new/choose",
+                            "https://github.com/lgg/homerun/issues/new/choose",
                             None::<&str>,
                         );
                     }
@@ -145,8 +137,8 @@ pub fn run() {
 
             // -- Spawn daemon sidecar if not running --
             let handle = app.handle().clone();
+            let client = sidecar_client.clone_connection();
             tauri::async_runtime::spawn(async move {
-                let client = crate::client::DaemonClient::default_socket();
                 if client.health().await.is_ok() {
                     return;
                 }
@@ -165,17 +157,40 @@ pub fn run() {
                 }
             });
 
-            // -- Set up macOS notifications --
-            // In dev mode, impersonate Terminal so notifications are delivered.
-            // In production, use the app's own bundle identifier.
-            #[cfg(target_os = "macos")]
-            {
-                let bundle_id = if tauri::is_dev() {
-                    "com.apple.Terminal"
-                } else {
-                    "com.homerun.app"
-                };
-                let _ = mac_notification_sys::set_application(bundle_id);
+            // -- Forward daemon WebSocket events to every React window --
+            // Reconnect continuously so a daemon restart does not leave the desktop
+            // stuck on polling-only updates.
+            let event_handle = app.handle().clone();
+            let client = event_client.clone_connection();
+            tauri::async_runtime::spawn(async move {
+                use futures::StreamExt;
+                use tokio_tungstenite::tungstenite::Message;
+
+                loop {
+                    if let Ok(mut events) = client.connect_events().await {
+                        while let Some(message) = events.next().await {
+                            match message {
+                                Ok(Message::Text(text)) => {
+                                    match serde_json::from_str::<serde_json::Value>(&text) {
+                                        Ok(event) => {
+                                            let _ = event_handle.emit("runner-event", event);
+                                        }
+                                        Err(error) => {
+                                            eprintln!("Ignoring malformed daemon event: {error}");
+                                        }
+                                    }
+                                }
+                                Ok(Message::Close(_)) | Err(_) => break,
+                                _ => {}
+                            }
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+
+            if let Some(main) = app.get_webview_window("main") {
+                window::install_main_window_close_handler(&main);
             }
 
             // -- Initialize system tray --
@@ -193,6 +208,7 @@ pub fn run() {
             commands::restart_daemon,
             commands::list_runners,
             commands::create_runner,
+            commands::update_runner_display_name,
             commands::delete_runner,
             commands::start_runner,
             commands::stop_runner,
@@ -227,6 +243,7 @@ pub fn run() {
             commands::get_step_logs,
             commands::get_runner_history,
             commands::rerun_workflow,
+            commands::get_run_status,
             commands::clear_runner_history,
             commands::delete_history_entry,
             commands::update_tray_icon,

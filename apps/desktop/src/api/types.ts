@@ -5,7 +5,10 @@ export interface ContainerConfig {
 
 export interface RunnerConfig {
   id: string;
+  /** Technical name registered with GitHub Actions. */
   name: string;
+  /** Optional HomeRun-only alias. */
+  display_name?: string | null;
   repo_owner: string;
   repo_name: string;
   labels: string[];
@@ -68,6 +71,7 @@ export interface RunnerInfo {
   pid: number | null;
   container_id?: string | null;
   uptime_secs: number | null;
+  started_at?: string | null;
   jobs_completed: number;
   jobs_failed: number;
   current_job?: string | null;
@@ -204,6 +208,7 @@ export interface RunnerEvent {
 export interface CreateBatchRequest {
   repo_full_name: string;
   count: number;
+  name_prefix?: string;
   labels?: string[];
   mode?: string;
   container?: ContainerConfig;
@@ -243,6 +248,8 @@ export interface Preferences {
   scan_labels: string[];
   workspace_path: string | null;
   auto_scan: boolean;
+  hide_offline_runners_in_mini_view: boolean;
+  sort_runners_by_activity: boolean;
 }
 
 export interface DiscoveredRepo {
@@ -254,16 +261,18 @@ export interface DiscoveredRepo {
 }
 
 export interface ScanProgressEvent {
-  type: "started" | "checking" | "found" | "done" | "cancelled";
-  scan_type?: string;
+  type: "started" | "checking" | "found" | "warning" | "done" | "cancelled" | "failed";
+  scan_id: string;
+  scan_type: "local" | "remote";
   repo?: string;
   index?: number;
   total?: number;
   total_found?: number;
   total_checked?: number;
   checked?: number;
+  message?: string;
   full_name?: string;
-  source?: string;
+  source?: "local" | "remote" | "both";
   workflow_files?: string[];
   matched_labels?: string[];
   local_path?: string | null;

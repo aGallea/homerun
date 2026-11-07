@@ -4,6 +4,8 @@ import { useTrayIcon } from "../hooks/useTrayIcon";
 import { api } from "../api/commands";
 import { jobProgress, formatJobElapsed } from "../utils/runnerHelpers";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { useRunnerDisplayPreferences } from "../hooks/useRunnerDisplayPreferences";
+import { filterCompactRunners, sortRunnersByActivity } from "../utils/runnerOrdering";
 
 const stateColors: Record<string, string> = {
   online: "var(--accent-green)",
@@ -25,10 +27,11 @@ function stateLabel(state: string): string {
 const TRAY_PANEL_WIDTH = 300;
 
 export function TrayPanel() {
-  const { runners, error } = useRunners();
-  const daemonOk = error === null;
+  const { runners, loading, error } = useRunners();
+  const daemonOk = !loading && error === null;
   const [daemonStopping, setDaemonStopping] = useState(false);
-  const [mainVisible, setMainVisible] = useState(true);
+  const { hideOfflineRunnersInMiniView, sortRunnersByActivity: sortByRecentActivity } =
+    useRunnerDisplayPreferences();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useTrayIcon(runners, daemonOk);
@@ -43,19 +46,23 @@ export function TrayPanel() {
 
   useEffect(() => {
     resizeToFit();
-  }, [runners, resizeToFit]);
+  }, [runners, hideOfflineRunnersInMiniView, resizeToFit]);
 
-  const counts = { online: 0, busy: 0, offline: 0 };
-  for (const r of runners) {
-    if (r.state === "busy") counts.busy++;
-    else if (r.state === "offline" || r.state === "error") counts.offline++;
-    else counts.online++;
+  const counts = { online: 0, busy: 0, offline: 0, transitioning: 0 };
+  for (const runner of runners) {
+    if (runner.state === "busy") counts.busy++;
+    else if (runner.state === "online") counts.online++;
+    else if (runner.state === "offline" || runner.state === "error") counts.offline++;
+    else counts.transitioning++;
   }
 
-  const sorted = [...runners].sort((a, b) => {
-    const order: Record<string, number> = { busy: 0, online: 1, creating: 1, registering: 1 };
-    return (order[a.state] ?? 2) - (order[b.state] ?? 2);
-  });
+  const compactRunners = filterCompactRunners(runners, hideOfflineRunnersInMiniView);
+  const sorted = sortByRecentActivity
+    ? sortRunnersByActivity(compactRunners)
+    : [...compactRunners].sort((a, b) => {
+        const order: Record<string, number> = { busy: 0, online: 1, creating: 1, registering: 1 };
+        return (order[a.state] ?? 2) - (order[b.state] ?? 2);
+      });
 
   return (
     <div className="tray-panel" ref={containerRef}>
@@ -83,6 +90,12 @@ export function TrayPanel() {
           <strong className="tray-muted">{counts.offline}</strong>{" "}
           <span className="tray-muted">offline</span>
         </span>
+        {counts.transitioning > 0 && (
+          <span>
+            <strong style={{ color: "var(--accent-blue)" }}>{counts.transitioning}</strong>{" "}
+            <span className="tray-muted">starting/stopping</span>
+          </span>
+        )}
       </div>
 
       <div className="tray-runners">
@@ -99,7 +112,7 @@ export function TrayPanel() {
                     className="tray-runner-name"
                     style={isOff ? { color: "var(--text-secondary)" } : undefined}
                   >
-                    {runner.config.name}
+                    {runner.config.display_name ?? runner.config.name}
                   </span>
                   {runner.state === "busy" && (
                     <span className="tray-runner-time">
@@ -129,30 +142,26 @@ export function TrayPanel() {
             </div>
           );
         })}
-        {runners.length === 0 && (
+        {sorted.length === 0 && (
           <div className="tray-no-runners">
-            {daemonOk ? "No runners configured" : "Cannot reach daemon"}
+            {!daemonOk
+              ? "Cannot reach daemon"
+              : runners.length > 0 && hideOfflineRunnersInMiniView
+                ? "Offline runners hidden"
+                : "No runners configured"}
           </div>
         )}
       </div>
 
       <div className="tray-actions">
+        <button className="tray-action" onClick={() => api.showMainWindow()}>
+          Open Main Window
+        </button>
         <button className="tray-action" onClick={() => api.toggleMiniWindow()}>
           Toggle Mini View
         </button>
-        <button
-          className="tray-action"
-          onClick={async () => {
-            if (mainVisible) {
-              await api.hideAllWindows();
-              setMainVisible(false);
-            } else {
-              await api.showMainWindow();
-              setMainVisible(true);
-            }
-          }}
-        >
-          {mainVisible ? "Hide View" : "Show View"}
+        <button className="tray-action" onClick={() => api.hideAllWindows()}>
+          Hide View
         </button>
         <button
           className="tray-action danger"

@@ -9,6 +9,237 @@ This file is auto-generated from [Conventional Commits](https://www.conventional
 
 ---
 
+## [0.11.2](https://github.com/lgg/homerun/compare/v0.11.1...v0.11.2) (2026-08-31)
+
+### Bug Fixes
+
+* allow mini view dragging across displays ([#45](https://github.com/lgg/homerun/issues/45))
+
+## [0.11.1](https://github.com/lgg/homerun/compare/v0.11.0...v0.11.1) (2026-08-29)
+
+### Bug Fixes
+
+* harden daemon runtime platform handling ([#43](https://github.com/lgg/homerun/issues/43))
+
+## [0.11.0](https://github.com/lgg/homerun/compare/v0.10.3...v0.11.0) (2026-08-28)
+
+### Features
+
+* add runner display preferences and harden HOME handling ([#41](https://github.com/lgg/homerun/issues/41))
+
+## [0.10.3](https://github.com/lgg/homerun/compare/v0.10.2...v0.10.3) (2026-08-28)
+
+### Bug Fixes
+
+* recover missing release and Docker pipelines through the release workflow
+* clean migrated GitHub runner state before reconfiguration
+* rebuild incomplete runner binary caches instead of trusting partial extraction
+* report a missing Unix home directory as an error instead of panicking
+* clean up the daemon process tree when daemon startup fails
+* serialize lifecycle admission during daemon shutdown and wait for durable runner creation
+* keep the daemon alive and reopen lifecycle admission when any runner fails to stop
+
+## [0.10.2](https://github.com/lgg/homerun/compare/v0.10.1...v0.10.2) (2026-08-28)
+
+### Bug Fixes
+
+* keep Mini View inside connected monitor work areas and recover stale off-screen positions
+* show and focus Mini View successfully before hiding the main window
+* revalidate Mini View bounds after moves and dynamic content resizing
+
+## [0.10.1](https://github.com/lgg/homerun/compare/v0.10.0...v0.10.1) (2026-08-28)
+
+### Bug Fixes
+
+* harden repository validation after the 0.10.0 release
+* make coverage badge updates repository-native and remove the external gist dependency
+* harden release workflow dispatch and recovery behavior
+
+## [0.10.0](https://github.com/lgg/homerun/compare/v0.8.5...v0.10.0) (2026-08-11)
+
+
+### Features
+
+* add --version flag to homerun and homerund binaries ([f59b128](https://github.com/lgg/homerun/commit/f59b12841c07d9b8a5551e86194e560ea5fbea7b))
+* add About section to desktop app and CLI about command ([0515987](https://github.com/lgg/homerun/commit/0515987f1520ff6dcaec552b360d2f5bc401d9ff)), closes [#88](https://github.com/lgg/homerun/issues/88)
+* add editable runner display names ([#1](https://github.com/lgg/homerun/issues/1)) ([0371212](https://github.com/lgg/homerun/commit/0371212eaeecf7bffc2009476f1b19cfb950edec))
+* add Hide View option to tray menu ([0fd2e7e](https://github.com/lgg/homerun/commit/0fd2e7edec29cd672371dbdce5a6df3b76f1289b))
+* add Homebrew tap support and update README ([b2a0347](https://github.com/lgg/homerun/commit/b2a03478340e77ca0b29e8020c0edf459c9e2ddc))
+* add macOS native notifications for runner status changes and job completions ([b35c52f](https://github.com/lgg/homerun/commit/b35c52fc1edcd58638fc8edf5c511c90e2842cfa))
+* add matched_labels to TUI DiscoveredRepo type ([ef950b5](https://github.com/lgg/homerun/commit/ef950b52c40e77c45a04225dd9fa714d69538a59))
+* add merge_results to daemon scanner ([589d881](https://github.com/lgg/homerun/commit/589d8810315a43d79ba0b032e5ac8ce4b9a8ff02))
+* add open main window tray action ([0c6ba56](https://github.com/lgg/homerun/commit/0c6ba5642080b3cf7833771ad724ce63d604fcc1))
+* add React/TypeScript test coverage with Vitest ([54552e3](https://github.com/lgg/homerun/commit/54552e31d486b117b60d761e7be6f81ef808f0da))
+* add remote SSE scan stream with progress ([4372188](https://github.com/lgg/homerun/commit/43721884c04dbcd2b48258e4013596748b2001d4))
+* add Repository Scanning section to Settings page ([1cdf12b](https://github.com/lgg/homerun/commit/1cdf12b96844c0b94526c082af6195b002f94a08))
+* add scan button, filters, and enriched cards to Repositories page ([5a43595](https://github.com/lgg/homerun/commit/5a4359583816e38727276c2540d4dfefeab83dbc))
+* add scan progress display, view toggle, and persisted timestamp ([faf9218](https://github.com/lgg/homerun/commit/faf92181f85ebd9212f5164275be1da037b398c6))
+* add scan results persistence module ([dcbf650](https://github.com/lgg/homerun/commit/dcbf650cc9c5f5238080ce2311ec5c8d65740b28))
+* add scan types and commands to Tauri bridge ([ada9712](https://github.com/lgg/homerun/commit/ada9712f146f4034b7ac053f270e3b184f0285c2))
+* add scan_labels, workspace_path, auto_scan to Preferences ([7903767](https://github.com/lgg/homerun/commit/7903767032253c2152b4ea717a04ea25727b42ea))
+* add SSE scan stream endpoints with cancellation and persistence ([62fa958](https://github.com/lgg/homerun/commit/62fa9586a61c3198175f55e6774a8c59241bd2ea))
+* add Tauri bridge for SSE scan progress and persistence ([0855efb](https://github.com/lgg/homerun/commit/0855efb78bcec9b0f1154098f603a1b8ee7ddfa1))
+* add two-phase local scanning with progress callback ([28e01fa](https://github.com/lgg/homerun/commit/28e01fa85ab37d1a7faaa07261c16148d3663e19))
+* add useScan hook for scan state management ([67bbea0](https://github.com/lgg/homerun/commit/67bbea0d24f742934b520397fed1c9b02c47fc0e))
+* add Windows MSI build to release workflow ([#112](https://github.com/lgg/homerun/issues/112)) ([4dd5082](https://github.com/lgg/homerun/commit/4dd508236061d07fa92dc2cfbf4381296e2c3dc5))
+* cross-platform binary download with .zip extraction for Windows ([#112](https://github.com/lgg/homerun/issues/112)) ([b8bfc62](https://github.com/lgg/homerun/commit/b8bfc623a4f33c77f78678a4558f9d4393f11060))
+* **desktop:** add /mini and /tray routes with stub components ([2651be3](https://github.com/lgg/homerun/commit/2651be3d2ca39e200244d40d620a0bed2d212197))
+* **desktop:** add Base/Rust/Custom image presets to the runner wizard ([90abf3b](https://github.com/lgg/homerun/commit/90abf3b53061f97906234fec2eb680cb6c4ce535))
+* **desktop:** add compact mini-view and menu bar tray icon ([36cc311](https://github.com/lgg/homerun/commit/36cc311ed34cb4ddedff7454b812859197606319))
+* **desktop:** add mini window and main window toggle commands ([643f422](https://github.com/lgg/homerun/commit/643f422e0d2402b2c2dcbacc3efdd50838932373))
+* **desktop:** add resized tray icon assets ([7149007](https://github.com/lgg/homerun/commit/7149007baa567d8259ca1094eb053326fd9f85a9))
+* **desktop:** add Toggle Mini View to Window menu with Cmd+Shift+M ([64868c0](https://github.com/lgg/homerun/commit/64868c0f3b3d37875f15db78facc798672639170))
+* **desktop:** add tray-icon and positioner dependencies ([c4471bf](https://github.com/lgg/homerun/commit/c4471bfd0f50b631c1f294c9c067bd9c30047f02))
+* **desktop:** add update_tray_icon command ([81c7f61](https://github.com/lgg/homerun/commit/81c7f613ea7bb5da15dcbad75abd80a8071bbfad))
+* **desktop:** add useTrayIcon hook for automatic tray icon state updates ([2dfb2f5](https://github.com/lgg/homerun/commit/2dfb2f505ceae9302de3b6055ad39c8d8692b729))
+* **desktop:** implement MiniView component with runner cards ([cb09baa](https://github.com/lgg/homerun/commit/cb09baa2dcbf78cc051d47ed47d0bf288816524a))
+* **desktop:** implement TrayPanel component with runner list and actions ([603b37e](https://github.com/lgg/homerun/commit/603b37e400a1787c67cc5d25e39365f862e98222))
+* **desktop:** initialize system tray with idle icon ([5fffef0](https://github.com/lgg/homerun/commit/5fffef008e8bf1ea8853726631c8b3343f7b5991))
+* **desktop:** move Docker chip below the runner name, leading the repo line ([a9d4f41](https://github.com/lgg/homerun/commit/a9d4f412035ec77b5d24592a8d72a97a814c6088))
+* **desktop:** show a Docker pill on container-backed runners ([c95d8b5](https://github.com/lgg/homerun/commit/c95d8b5485c537c36f52deff64287551b22ff5ce))
+* **docker:** add first-party Rust runner image and publish it ([cb9c7dd](https://github.com/lgg/homerun/commit/cb9c7dd47555db6f41ef072b12c7fef735699abe))
+* macOS native notifications and tray Hide View ([2f3705f](https://github.com/lgg/homerun/commit/2f3705f81d4322c64852330f8922d2131106b4ee))
+* named pipe IPC for Windows daemon server ([#112](https://github.com/lgg/homerun/issues/112)) ([0044323](https://github.com/lgg/homerun/commit/00443232d985c3054a91cbe455fec44b72da50f2))
+* notify when a runner is deleted ([280bfa3](https://github.com/lgg/homerun/commit/280bfa3e801e7f521f2731665bcdd7afc54ee88f))
+* refactor scanner to accept custom labels ([11c5bed](https://github.com/lgg/homerun/commit/11c5bed297b5d99a70e003d3213c053afe27f539))
+* rename list_self_hosted_workflows to list_workflows_with_labels ([54d79c5](https://github.com/lgg/homerun/commit/54d79c51a811e1c1ea03ee220cbe654fd0d6f67f))
+* rewrite useScan hook for event-driven scanning with persistence ([7aceb84](https://github.com/lgg/homerun/commit/7aceb8413d951c9bdfe9578cc59174fef448a66d))
+* **runner:** add Docker container mode for self-hosted runners ([26dd0a4](https://github.com/lgg/homerun/commit/26dd0a4042616d1fe9600fb886770b0d73043eb5))
+* **runner:** add Docker container mode for self-hosted runners ([963549a](https://github.com/lgg/homerun/commit/963549acfd1737ffe285c7d47262c0a2f32c6e66))
+* **runner:** container runners default to self-hosted,docker labels ([0147647](https://github.com/lgg/homerun/commit/0147647fe6b9b30fa541ec0112ecde84a3508616))
+* **runner:** reject creating a runner with a duplicate name ([e80a4d0](https://github.com/lgg/homerun/commit/e80a4d0c8aa81501b4160768b231b02363d75868))
+* scan endpoints accept optional labels override ([ab8085e](https://github.com/lgg/homerun/commit/ab8085ec58fea736b77fa1b31f058ea1aa42ccf2))
+* show job progress in runner overview and add Windows build docs ([35d7f1c](https://github.com/lgg/homerun/commit/35d7f1c1f6375c7508d186c48875fb94256ecdb0))
+* smart repo discovery with custom label scanning ([5570e63](https://github.com/lgg/homerun/commit/5570e638a092f83d1facde0a2a0a725ce471b08a))
+* **test-utils:** create test-utils crate with MockDaemon skeleton ([f5ee20f](https://github.com/lgg/homerun/commit/f5ee20fd1b47380f034bff01b11ab71ee4d7cf0e))
+* **test-utils:** implement mock daemon route handlers ([8fd904d](https://github.com/lgg/homerun/commit/8fd904d692150f1a6be0433464322519b3563d59))
+* **tui:** add job progress bar and duration to job history ([daf7618](https://github.com/lgg/homerun/commit/daf76182a6aa501e35c9ce56a6b0d4da23fefded))
+* **tui:** add search/filter to Repos tab ([6a02698](https://github.com/lgg/homerun/commit/6a02698d83088fe8bd4ac685d30e952cde865a13))
+* **tui:** k9s-inspired layout redesign with login, job history, and test suite ([fe87ce6](https://github.com/lgg/homerun/commit/fe87ce6583868d8e1251b758a1bcf2743fffccf2))
+* **tui:** show job history in runner detail panel ([851e63b](https://github.com/lgg/homerun/commit/851e63b7db21195b98bc6c2b0bb35bdfe2fb319e))
+* Windows named pipe support for desktop client ([#112](https://github.com/lgg/homerun/issues/112)) ([355b987](https://github.com/lgg/homerun/commit/355b9877c91e38f12b206339e120c052312a91ca))
+* Windows named pipe support for TUI client ([#112](https://github.com/lgg/homerun/issues/112)) ([1e920d2](https://github.com/lgg/homerun/commit/1e920d27ca1403d663930832e6422c00ff86d5f1))
+* Windows platform support ([c8f0fb0](https://github.com/lgg/homerun/commit/c8f0fb091846a8bdcb1f6095e563f9bd9b417000))
+
+
+### Bug Fixes
+
+* add .gitattributes for LF normalization and fix XML end-of-file ([#113](https://github.com/lgg/homerun/issues/113)) ([211814a](https://github.com/lgg/homerun/commit/211814aa7635f81f55b1aaa6a37db60507d46203))
+* add essential dirs to runner PATH and use cmd for Python setup ([#113](https://github.com/lgg/homerun/issues/113)) ([b7a1010](https://github.com/lgg/homerun/commit/b7a10103f5c12b105cc5b6a0b30ffb49aad609a7))
+* add FAQ for background items notification and improve CLI test coverage ([bb4e773](https://github.com/lgg/homerun/commit/bb4e773fb9d0d12086991b5cca9ee475b64141a2))
+* add setup-node and rust-toolchain to coverage-badge workflow ([57d2450](https://github.com/lgg/homerun/commit/57d2450c8046b999fb27d9972575107f0695b10e))
+* add shell: bash to all self-hosted workflow jobs ([8bc86a9](https://github.com/lgg/homerun/commit/8bc86a99cbb0d16b5f39c04e83c9c3b21dbd60c4))
+* attach nested release artifacts automatically ([7296c13](https://github.com/lgg/homerun/commit/7296c133246ed23dbf76887a4d198304ef237b95))
+* cap status column width so action buttons stay visible ([f4d18c0](https://github.com/lgg/homerun/commit/f4d18c0d6d2a27aae94b55df3f830df7f1ca0c28))
+* cargo fmt and use PowerShell for Python setup in CI ([#113](https://github.com/lgg/homerun/issues/113)) ([19b2d9e](https://github.com/lgg/homerun/commit/19b2d9e59a07e367acaa2733d59b953e264e7d8d))
+* CI badge, release version caching, and sidebar logo size ([eace8ad](https://github.com/lgg/homerun/commit/eace8ad085f3ba9a21d9a891022dc1b9364376e8))
+* CI badge, release version caching, and sidebar logo size ([f783cd0](https://github.com/lgg/homerun/commit/f783cd0361bc6b4075490ae0fb27561f087a8097))
+* CI PATH resolution for Windows Git Bash ([#112](https://github.com/lgg/homerun/issues/112)) ([f1c095c](https://github.com/lgg/homerun/commit/f1c095c5ea9a273c5b91e1325c553f939472ad6b))
+* CI rustup shim and python issues on Windows runner ([#112](https://github.com/lgg/homerun/issues/112)) ([aef6775](https://github.com/lgg/homerun/commit/aef6775d30c7f40f703dc3c35ed114617b536fbc))
+* **ci:** add pip scripts dir to PATH for macOS self-hosted runners ([9f49b67](https://github.com/lgg/homerun/commit/9f49b67d71df8c8915c64fbe6ac645b2c8cd4fb3))
+* **ci:** fall back to python3 -m pre_commit when binary not in PATH ([9eaa285](https://github.com/lgg/homerun/commit/9eaa2859fc1bddf072ca2b04f4c7658e1de650fc))
+* **ci:** lowercase GHCR owner in runner-image tags ([18f6741](https://github.com/lgg/homerun/commit/18f67414faff747c4dc726ac986503a870859a0d))
+* **ci:** lowercase GHCR owner in runner-image tags ([506a981](https://github.com/lgg/homerun/commit/506a9814aa670a130327013189b8f05845351542))
+* **ci:** prefix React lcov paths with apps/desktop/ for coverage report ([0b8d943](https://github.com/lgg/homerun/commit/0b8d9430011e27adf599881cef6a335ee01ed9a1))
+* **ci:** skip no-commit-to-branch hook on push-to-master CI runs ([cf38754](https://github.com/lgg/homerun/commit/cf387541b6f8335a42332683091f6356fce38b68))
+* **ci:** skip no-commit-to-branch hook on push-to-master CI runs ([c39fa50](https://github.com/lgg/homerun/commit/c39fa5052a0ec58bcbedd746244abd72144e6991))
+* **ci:** use python3 fallback for pre-commit on macOS self-hosted runners ([3d90011](https://github.com/lgg/homerun/commit/3d9001192b10f332e9da71b61fbb9146a0bfae4d))
+* clippy warnings and Windows test client TCP support ([#112](https://github.com/lgg/homerun/issues/112)) ([bd68b00](https://github.com/lgg/homerun/commit/bd68b00bb4e46fd388a925402d05ba17d1aeffdf))
+* close final lifecycle and workflow audit gaps ([#10](https://github.com/lgg/homerun/issues/10)) ([726d352](https://github.com/lgg/homerun/commit/726d352176226e88b8d31881210804affff696c2))
+* close post-merge lifecycle race conditions ([98ac252](https://github.com/lgg/homerun/commit/98ac2527f3d5c54e87ae789ccbae5097911bea6b))
+* close post-merge lifecycle race conditions ([dc91773](https://github.com/lgg/homerun/commit/dc91773e18faa6a7c0da0dba776d9aeb7776e129))
+* close post-merge lifecycle race conditions ([0d794b9](https://github.com/lgg/homerun/commit/0d794b953f563c89c2e92581547b190384a4626a))
+* close post-merge lifecycle race conditions ([09c4b6e](https://github.com/lgg/homerun/commit/09c4b6e7aa7ce596cf58d1983ece606f15871157))
+* close remaining post-merge frontend races ([#16](https://github.com/lgg/homerun/issues/16)) ([8080d10](https://github.com/lgg/homerun/commit/8080d108c1d3cb2cadfe5e76eee7be0b590d9fdc))
+* complete declared discovery and desktop flows ([#18](https://github.com/lgg/homerun/issues/18)) ([ce3c1a2](https://github.com/lgg/homerun/commit/ce3c1a21f02f59d057fccbadd0f397b4f96ab381))
+* complete declared product functions and screens ([#13](https://github.com/lgg/homerun/issues/13)) ([b32d883](https://github.com/lgg/homerun/commit/b32d8836aaad6f9ea22c9e957b74754c6ad21591))
+* correct audited wizard effect ordering ([54b5693](https://github.com/lgg/homerun/commit/54b5693db3bf3d8f403a9e98b838a94991af9d4c))
+* correct release validator workflow syntax ([32afb48](https://github.com/lgg/homerun/commit/32afb484a53e640490cb24c2ad4a9b0ac34bc0ae))
+* **daemon:** fall back to /bin/sh, not /bin/zsh, resolving shell PATH ([97309a3](https://github.com/lgg/homerun/commit/97309a32ed523abfc21f5560f35b1aa7f5f7e37f))
+* derive Python tool cache path from GITHUB_WORKSPACE ([#113](https://github.com/lgg/homerun/issues/113)) ([3a9591b](https://github.com/lgg/homerun/commit/3a9591b57dd41be98d83ce72d1580e5be273983e))
+* **desktop:** add missing changes from compact-mini-view ([78d6ca2](https://github.com/lgg/homerun/commit/78d6ca29ed97d79a71ba146aee1c41a7a525f8d3))
+* **desktop:** add missing changes from compact-mini-view feature ([d179808](https://github.com/lgg/homerun/commit/d1798082f06f70a1445506c52883486575033d38))
+* **desktop:** address code review issues for mini-view and tray ([f6eb7bb](https://github.com/lgg/homerun/commit/f6eb7bbfb3f506fea7480345454aedc2ed3035a3))
+* **desktop:** bump @tauri-apps/api to 2.11 to match Rust crate ([a7a6fb8](https://github.com/lgg/homerun/commit/a7a6fb8e0539810c028336584e4048ffa3032539))
+* **desktop:** bump @tauri-apps/api to 2.11 to match Rust crate ([01580aa](https://github.com/lgg/homerun/commit/01580aa3ab8bf62bfcd66c86d6819a5e6a463ca1))
+* **desktop:** dynamically resize mini window to fit content ([3c6f14f](https://github.com/lgg/homerun/commit/3c6f14f3c8affb04cd83a7b1e181e7ff18ef8820))
+* **desktop:** dynamically resize tray panel to fit content ([ebf6759](https://github.com/lgg/homerun/commit/ebf67597b570e54a0045d101f115333a6179363a))
+* **desktop:** enable transparent windows for tray panel and mini view ([c0da74b](https://github.com/lgg/homerun/commit/c0da74b4636b9816307114c436507e9b78cde21d))
+* **desktop:** feed tray events to positioner plugin to prevent crash ([3eecd32](https://github.com/lgg/homerun/commit/3eecd32b1ba9446bf2c189794388fe0e6931eca8))
+* **desktop:** render Docker chip below the name for grouped runners too ([c46e21d](https://github.com/lgg/homerun/commit/c46e21d90a37de94a203caff7b8927efb400b422))
+* **desktop:** replace positioner plugin with direct tray position ([784a0b1](https://github.com/lgg/homerun/commit/784a0b14ab50150fcdc13dca6cbad3cfeddbdbdf))
+* **desktop:** resize mini/tray windows on any runner state change ([66e3e7d](https://github.com/lgg/homerun/commit/66e3e7dedd3ac8b6e02cf8d1d378c77ab686414d))
+* **desktop:** resolve npm audit vulnerabilities ([9fc8b15](https://github.com/lgg/homerun/commit/9fc8b15482cfd513873cb6f68efe34c893c09bd8))
+* **desktop:** resolve npm audit vulnerabilities ([bc6806c](https://github.com/lgg/homerun/commit/bc6806cb4612825addb6c9ff012aec73cf7dd960))
+* **desktop:** skip metrics poll while a request is in flight ([7771007](https://github.com/lgg/homerun/commit/77710075f51731d73c82f8ec0660a7dd1c0ae1cb))
+* **docker:** add pkg-config and libssl-dev to the Rust runner image ([5a5148b](https://github.com/lgg/homerun/commit/5a5148bf06e91c1f9c9e16a1d3653b0edf31b3cb))
+* **docker:** add rustfmt, clippy, llvm-tools to the Rust runner image ([a6f501b](https://github.com/lgg/homerun/commit/a6f501b15e924881f28e6368abb3c362e2e6a3f6))
+* dynamically discover Git install path for runner PATH ([5700d00](https://github.com/lgg/homerun/commit/5700d002bfa4f54e4525520840fa89d1a4e95daa))
+* enable diag log tailing for freshly spawned runners on Windows ([942ec47](https://github.com/lgg/homerun/commit/942ec47e894828e8e6647a2ec88da97d3d4be140))
+* ensure Git Bash is on PATH for Windows runners ([#113](https://github.com/lgg/homerun/issues/113)) ([869294e](https://github.com/lgg/homerun/commit/869294e2110e6f593a27b27c3206b91ba18b6284))
+* fallback to any runner's Python cache when setup-python fails ([#113](https://github.com/lgg/homerun/issues/113)) ([8706baa](https://github.com/lgg/homerun/commit/8706baaf60a086c317af679821734c3d05643772))
+* flatten release artifacts before upload ([75e40f1](https://github.com/lgg/homerun/commit/75e40f1ad655ff5ad99acf95ed418b74a448d3dd))
+* harden audited runner and window lifecycle changes ([2e69dc3](https://github.com/lgg/homerun/commit/2e69dc39c6a697e4e111d9ef5d752e3057ac7c0d))
+* harden process publication and Windows state recovery ([9a60715](https://github.com/lgg/homerun/commit/9a607158a239bc6a9b343ae996603d5271ce466e))
+* harden remaining declared lifecycle flows ([#20](https://github.com/lgg/homerun/issues/20)) ([c778e40](https://github.com/lgg/homerun/commit/c778e403f994391a12416b35baaef7d65f20d744))
+* harden runtime state and persistence consistency ([#14](https://github.com/lgg/homerun/issues/14)) ([96988e7](https://github.com/lgg/homerun/commit/96988e7ce4b1b8671908d6c00b39e8a48d081b27))
+* improve tray panel positioning for bottom taskbar ([#112](https://github.com/lgg/homerun/issues/112)) ([c80b8ad](https://github.com/lgg/homerun/commit/c80b8adf8d0214ccc9dc0dd86045ec26391435cc))
+* logout on bad credentials and add bash shell to coverage workflow ([5f1ddef](https://github.com/lgg/homerun/commit/5f1ddef76931e6e6b772ea89ed780ccca5d17858))
+* make all shutdown tests resilient to daemon service state ([13e415f](https://github.com/lgg/homerun/commit/13e415fb1337521ef865df010beef6d48df1a06c))
+* make CI workflow cross-platform for Windows self-hosted runner ([#112](https://github.com/lgg/homerun/issues/112)) ([b71c957](https://github.com/lgg/homerun/commit/b71c957abd37645b0aef13bcbd33f750dd6378ea))
+* make deletion durable and rollback config safely ([d04df86](https://github.com/lgg/homerun/commit/d04df86b1c0d8e81004b6b21892beccb928b46c4))
+* make lifecycle persistence fully transactional ([#11](https://github.com/lgg/homerun/issues/11)) ([f6c16c0](https://github.com/lgg/homerun/commit/f6c16c0b852d3d8ac1c1671915fd075bbf3a2ce0))
+* make runner deletion and restart admission reliable ([#12](https://github.com/lgg/homerun/issues/12)) ([4f7eb6b](https://github.com/lgg/homerun/commit/4f7eb6b7f5758e4964c3c3a3fdb4cb936eafa84c))
+* make runner row columns shrinkable for narrow windows ([9e55245](https://github.com/lgg/homerun/commit/9e5524593886c7d80b838de16a80200d85e4b553))
+* make runner row job name responsive to available width ([76e3847](https://github.com/lgg/homerun/commit/76e384709d94542cc875ab5bea4f51559c313285))
+* make shutdown test resilient to daemon service state ([f6f0d47](https://github.com/lgg/homerun/commit/f6f0d47bb29df23d278548212e2062cbbd8bfc68))
+* make shutdown test resilient to daemon service state ([3809747](https://github.com/lgg/homerun/commit/3809747495cfaa0f00c94e6c7dacc8f1c057bac9))
+* **metrics:** compute container CPU% from a real interval, not one-shot ([11092e0](https://github.com/lgg/homerun/commit/11092e078bd58f90ce5799c61606fa77d2c0c54e))
+* platform-aware shutdown error message ([#113](https://github.com/lgg/homerun/issues/113)) ([df841a4](https://github.com/lgg/homerun/commit/df841a4121b5c21327711e4a0f7891314fce097f))
+* position tray panel above taskbar on Windows ([#112](https://github.com/lgg/homerun/issues/112)) ([0c25876](https://github.com/lgg/homerun/commit/0c258764778753142d614ea346d8933150c0f2ba))
+* preserve safe native mode edits and clear stale wizard selection ([4845717](https://github.com/lgg/homerun/commit/484571799dc50a87419b295003180e022351f14a))
+* protect action buttons from shrinking at narrow widths ([b2042f0](https://github.com/lgg/homerun/commit/b2042f0106d0358bd145fa265eb51424c7759b02))
+* recreate closed main window from tray ([935ccb5](https://github.com/lgg/homerun/commit/935ccb5e6db3e73c887d749d6cd2a8db0c657f76))
+* remediate nanoid audit advisory ([d1dfddb](https://github.com/lgg/homerun/commit/d1dfddb2448afeecad90bba368956c853ec179fa))
+* remove dtolnay/rust-toolchain from CI to avoid concurrent rustup conflicts ([5bc4bef](https://github.com/lgg/homerun/commit/5bc4bef14960ce1a2742e9d5bfd4e1bbb850c896))
+* remove invalid NSIS config from tauri.conf.json ([#112](https://github.com/lgg/homerun/issues/112)) ([f42ffaa](https://github.com/lgg/homerun/commit/f42ffaace8ec3d3f3b6007c8544adc0b1587bfca))
+* remove jq dependency from coverage badge workflow ([adf552d](https://github.com/lgg/homerun/commit/adf552d2858e9f4c3f9c73dd53fd38a9cc14927e))
+* remove jq dependency from coverage badge workflow ([54a091d](https://github.com/lgg/homerun/commit/54a091d5b052ab4b8e8bc391327c87befa79e116))
+* remove unused CommandExt import in unix process group ([#113](https://github.com/lgg/homerun/issues/113)) ([a276410](https://github.com/lgg/homerun/commit/a27641067a769ceb6414f285a382c594a7242cad))
+* remove unused variable in useAuth test ([f4f2d6a](https://github.com/lgg/homerun/commit/f4f2d6ae0837ce76e199a1058bd4dba3b7832193))
+* reopen the main window from the tray ([c15c5d2](https://github.com/lgg/homerun/commit/c15c5d29963f756d2d51219b2842197ace1818a2))
+* resolve Windows compilation blockers in runner/mod.rs and test-utils ([#112](https://github.com/lgg/homerun/issues/112)) ([a453984](https://github.com/lgg/homerun/commit/a4539840580431d24bebaf68ddf4755101d35319))
+* responsive runner row layout — buttons always visible at all widths ([e93e647](https://github.com/lgg/homerun/commit/e93e6475be8c526b7e6f3d720d8911d0f6dae3c3))
+* restrict macOS release build to macOS self-hosted runners ([d334fb3](https://github.com/lgg/homerun/commit/d334fb38629c0d886605ab015d96a454b5de38c0))
+* restrict persistent runner restart triggers ([#17](https://github.com/lgg/homerun/issues/17)) ([5f28973](https://github.com/lgg/homerun/commit/5f2897345d7ce9fa934150135669788e23aabba8))
+* rewrite diag log tailing to use poll-based file reading ([83c72eb](https://github.com/lgg/homerun/commit/83c72eb0d411c93f649e83591c8afc1a343c4368))
+* **runner:** reject Container mode without a container config ([754e12b](https://github.com/lgg/homerun/commit/754e12b66110f75312f13dc89ce8d4130851ffe1))
+* **runner:** remove container-backed runner's container on natural exit ([ee206f0](https://github.com/lgg/homerun/commit/ee206f0442f718739d3bd3de309de17ffaf9e97c))
+* **runner:** run container runners as non-root and open links via shell ([9d3772a](https://github.com/lgg/homerun/commit/9d3772add6adab5bd8b48dcca371291a86e79369))
+* **runner:** validate container image and name at create time ([b3549c9](https://github.com/lgg/homerun/commit/b3549c9a87eb8d7d59538d586c534cf2ffd2caec))
+* skip setup-python on Windows self-hosted runner ([#113](https://github.com/lgg/homerun/issues/113)) ([90410b9](https://github.com/lgg/homerun/commit/90410b9349a0a1b697cb12fcfbc6b80985ac42fe))
+* **test:** resolve flaky colored test and React act() warnings ([1cccfc2](https://github.com/lgg/homerun/commit/1cccfc2801a5d26faed877dd5fce2f67d1c5f9d1))
+* **test:** resolve flaky colored test and React act() warnings ([1279e23](https://github.com/lgg/homerun/commit/1279e23a00156a95f47f24bf82bc8793c698ba1d))
+* **test:** use tempdir in keychain test to avoid CI race condition ([a6f3e10](https://github.com/lgg/homerun/commit/a6f3e10f215cab80be19d1c9c56690152fd55d03))
+* truncate busy status text so action buttons stay visible ([1d1c846](https://github.com/lgg/homerun/commit/1d1c8462b1dc3d54b94514c4e683c9cde18bb4c9))
+* **tui:** account for indicator line in step skip calculation ([408deb7](https://github.com/lgg/homerun/commit/408deb73a12ad7d1ca5bc8c634eeaf0af4117057))
+* **tui:** show progress bar above steps, show latest steps first ([54b4b24](https://github.com/lgg/homerun/commit/54b4b247f18c6aa6a1273ccc5245374b336d1899))
+* **tui:** use percentage-based layout for runner detail panels ([6c9c094](https://github.com/lgg/homerun/commit/6c9c0945d52ddcd4cb65af64f93d29cd10521bc3))
+* update pre-commit stage names for v4 compatibility ([#113](https://github.com/lgg/homerun/issues/113)) ([b6b6417](https://github.com/lgg/homerun/commit/b6b64179f24719e1dce0d0096ab7973427bcaefe))
+* use existing Rust installation instead of dtolnay/rust-toolchain ([96b2709](https://github.com/lgg/homerun/commit/96b2709eedea1d9ee4a6ff06a4df0506ebf17688))
+* use monotonic job counter for completion notifications ([46f23d1](https://github.com/lgg/homerun/commit/46f23d117c13e1fb827a403dce150e5ce86cd07b))
+* use monotonic job counter for completion notifications ([72ea28e](https://github.com/lgg/homerun/commit/72ea28e0afc1f9a010c14bcceeec5c64f59d6a34))
+* use platform-aware default runner labels ([#112](https://github.com/lgg/homerun/issues/112)) ([36918de](https://github.com/lgg/homerun/commit/36918de44cf434f379b82a1114a911b0c4d136ce))
+* use Registry Run key instead of schtasks for Windows auto-start ([#112](https://github.com/lgg/homerun/issues/112)) ([e239d61](https://github.com/lgg/homerun/commit/e239d6117e029ba29bad8923f3bc1b5b413b2f5e))
+* validate names before runner filesystem mutation ([b29e254](https://github.com/lgg/homerun/commit/b29e25405658a168cfc527903a0fc9075798a605))
+* Windows compilation fixes and release workflow ([#112](https://github.com/lgg/homerun/issues/112)) ([d5cfa59](https://github.com/lgg/homerun/commit/d5cfa59daf04640d906caf27ce33711c5a697f5f))
+* Windows launch-at-login, remove macOS-specific UI text ([#112](https://github.com/lgg/homerun/issues/112)) ([cf42d68](https://github.com/lgg/homerun/commit/cf42d684deb6df6f0b26217c8d40a7a87cc54241))
+
+
+### Performance Improvements
+
+* **metrics:** fetch container stats concurrently instead of serially ([5d8aa9e](https://github.com/lgg/homerun/commit/5d8aa9ef07912f629f39c9b6757692ade3b92bc2))
+
 ## [0.9.1](https://github.com/aGallea/homerun/compare/v0.9.0...v0.9.1) (2026-07-20)
 
 

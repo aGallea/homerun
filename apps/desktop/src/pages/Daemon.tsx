@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext } from "react-router";
 import { useDaemonLogs } from "../hooks/useDaemonLogs";
 import { useMetrics } from "../hooks/useMetrics";
 import { api } from "../api/commands";
@@ -75,8 +75,12 @@ export function Daemon() {
       if (action === "start") await api.startDaemon();
       else if (action === "stop") await api.stopDaemon();
       else await api.restartDaemon();
-      const label = action.charAt(0).toUpperCase() + action.slice(1);
-      setActionResult({ type: "success", message: `Daemon ${label.toLowerCase()}ed successfully` });
+      const completedAction = {
+        start: "started",
+        stop: "stopped",
+        restart: "restarted",
+      }[action];
+      setActionResult({ type: "success", message: `Daemon ${completedAction} successfully` });
       resultTimerRef.current = setTimeout(() => setActionResult(null), 4000);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -87,6 +91,12 @@ export function Daemon() {
   };
 
   const daemon = metrics?.daemon;
+
+  useEffect(() => {
+    return () => {
+      if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (follow && logContainerRef.current) {

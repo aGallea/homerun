@@ -66,6 +66,7 @@ impl AppState {
     pub fn new_test_authenticated() -> Self {
         let mut state = Self::new_test();
         state.auth = AuthManager::new_test_authenticated();
+        state.runner_manager.set_auth_manager(state.auth.clone());
         state
     }
 }
@@ -212,7 +213,7 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
 
     // Restore auth token from credential store
     if let Err(e) = state.auth.try_restore().await {
-        tracing::warn!("Failed to restore auth from keychain: {}", e);
+        tracing::warn!("Failed to restore auth from the credential store: {}", e);
     }
 
     // Sync auth token to runner manager so it can query GitHub API for job context
@@ -244,7 +245,8 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
                     );
                     state
                         .runner_manager
-                        .monitor_orphaned_process(&runner.config.id, pid);
+                        .monitor_orphaned_process(&runner.config.id, pid)
+                        .await;
                 }
             }
         }
@@ -258,39 +260,51 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
         .preferences
         .start_runners_on_launch;
     if restore && !need_restart.is_empty() {
-        if let Some(token) = state.auth.token().await {
-            tracing::info!(
-                "Restoring {} previously-running runner(s)",
-                need_restart.len()
+        let token = state.auth.token().await;
+        tracing::info!(
+            "Restoring {} previously-running runner(s)",
+            need_restart.len()
+        );
+        if token.is_none() {
+            tracing::warn!(
+                "Cannot restore runners immediately: no auth token is available; recovery will retry after sign-in"
             );
-            for runner_id in need_restart {
-                let manager = state.runner_manager.clone();
-                let tok = token.clone();
+        }
+
+        for runner_id in need_restart {
+            let manager = state.runner_manager.clone();
+            if let Some(token) = token.clone() {
                 tokio::spawn(async move {
-                    if let Err(e) = manager
-                        .update_state(&runner_id, crate::runner::state::RunnerState::Registering)
-                        .await
-                    {
-                        tracing::error!("Failed to transition runner {}: {}", runner_id, e);
+                    if let Err(error) = manager.begin_start_operation(&runner_id).await {
+                        tracing::warn!(
+                            runner = %runner_id,
+                            error = %error,
+                            "Startup restore deferred by another lifecycle operation"
+                        );
+                        manager.schedule_recovery(runner_id);
                         return;
                     }
-                    if let Err(e) = manager
-                        .register_and_start_from_registering(&runner_id, &tok)
-                        .await
-                    {
-                        tracing::error!("Failed to restore runner {}: {}", runner_id, e);
+
+                    if let Err(error) = manager.start_existing_reserved(&runner_id, &token).await {
+                        tracing::error!(
+                            runner = %runner_id,
+                            error = %error,
+                            "Failed to restore runner"
+                        );
                         let _ = manager
                             .update_state_with_error(
                                 &runner_id,
                                 crate::runner::state::RunnerState::Error,
-                                Some(format!("{e:#}")),
+                                Some(format!("{error:#}")),
                             )
                             .await;
+                        manager.schedule_recovery(runner_id.clone());
                     }
+                    manager.finish_start_operation(&runner_id).await;
                 });
+            } else {
+                manager.schedule_recovery(runner_id);
             }
-        } else {
-            tracing::warn!("Cannot restore runners: no auth token available. Sign in and restart.");
         }
     }
 
@@ -308,14 +322,22 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
 
         let server = axum::serve(listener, app);
 
-        let shutdown_signal = async {
-            let mut sigterm =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("failed to register SIGTERM handler");
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let shutdown_signal = async move {
             let sigint = tokio::signal::ctrl_c();
             tokio::select! {
-                _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
-                _ = sigint => tracing::info!("Received SIGINT"),
+                signal = sigterm.recv() => {
+                    if signal.is_some() {
+                        tracing::info!("Received SIGTERM");
+                    } else {
+                        tracing::warn!("SIGTERM handler closed; shutting down");
+                    }
+                }
+                signal = sigint => match signal {
+                    Ok(()) => tracing::info!("Received SIGINT"),
+                    Err(error) => tracing::error!(%error, "Ctrl-C handler failed; shutting down"),
+                },
             }
         };
 
@@ -335,10 +357,10 @@ pub async fn serve(config: Config, daemon_logs: DaemonLogState) -> Result<()> {
         let server = axum::serve(listener, app);
 
         let shutdown_signal = async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("failed to register Ctrl-C handler");
-            tracing::info!("Received Ctrl-C");
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => tracing::info!("Received Ctrl-C"),
+                Err(error) => tracing::error!(%error, "Ctrl-C handler failed; shutting down"),
+            }
         };
 
         server.with_graceful_shutdown(shutdown_signal).await?;

@@ -16,8 +16,8 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 chrono.workspace = true
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30.2"
+crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "client-legacy", "http1"] }

@@ -15,13 +15,10 @@ pub async fn configure_runner(
     name: &str,
     labels: &[String],
 ) -> Result<()> {
-    // Remove stale local config so the config script doesn't refuse to reconfigure
-    for file in &[".runner", ".credentials", ".credentials_rsaparams"] {
-        let path = runner_dir.join(file);
-        if path.exists() {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
+    // Newer GitHub Actions runner versions may leave `.runner_migrated`
+    // instead of `.runner`. Keep all stale-config cleanup in one helper so
+    // every configure path handles the same complete set of files.
+    clean_runner_config(runner_dir);
 
     let labels_str = labels.join(",");
     let dir_str = runner_dir.to_string_lossy().to_string();
@@ -113,18 +110,27 @@ pub fn clean_runner_config(runner_dir: &Path) {
 
 pub async fn remove_runner(runner_dir: &Path, token: &str) -> Result<()> {
     let script = config_script();
-    let status = Command::new(runner_dir.join(&script))
+    let output = Command::new(runner_dir.join(&script))
         .args(["remove", "--token", token])
         .current_dir(runner_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .status()
+        .output()
         .await?;
 
-    if !status.success() {
-        tracing::warn!(
-            "{} remove failed — runner may need manual cleanup on GitHub",
-            script
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.trim().is_empty() {
+            stderr.trim()
+        } else {
+            stdout.trim()
+        };
+        anyhow::bail!(
+            "{} remove failed (exit {}): {}",
+            script,
+            output.status.code().unwrap_or(-1),
+            detail
         );
     }
     Ok(())
@@ -150,6 +156,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_configure_runner_cleans_runner_migrated_before_configuring() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".runner_migrated"), "{}").unwrap();
+        std::fs::write(dir.path().join(".credentials"), "cred").unwrap();
+
+        let result = configure_runner(
+            dir.path(),
+            "https://github.com/test/repo",
+            "fake-token",
+            "test-runner",
+            &["self-hosted".to_string()],
+        )
+        .await;
+
+        // The missing config script still makes the call fail, but cleanup
+        // must happen first so a real config script would not reject stale
+        // migrated registration state.
+        assert!(result.is_err());
+        assert!(!dir.path().join(".runner_migrated").exists());
+        assert!(!dir.path().join(".credentials").exists());
+    }
+
+    #[tokio::test]
     async fn test_start_runner_fails_without_run_script() {
         let dir = tempfile::tempdir().unwrap();
         let result = start_runner(dir.path()).await;
@@ -171,11 +200,9 @@ mod tests {
     async fn test_remove_runner_fails_without_config_script() {
         let dir = tempfile::tempdir().unwrap();
         let result = remove_runner(dir.path(), "fake-token").await;
-        // On Unix, spawn fails because the script doesn't exist.
-        // On Windows, the command may run but exit with failure.
-        // Both are acceptable — the function handles non-success exits.
-        // Just verify it doesn't panic.
-        let _ = result;
+        // On Unix, spawning the missing script fails. On Windows, cmd.exe may
+        // start but must still return a non-success status. Both must surface.
+        assert!(result.is_err());
     }
 
     #[test]

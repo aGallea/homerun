@@ -43,7 +43,7 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
   const initialized = useRef(false);
 
   useEffect(() => {
-    if (!preferences || runners.length === 0) return;
+    if (!preferences) return;
 
     const prev = prevRef.current;
 
@@ -52,7 +52,7 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
       const initial = new Map<string, TrackedRunner>();
       for (const r of runners) {
         initial.set(r.config.id, {
-          name: r.config.name,
+          name: r.config.display_name ?? r.config.name,
           state: r.state,
           lastJobKey: jobKey(r),
           totalJobs: r.jobs_completed + r.jobs_failed,
@@ -67,7 +67,7 @@ export function useNotifications(runners: RunnerInfo[], preferences: Preferences
 
     for (const r of runners) {
       const id = r.config.id;
-      const name = r.config.name;
+      const name = r.config.display_name ?? r.config.name;
       const old = prev.get(id);
       const currentJobKey = jobKey(r);
 

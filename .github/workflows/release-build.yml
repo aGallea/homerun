@@ -45,6 +45,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Verify Tauri lockfile
+        run: cargo metadata --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -56,13 +59,13 @@ jobs:
 
       - name: Build homerund sidecar
         run: |
-          cargo build --release -p homerund --target ${{ matrix.target }}
+          cargo build --locked --release -p homerund --target ${{ matrix.target }}
           mkdir -p apps/desktop/src-tauri/binaries
           cp target/${{ matrix.target }}/release/homerund \
             apps/desktop/src-tauri/binaries/homerund-${{ matrix.target }}
 
       - name: Build homerun CLI
-        run: cargo build --release -p homerun --target ${{ matrix.target }}
+        run: cargo build --locked --release -p homerun --target ${{ matrix.target }}
 
       - name: Package CLI binaries
         run: |
@@ -80,6 +83,7 @@ jobs:
           name: cli-${{ matrix.arch }}
           path: homerun-*.tar.gz
           if-no-files-found: error
+          retention-days: 1
 
       - name: Build Tauri app
         working-directory: apps/desktop
@@ -91,17 +95,22 @@ jobs:
           name: HomeRun-${{ matrix.arch }}
           path: apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
+          retention-days: 1
 
   build-windows:
     name: Build Windows (x64)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Tauri lockfile
+        shell: pwsh
+        run: cargo metadata --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > $null
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -118,13 +127,13 @@ jobs:
 
       - name: Build homerund sidecar
         run: |
-          cargo build --release -p homerund
+          cargo build --locked --release -p homerund
           New-Item -ItemType Directory -Force -Path apps/desktop/src-tauri/binaries
           Copy-Item target/release/homerund.exe apps/desktop/src-tauri/binaries/homerund-x86_64-pc-windows-msvc.exe
         shell: pwsh
 
       - name: Build homerun CLI
-        run: cargo build --release -p homerun
+        run: cargo build --locked --release -p homerun
 
       - name: Package CLI binaries
         run: |
@@ -141,6 +150,7 @@ jobs:
           name: cli-windows-x64
           path: homerun-*.zip
           if-no-files-found: error
+          retention-days: 1
 
       - name: Build Tauri app (MSI + NSIS)
         working-directory: apps/desktop
@@ -152,6 +162,7 @@ jobs:
           name: HomeRun-windows-x64-msi
           path: apps/desktop/src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
+          retention-days: 1
 
       - name: Upload NSIS installer artifact
         uses: actions/upload-artifact@v4
@@ -159,6 +170,7 @@ jobs:
           name: HomeRun-windows-x64-nsis
           path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
+          retention-days: 1
 
   build-linux:
     name: Build Linux (x86_64)
@@ -170,6 +182,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Tauri lockfile
+        run: cargo metadata --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
 
       - name: Install Tauri system dependencies
         run: |
@@ -196,13 +211,13 @@ jobs:
 
       - name: Build homerund sidecar
         run: |
-          cargo build --release -p homerund
+          cargo build --locked --release -p homerund
           mkdir -p apps/desktop/src-tauri/binaries
           cp target/release/homerund \
             apps/desktop/src-tauri/binaries/homerund-x86_64-unknown-linux-gnu
 
       - name: Build homerun CLI
-        run: cargo build --release -p homerun
+        run: cargo build --locked --release -p homerun
 
       - name: Package CLI binaries
         run: |
@@ -218,6 +233,7 @@ jobs:
           name: cli-linux-x64
           path: homerun-*.tar.gz
           if-no-files-found: error
+          retention-days: 1
 
       - name: Build Tauri app (AppImage + deb)
         working-directory: apps/desktop
@@ -229,6 +245,7 @@ jobs:
           name: HomeRun-linux-x64-appimage
           path: apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: warn
+          retention-days: 1
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
@@ -236,6 +253,7 @@ jobs:
           name: HomeRun-linux-x64-deb
           path: apps/desktop/src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: warn
+          retention-days: 1
 
   release:
     name: Create GitHub Release
@@ -266,11 +284,12 @@ jobs:
             artifacts/*.AppImage
             artifacts/*.deb
           draft: false
+          generate_release_notes: true
 
   update-tap:
     name: Update Homebrew Tap
     needs: release
-    if: ${{ github.ref_type == 'tag' }}
+    if: ${{ github.ref_type == 'tag' && vars.HOMEBREW_TAP_REPOSITORY != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -282,6 +301,7 @@ jobs:
       - name: Compute SHA256 hashes and dispatch
         env:
           GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          HOMEBREW_TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           SHA_CLI_ARM=$(sha256sum artifacts/homerun-v${VERSION}-aarch64-apple-darwin.tar.gz | awk '{print $1}')
@@ -289,7 +309,7 @@ jobs:
           SHA_DMG_ARM=$(sha256sum artifacts/HomeRun_${VERSION}_aarch64.dmg | awk '{print $1}')
           SHA_DMG_X86=$(sha256sum artifacts/HomeRun_${VERSION}_x64.dmg | awk '{print $1}')
 
-          gh api repos/aGallea/homebrew-homerun/dispatches \
+          gh api "repos/${HOMEBREW_TAP_REPOSITORY}/dispatches" \
             --method POST \
             -f event_type=update-tap \
             -f "client_payload[version]=${VERSION}" \

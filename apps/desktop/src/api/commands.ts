@@ -38,6 +38,8 @@ export const api = {
   // Runners
   listRunners: () => invoke<RunnerInfo[]>("list_runners"),
   createRunner: (req: CreateRunnerRequest) => invoke<RunnerInfo>("create_runner", { req }),
+  updateRunnerDisplayName: (id: string, displayName: string | null) =>
+    invoke<RunnerInfo>("update_runner_display_name", { id, display_name: displayName }),
   deleteRunner: (id: string) => invoke<void>("delete_runner", { id }),
   startRunner: (id: string) => invoke<void>("start_runner", { id }),
   stopRunner: (id: string) => invoke<void>("stop_runner", { id }),
@@ -52,7 +54,7 @@ export const api = {
 
   // Scan (streaming)
   startScan: (workspacePath: string | null, authenticated: boolean) =>
-    invoke<void>("start_scan", { workspace_path: workspacePath, authenticated }),
+    invoke<string[]>("start_scan", { workspace_path: workspacePath, authenticated }),
   cancelScan: (scanId: string) => invoke<unknown>("cancel_scan", { scan_id: scanId }),
   getScanResults: () => invoke<ScanResults | null>("get_scan_results"),
 

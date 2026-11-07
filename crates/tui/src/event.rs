@@ -14,6 +14,8 @@ pub enum AppEvent {
     Tick,
     /// A runner event from the daemon WebSocket.
     DaemonEvent(String),
+    /// Completion of a background GitHub Device Flow poll.
+    LoginCompleted(Result<crate::client::AuthStatus, String>),
 }
 
 /// Spawns a background task that sends AppEvents into a channel.

@@ -22,7 +22,6 @@ export function useMetrics(pollInterval = 2000) {
       setError(null);
     } catch (e) {
       setError(String(e));
-      setMetrics(null);
     } finally {
       inFlight.current = false;
       if (initialFetch.current) {

@@ -1,7 +1,7 @@
 use axum::{
     extract::State,
     http::StatusCode,
-    response::sse::{Event, Sse},
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use futures::stream::StreamExt;
@@ -12,25 +12,25 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::github::GitHubClient;
 use crate::scanner::persistence::{self, ScanResults};
 use crate::scanner::{
     merge_results, scan_local, scan_local_with_progress, scan_remote, scan_remote_with_progress,
-    DiscoveredRepo,
+    DiscoveredRepo, ScanOutcome, ScanProgressEvent,
 };
 use crate::server::AppState;
 
 #[derive(Clone, Default)]
 pub struct ScanState {
     active_scans: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    persistence_lock: Arc<Mutex<()>>,
 }
 
 impl ScanState {
     pub fn new() -> Self {
-        Self {
-            active_scans: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self::default()
     }
 
     pub async fn register(&self, scan_id: String, cancel: CancellationToken) {
@@ -38,7 +38,7 @@ impl ScanState {
     }
 
     pub async fn cancel(&self, scan_id: &str) -> bool {
-        if let Some(token) = self.active_scans.lock().await.remove(scan_id) {
+        if let Some(token) = self.active_scans.lock().await.get(scan_id).cloned() {
             token.cancel();
             true
         } else {
@@ -48,6 +48,11 @@ impl ScanState {
 
     pub async fn remove(&self, scan_id: &str) {
         self.active_scans.lock().await.remove(scan_id);
+    }
+
+    #[cfg(test)]
+    async fn contains(&self, scan_id: &str) -> bool {
+        self.active_scans.lock().await.contains_key(scan_id)
     }
 }
 
@@ -95,6 +100,51 @@ pub async fn scan_remote_handler(
 #[derive(Deserialize)]
 pub struct LocalStreamRequest {
     pub path: PathBuf,
+    pub scan_id: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+pub struct StreamRequest {
+    pub scan_id: Option<String>,
+}
+
+fn stream_event(event: ScanProgressEvent) -> Result<Event, Infallible> {
+    Ok(Event::default()
+        .data(serde_json::to_string(&event).expect("scan progress events must serialize")))
+}
+
+async fn persist_scan_outcome(
+    state: &ScanState,
+    path: &std::path::Path,
+    scan_type: &str,
+    outcome: &ScanOutcome,
+) -> anyhow::Result<()> {
+    let _guard = state.persistence_lock.lock().await;
+    let existing = persistence::load_scan_results(path)
+        .await?
+        .unwrap_or(ScanResults {
+            last_scan_at: chrono::Utc::now(),
+            local_results: Vec::new(),
+            remote_results: Vec::new(),
+            merged_results: Vec::new(),
+        });
+
+    let (local_results, remote_results) = if scan_type == "local" {
+        (outcome.results.clone(), existing.remote_results)
+    } else {
+        (existing.local_results, outcome.results.clone())
+    };
+    let merged_results = merge_results(local_results.clone(), remote_results.clone());
+    persistence::save_scan_results(
+        path,
+        &ScanResults {
+            last_scan_at: chrono::Utc::now(),
+            local_results,
+            remote_results,
+            merged_results,
+        },
+    )
+    .await
 }
 
 pub async fn scan_local_stream(
@@ -102,84 +152,144 @@ pub async fn scan_local_stream(
     Json(body): Json<LocalStreamRequest>,
 ) -> Sse<impl futures::stream::Stream<Item = Result<Event, Infallible>>> {
     let labels = state.config.read().await.preferences.scan_labels.clone();
-    let config = state.config.read().await.clone();
+    let results_path = state.config.read().await.scan_results_path();
+    let scan_id = body
+        .scan_id
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let cancel = CancellationToken::new();
-    let _scan_state = state.scan_state.clone();
+    state
+        .scan_state
+        .register(scan_id.clone(), cancel.clone())
+        .await;
 
-    let (tx, rx) = mpsc::channel::<crate::scanner::ScanProgressEvent>(100);
+    let scan_state = state.scan_state.clone();
+    let (tx, rx) = mpsc::unbounded_channel::<ScanProgressEvent>();
+    let progress_tx = tx.clone();
+    let task_scan_id = scan_id.clone();
 
     tokio::spawn(async move {
-        let results = scan_local_with_progress(&body.path, &labels, cancel, |event| {
-            let _ = tx.try_send(event);
-        })
-        .await
-        .unwrap_or_default();
+        let result =
+            scan_local_with_progress(&body.path, &labels, &task_scan_id, cancel, move |event| {
+                let _ = progress_tx.send(event);
+            })
+            .await;
 
-        // Persist local results
-        let scan_results = ScanResults {
-            last_scan_at: chrono::Utc::now(),
-            local_results: results.clone(),
-            remote_results: vec![],
-            merged_results: results,
-        };
-        let _ = persistence::save_scan_results(&config.scan_results_path(), &scan_results).await;
+        match result {
+            Ok(outcome) if outcome.cancelled => {
+                let _ = tx.send(ScanProgressEvent::Cancelled {
+                    scan_id: task_scan_id.clone(),
+                    scan_type: "local".to_string(),
+                    checked: outcome.checked,
+                    total: outcome.total,
+                });
+            }
+            Ok(outcome) => {
+                match persist_scan_outcome(&scan_state, &results_path, "local", &outcome).await {
+                    Ok(()) => {
+                        let _ = tx.send(ScanProgressEvent::Done {
+                            scan_id: task_scan_id.clone(),
+                            scan_type: "local".to_string(),
+                            total_found: outcome.results.len(),
+                            total_checked: outcome.checked,
+                        });
+                    }
+                    Err(error) => {
+                        let _ = tx.send(ScanProgressEvent::Failed {
+                            scan_id: task_scan_id.clone(),
+                            scan_type: "local".to_string(),
+                            message: format!("Failed to persist local scan results: {error:#}"),
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                let _ = tx.send(ScanProgressEvent::Failed {
+                    scan_id: task_scan_id.clone(),
+                    scan_type: "local".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        }
+        scan_state.remove(&task_scan_id).await;
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
-        let json = serde_json::to_string(&event).unwrap_or_default();
-        Ok(Event::default().data(json))
-    });
-
-    Sse::new(stream)
+    let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx).map(stream_event);
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 pub async fn scan_remote_stream(
     State(state): State<AppState>,
+    body: Option<Json<StreamRequest>>,
 ) -> Result<Sse<impl futures::stream::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
 {
     let token = state.auth.token().await;
     let client = GitHubClient::new(token).map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
     let labels = state.config.read().await.preferences.scan_labels.clone();
-    let config = state.config.read().await.clone();
+    let results_path = state.config.read().await.scan_results_path();
+    let scan_id = body
+        .and_then(|body| body.0.scan_id)
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let cancel = CancellationToken::new();
+    state
+        .scan_state
+        .register(scan_id.clone(), cancel.clone())
+        .await;
 
-    let (tx, rx) = mpsc::channel::<crate::scanner::ScanProgressEvent>(100);
+    let scan_state = state.scan_state.clone();
+    let (tx, rx) = mpsc::unbounded_channel::<ScanProgressEvent>();
+    let progress_tx = tx.clone();
+    let task_scan_id = scan_id.clone();
 
     tokio::spawn(async move {
-        let results = scan_remote_with_progress(&client, &labels, cancel, |event| {
-            let _ = tx.try_send(event);
-        })
-        .await
-        .unwrap_or_default();
+        let result =
+            scan_remote_with_progress(&client, &labels, &task_scan_id, cancel, move |event| {
+                let _ = progress_tx.send(event);
+            })
+            .await;
 
-        // Load existing local results to merge with
-        let existing = persistence::load_scan_results(&config.scan_results_path())
-            .await
-            .ok()
-            .flatten();
-
-        let local_results = existing
-            .as_ref()
-            .map(|r| r.local_results.clone())
-            .unwrap_or_default();
-
-        let merged = merge_results(local_results.clone(), results.clone());
-
-        let scan_results = ScanResults {
-            last_scan_at: chrono::Utc::now(),
-            local_results,
-            remote_results: results,
-            merged_results: merged,
-        };
-        let _ = persistence::save_scan_results(&config.scan_results_path(), &scan_results).await;
+        match result {
+            Ok(outcome) if outcome.cancelled => {
+                let _ = tx.send(ScanProgressEvent::Cancelled {
+                    scan_id: task_scan_id.clone(),
+                    scan_type: "remote".to_string(),
+                    checked: outcome.checked,
+                    total: outcome.total,
+                });
+            }
+            Ok(outcome) => {
+                match persist_scan_outcome(&scan_state, &results_path, "remote", &outcome).await {
+                    Ok(()) => {
+                        let _ = tx.send(ScanProgressEvent::Done {
+                            scan_id: task_scan_id.clone(),
+                            scan_type: "remote".to_string(),
+                            total_found: outcome.results.len(),
+                            total_checked: outcome.checked,
+                        });
+                    }
+                    Err(error) => {
+                        let _ = tx.send(ScanProgressEvent::Failed {
+                            scan_id: task_scan_id.clone(),
+                            scan_type: "remote".to_string(),
+                            message: format!("Failed to persist remote scan results: {error:#}"),
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                let _ = tx.send(ScanProgressEvent::Failed {
+                    scan_id: task_scan_id.clone(),
+                    scan_type: "remote".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        }
+        scan_state.remove(&task_scan_id).await;
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
-        let json = serde_json::to_string(&event).unwrap_or_default();
-        Ok(Event::default().data(json))
-    });
-
-    Ok(Sse::new(stream))
+    let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx).map(stream_event);
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 #[derive(Deserialize)]
@@ -316,6 +426,19 @@ mod tests {
             .unwrap();
         // Missing required `path` field → 422 Unprocessable Entity
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn test_scan_state_registers_and_cancels_by_id() {
+        let state = super::ScanState::new();
+        let token = tokio_util::sync::CancellationToken::new();
+        state.register("scan-1".to_string(), token.clone()).await;
+
+        assert!(state.contains("scan-1").await);
+        assert!(state.cancel("scan-1").await);
+        assert!(token.is_cancelled());
+        state.remove("scan-1").await;
+        assert!(!state.contains("scan-1").await);
     }
 
     #[tokio::test]

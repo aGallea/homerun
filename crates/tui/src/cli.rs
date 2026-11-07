@@ -1,16 +1,43 @@
 // Plain CLI mode (--no-tui)
-use anyhow::Result;
+use anyhow::{bail, Result};
 
-use crate::client::DaemonClient;
+use crate::client::{CreateRunnerRequest, DaemonClient, RunnerInfo};
 
 pub enum CliCommand {
     List,
-    Status,
+    Status {
+        verbose: bool,
+    },
     About,
+    Login {
+        token: Option<String>,
+    },
+    Logout,
+    Add {
+        name: String,
+        repo: String,
+        count: u8,
+        labels: Option<Vec<String>>,
+        mode: Option<String>,
+    },
+    Start {
+        runner: String,
+    },
+    Stop {
+        runner: String,
+    },
+    Restart {
+        runner: String,
+    },
+    Remove {
+        runner: String,
+    },
+    SetMode {
+        runner: String,
+        mode: String,
+    },
     Scan {
-        /// Local workspace path to scan (None = skip local scan)
         path: Option<String>,
-        /// Also scan GitHub repos via API
         remote: bool,
     },
     Daemon(DaemonAction),
@@ -20,39 +47,45 @@ pub enum DaemonAction {
     Start,
     Stop,
     Restart,
+    Autostart(AutostartAction),
+}
+
+pub enum AutostartAction {
+    Enable,
+    Disable,
+    Status,
 }
 
 pub async fn run(command: Option<CliCommand>) -> Result<()> {
-    // Handle commands that don't require daemon connection
     if let Some(CliCommand::About) = &command {
         return cmd_about();
     }
 
     if let Some(CliCommand::Daemon(action)) = &command {
-        return match action {
+        match action {
             DaemonAction::Start => {
                 println!("Starting daemon...");
                 crate::daemon_lifecycle::start_daemon().await?;
                 println!("Daemon started.");
-                Ok(())
+                return Ok(());
             }
             DaemonAction::Stop => {
                 println!("Stopping daemon...");
                 crate::daemon_lifecycle::stop_daemon().await?;
                 println!("Daemon stopped.");
-                Ok(())
+                return Ok(());
             }
             DaemonAction::Restart => {
                 println!("Restarting daemon...");
                 crate::daemon_lifecycle::restart_daemon().await?;
                 println!("Daemon restarted.");
-                Ok(())
+                return Ok(());
             }
-        };
+            DaemonAction::Autostart(_) => {}
+        }
     }
 
-    let client = DaemonClient::default_socket();
-
+    let client = DaemonClient::default_socket()?;
     if client.health().await.is_err() {
         eprintln!(
             "Cannot connect to HomeRun daemon.\n\
@@ -65,16 +98,189 @@ pub async fn run(command: Option<CliCommand>) -> Result<()> {
 
     match command {
         Some(CliCommand::List) => cmd_list(&client).await,
-        Some(CliCommand::Status) => cmd_status(&client).await,
+        Some(CliCommand::Status { verbose }) => cmd_status(&client, verbose).await,
+        Some(CliCommand::Login { token }) => cmd_login(&client, token).await,
+        Some(CliCommand::Logout) => {
+            client.logout().await?;
+            println!("Logged out.");
+            Ok(())
+        }
+        Some(CliCommand::Add {
+            name,
+            repo,
+            count,
+            labels,
+            mode,
+        }) => cmd_add(&client, name, repo, count, labels, mode).await,
+        Some(CliCommand::Start { runner }) => cmd_lifecycle(&client, &runner, "start").await,
+        Some(CliCommand::Stop { runner }) => cmd_lifecycle(&client, &runner, "stop").await,
+        Some(CliCommand::Restart { runner }) => cmd_lifecycle(&client, &runner, "restart").await,
+        Some(CliCommand::Remove { runner }) => cmd_lifecycle(&client, &runner, "remove").await,
+        Some(CliCommand::SetMode { runner, mode }) => cmd_set_mode(&client, &runner, mode).await,
         Some(CliCommand::Scan { path, remote }) => cmd_scan(&client, path, remote).await,
+        Some(CliCommand::Daemon(DaemonAction::Autostart(action))) => {
+            cmd_autostart(&client, action).await
+        }
         Some(CliCommand::About | CliCommand::Daemon(_)) => unreachable!(),
         None => {
-            eprintln!(
-                "No command specified. Use `homerun --no-tui list` or `homerun --no-tui status`."
-            );
+            eprintln!("No command specified. Run `homerun --help` for available commands.");
             std::process::exit(1);
         }
     }
+}
+
+async fn resolve_runner(client: &DaemonClient, selector: &str) -> Result<RunnerInfo> {
+    let runners = client.list_runners().await?;
+    if let Some(exact) = runners.iter().find(|runner| runner.config.id == selector) {
+        return Ok(exact.clone());
+    }
+    let matches: Vec<_> = runners
+        .into_iter()
+        .filter(|runner| {
+            runner.config.name == selector
+                || runner.config.display_name.as_deref() == Some(selector)
+        })
+        .collect();
+    match matches.as_slice() {
+        [] => bail!("Runner '{selector}' was not found"),
+        [runner] => Ok(runner.clone()),
+        _ => bail!("Runner selector '{selector}' is ambiguous; use the runner ID"),
+    }
+}
+
+async fn cmd_login(client: &DaemonClient, token: Option<String>) -> Result<()> {
+    if let Some(token) = token {
+        let auth = client.login_with_token(&token).await?;
+        let user = auth
+            .user
+            .map(|user| user.login)
+            .unwrap_or_else(|| "unknown".to_string());
+        println!("Logged in as {user}.");
+        return Ok(());
+    }
+
+    let flow = client.start_device_flow().await?;
+    println!(
+        "Open {} and enter code {}",
+        flow.verification_uri, flow.user_code
+    );
+    loop {
+        match client
+            .poll_device_flow(&flow.device_code, flow.interval)
+            .await?
+        {
+            Some(auth) => {
+                let user = auth
+                    .user
+                    .map(|user| user.login)
+                    .unwrap_or_else(|| "unknown".to_string());
+                println!("Logged in as {user}.");
+                return Ok(());
+            }
+            None => continue,
+        }
+    }
+}
+
+fn normalize_cli_mode(mode: Option<String>) -> Result<Option<String>> {
+    match mode.as_deref() {
+        None => Ok(None),
+        Some("app") => Ok(Some("app".to_string())),
+        Some("service") => Ok(Some("service".to_string())),
+        Some("container") => {
+            bail!("container runners require an image and must be created from the desktop app")
+        }
+        Some(other) => bail!("unsupported runner mode '{other}'; use app or service"),
+    }
+}
+
+async fn cmd_add(
+    client: &DaemonClient,
+    name: String,
+    repo: String,
+    count: u8,
+    labels: Option<Vec<String>>,
+    mode: Option<String>,
+) -> Result<()> {
+    let mode = normalize_cli_mode(mode)?;
+    if count == 0 || count > 10 {
+        bail!("count must be between 1 and 10");
+    }
+    if count == 1 {
+        let runner = client
+            .create_runner(&CreateRunnerRequest {
+                repo_full_name: repo,
+                name: Some(name),
+                labels,
+                mode,
+            })
+            .await?;
+        println!(
+            "Created runner {} ({})",
+            runner.config.name, runner.config.id
+        );
+    } else {
+        let result = client
+            .create_batch(&repo, count, Some(name), labels, mode)
+            .await?;
+        for runner in result.runners {
+            println!(
+                "Created runner {} ({})",
+                runner.config.name, runner.config.id
+            );
+        }
+        for error in result.errors {
+            eprintln!("Runner {} failed: {}", error.index + 1, error.error);
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_lifecycle(client: &DaemonClient, selector: &str, action: &str) -> Result<()> {
+    let runner = resolve_runner(client, selector).await?;
+    match action {
+        "start" => client.start_runner(&runner.config.id).await?,
+        "stop" => client.stop_runner(&runner.config.id).await?,
+        "restart" => client.restart_runner(&runner.config.id).await?,
+        "remove" => client.delete_runner(&runner.config.id).await?,
+        _ => unreachable!(),
+    }
+    println!("{} {}.", action, runner.config.name);
+    Ok(())
+}
+
+async fn cmd_set_mode(client: &DaemonClient, selector: &str, mode: String) -> Result<()> {
+    let mode = normalize_cli_mode(Some(mode))?.expect("set-mode always supplies a mode");
+    let runner = resolve_runner(client, selector).await?;
+    client
+        .update_runner(&runner.config.id, None, Some(mode.clone()), None)
+        .await?;
+    println!("Set {} mode to {mode}.", runner.config.name);
+    Ok(())
+}
+
+async fn cmd_autostart(client: &DaemonClient, action: AutostartAction) -> Result<()> {
+    match action {
+        AutostartAction::Enable => {
+            client.install_service().await?;
+            println!("Daemon autostart enabled.");
+        }
+        AutostartAction::Disable => {
+            client.uninstall_service().await?;
+            println!("Daemon autostart disabled.");
+        }
+        AutostartAction::Status => {
+            println!(
+                "Daemon autostart: {}",
+                if client.service_status().await? {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
+        }
+    }
+    Ok(())
 }
 
 pub fn colored(text: &str, color_code: &str) -> String {
@@ -115,14 +321,12 @@ pub fn cmd_about() -> Result<()> {
     println!("  Version:     {version}");
     println!("  License:     MIT");
     println!("  Author:      aGallea (https://github.com/aGallea)");
-    println!("  Repository:  https://github.com/aGallea/homerun");
+    println!("  Repository:  https://github.com/lgg/homerun");
     println!();
     println!("Feedback:");
+    println!("  Bug report:      https://github.com/lgg/homerun/issues/new?template=bug_report.md");
     println!(
-        "  Bug report:      https://github.com/aGallea/homerun/issues/new?template=bug_report.md"
-    );
-    println!(
-        "  Feature request:  https://github.com/aGallea/homerun/issues/new?template=feature_request.md"
+        "  Feature request:  https://github.com/lgg/homerun/issues/new?template=feature_request.md"
     );
     Ok(())
 }
@@ -182,14 +386,35 @@ pub async fn cmd_list(client: &DaemonClient) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_status(client: &DaemonClient) -> Result<()> {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RunnerStateCounts {
+    online: usize,
+    busy: usize,
+    offline: usize,
+    error: usize,
+    transitioning: usize,
+}
+
+fn count_runner_states<'a>(states: impl IntoIterator<Item = &'a str>) -> RunnerStateCounts {
+    let mut counts = RunnerStateCounts::default();
+    for state in states {
+        match state {
+            "online" => counts.online += 1,
+            "busy" => counts.busy += 1,
+            "offline" => counts.offline += 1,
+            "error" => counts.error += 1,
+            _ => counts.transitioning += 1,
+        }
+    }
+    counts
+}
+
+pub async fn cmd_status(client: &DaemonClient, verbose: bool) -> Result<()> {
     let auth = client.auth_status().await?;
     let runners = client.list_runners().await?;
     let metrics = client.get_metrics().await.ok();
 
-    let online = runners.iter().filter(|r| r.state == "online").count();
-    let busy = runners.iter().filter(|r| r.state == "busy").count();
-    let offline = runners.iter().filter(|r| r.state == "offline").count();
+    let counts = count_runner_states(runners.iter().map(|runner| runner.state.as_str()));
 
     let user = auth
         .user
@@ -210,10 +435,12 @@ pub async fn cmd_status(client: &DaemonClient) -> Result<()> {
 
     let total = runners.len();
     println!(
-        "  Runners: {total} total ({} online, {} busy, {} offline)",
-        colored(&online.to_string(), "32"),
-        colored(&busy.to_string(), "33"),
-        colored(&offline.to_string(), "90"),
+        "  Runners: {total} total ({} online, {} busy, {} offline, {} error, {} transitioning)",
+        colored(&counts.online.to_string(), "32"),
+        colored(&counts.busy.to_string(), "33"),
+        colored(&counts.offline.to_string(), "90"),
+        colored(&counts.error.to_string(), "31"),
+        colored(&counts.transitioning.to_string(), "36"),
     );
 
     if let Some(m) = &metrics {
@@ -223,6 +450,11 @@ pub async fn cmd_status(client: &DaemonClient) -> Result<()> {
             "  CPU: {:.0}%  Memory: {:.1} GB / {:.1} GB",
             m.system.cpu_percent, mem_used_gb, mem_total_gb,
         );
+    }
+
+    if verbose && !runners.is_empty() {
+        println!();
+        cmd_list(client).await?;
     }
 
     Ok(())
@@ -296,6 +528,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_normalize_cli_mode_accepts_native_modes() {
+        assert_eq!(
+            normalize_cli_mode(Some("app".into())).unwrap(),
+            Some("app".into())
+        );
+        assert_eq!(
+            normalize_cli_mode(Some("service".into())).unwrap(),
+            Some("service".into())
+        );
+    }
+
+    #[test]
+    fn test_normalize_cli_mode_rejects_container_without_config() {
+        let error = normalize_cli_mode(Some("container".into())).unwrap_err();
+        assert!(error.to_string().contains("desktop app"));
+    }
+
+    #[test]
     fn test_cmd_about_succeeds() {
         let result = cmd_about();
         assert!(result.is_ok());
@@ -337,5 +587,27 @@ mod tests {
     #[test]
     fn test_colored_with_terminal() {
         assert_eq!(colored_impl("hello", "32", true), "\x1b[32mhello\x1b[0m");
+    }
+
+    #[test]
+    fn test_count_runner_states_includes_errors_and_transitions() {
+        let counts = count_runner_states([
+            "online",
+            "busy",
+            "offline",
+            "error",
+            "registering",
+            "stopping",
+        ]);
+        assert_eq!(
+            counts,
+            RunnerStateCounts {
+                online: 1,
+                busy: 1,
+                offline: 1,
+                error: 1,
+                transitioning: 2,
+            }
+        );
     }
 }

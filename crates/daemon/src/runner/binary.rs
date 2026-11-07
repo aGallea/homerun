@@ -2,11 +2,27 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
-#[cfg(test)]
-use crate::platform::process::run_script;
-
 /// Global lock to prevent concurrent downloads/extractions of the runner binary.
 static DOWNLOAD_LOCK: Mutex<()> = Mutex::const_new(());
+
+/// Written only after a runner archive has been extracted and its required
+/// scripts have been verified. Its presence distinguishes a complete cache
+/// from a directory left behind by an interrupted/failed extraction.
+const CACHE_READY_MARKER: &str = ".homerun-cache-ready";
+
+fn runner_script_name(os: &str, base: &str) -> String {
+    if os == "win" {
+        format!("{base}.cmd")
+    } else {
+        format!("{base}.sh")
+    }
+}
+
+fn cache_is_ready(runner_dir: &Path, os: &str) -> bool {
+    runner_dir.join(CACHE_READY_MARKER).is_file()
+        && runner_dir.join(runner_script_name(os, "run")).is_file()
+        && runner_dir.join(runner_script_name(os, "config")).is_file()
+}
 
 /// Constructs the GitHub Actions runner download URL for the given version, OS, and architecture.
 pub fn runner_download_url(version: &str, os: &str, arch: &str) -> String {
@@ -50,8 +66,9 @@ pub async fn get_latest_runner_version() -> Result<String> {
 }
 
 /// Ensures the GitHub Actions runner binary is downloaded and extracted to cache_dir.
-/// If `cache_dir/runner-{version}/run.sh` (or `run.cmd` on Windows) already exists, returns early.
-/// Otherwise downloads the archive, extracts it, and cleans up.
+/// A cache is considered complete only after extraction has written the
+/// completion marker and both required scripts are present. Interrupted caches
+/// are discarded and rebuilt on the next call.
 /// Returns the path to the versioned runner directory.
 pub async fn ensure_runner_binary(cache_dir: &Path) -> Result<PathBuf> {
     let (os, arch) = detect_platform();
@@ -86,21 +103,37 @@ async fn fetch_and_cache(
     os: &str,
     arch: &str,
 ) -> Result<PathBuf> {
-    let run_script_path = runner_dir.join(if os == "win" { "run.cmd" } else { "run.sh" });
+    let run_script_path = runner_dir.join(runner_script_name(os, "run"));
+    let config_script_path = runner_dir.join(runner_script_name(os, "config"));
 
-    // Fast path: already cached, no lock needed
-    if run_script_path.exists() {
+    // Fast path: use only a cache that was explicitly marked complete.
+    if cache_is_ready(&runner_dir, os) {
         tracing::debug!("Runner binary already cached at {:?}", runner_dir);
         return Ok(runner_dir);
     }
 
-    // Serialize concurrent downloads — only one caller extracts at a time
+    // Serialize concurrent downloads — only one caller extracts at a time.
     let _guard = DOWNLOAD_LOCK.lock().await;
 
-    // Re-check after acquiring lock (another caller may have finished)
-    if run_script_path.exists() {
+    // Re-check after acquiring lock (another caller may have finished).
+    if cache_is_ready(&runner_dir, os) {
         tracing::debug!("Runner binary already cached at {:?}", runner_dir);
         return Ok(runner_dir);
+    }
+
+    // A previous download/extraction may have died after creating `run.sh`
+    // but before the archive was complete. Never layer a new extraction over
+    // a directory whose completeness is unknown.
+    if runner_dir.exists() {
+        tracing::warn!(
+            "Discarding incomplete runner cache at {:?} before re-download",
+            runner_dir
+        );
+        tokio::fs::remove_dir_all(&runner_dir)
+            .await
+            .with_context(|| {
+                format!("Failed to remove incomplete runner cache {:?}", runner_dir)
+            })?;
     }
 
     tokio::fs::create_dir_all(&runner_dir)
@@ -167,6 +200,22 @@ async fn fetch_and_cache(
     tokio::fs::remove_file(&archive_path)
         .await
         .with_context(|| format!("Failed to remove runner archive {:?}", archive_path))?;
+
+    if !run_script_path.is_file() || !config_script_path.is_file() {
+        anyhow::bail!(
+            "Runner archive extraction incomplete: expected {:?} and {:?}",
+            run_script_path,
+            config_script_path
+        );
+    }
+
+    // This must be the last write in the successful extraction path. If the
+    // process exits before here, the next caller will discard and rebuild the
+    // incomplete directory instead of accepting it as a cache hit.
+    let marker_path = runner_dir.join(CACHE_READY_MARKER);
+    tokio::fs::write(&marker_path, b"ready\n")
+        .await
+        .with_context(|| format!("Failed to write runner cache marker {:?}", marker_path))?;
 
     tracing::info!("Runner binary ready at {:?}", runner_dir);
 
@@ -258,34 +307,61 @@ mod tests {
         assert!(arch == "arm64" || arch == "x64", "unexpected arch: {arch}");
     }
 
-    /// Test the cache-hit early-return path: if `runner-{version}/run.sh` (or `run.cmd`)
-    /// already exists, `ensure_runner_binary` should return immediately
-    /// with the runner directory path without making any network calls.
-    #[tokio::test]
-    async fn test_ensure_runner_binary_cache_hit_returns_early() {
-        use std::fs;
-
+    #[test]
+    fn test_cache_requires_completion_marker() {
         let tmp = tempfile::tempdir().expect("failed to create temp dir");
-        let cache_dir = tmp.path();
+        std::fs::write(tmp.path().join("run.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(tmp.path().join("config.sh"), "#!/bin/bash\n").unwrap();
 
-        // Simulate a cached runner at a fixed version
-        let version = "2.999.0";
-        let runner_dir = cache_dir.join(format!("runner-{version}"));
-        fs::create_dir_all(&runner_dir).expect("failed to create runner dir");
-        fs::write(runner_dir.join(run_script()), "#!/bin/bash\necho runner")
-            .expect("failed to write run script");
-
-        // We test the building blocks directly:
-        // 1. The run script exists check works correctly.
-        let run_script_path = runner_dir.join(run_script());
         assert!(
-            run_script_path.exists(),
-            "run script should exist in simulated cache"
+            !cache_is_ready(tmp.path(), "linux"),
+            "scripts alone must not make an interrupted extraction a cache hit"
         );
 
-        // 2. The runner_dir path is constructed consistently.
-        let expected_runner_dir = cache_dir.join(format!("runner-{version}"));
-        assert_eq!(runner_dir, expected_runner_dir);
+        std::fs::write(tmp.path().join(CACHE_READY_MARKER), "ready\n").unwrap();
+        assert!(cache_is_ready(tmp.path(), "linux"));
+    }
+
+    #[test]
+    fn test_cache_marker_requires_both_scripts() {
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(tmp.path().join(CACHE_READY_MARKER), "ready\n").unwrap();
+        std::fs::write(tmp.path().join("run.sh"), "#!/bin/bash\n").unwrap();
+
+        assert!(!cache_is_ready(tmp.path(), "linux"));
+
+        std::fs::write(tmp.path().join("config.sh"), "#!/bin/bash\n").unwrap();
+        assert!(cache_is_ready(tmp.path(), "linux"));
+    }
+
+    #[test]
+    fn test_cache_ready_uses_target_os_script_extension() {
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(tmp.path().join(CACHE_READY_MARKER), "ready\n").unwrap();
+        std::fs::write(tmp.path().join("run.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(tmp.path().join("config.sh"), "#!/bin/bash\n").unwrap();
+
+        assert!(cache_is_ready(tmp.path(), "linux"));
+        assert!(
+            !cache_is_ready(tmp.path(), "win"),
+            "container Linux cache must not be mistaken for a Windows cache"
+        );
+    }
+
+    /// Test the cache-hit early-return building blocks without making a network call.
+    #[test]
+    fn test_complete_cache_is_recognized() {
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
+        let runner_dir = tmp.path().join("runner-2.999.0");
+        std::fs::create_dir_all(&runner_dir).expect("failed to create runner dir");
+        std::fs::write(runner_dir.join("run.sh"), "#!/bin/bash\necho runner")
+            .expect("failed to write run script");
+        std::fs::write(runner_dir.join("config.sh"), "#!/bin/bash\necho config")
+            .expect("failed to write config script");
+        std::fs::write(runner_dir.join(CACHE_READY_MARKER), "ready\n")
+            .expect("failed to write marker");
+
+        assert!(cache_is_ready(&runner_dir, "linux"));
     }
 
     /// Verify that runner_download_url produces a URL that correctly incorporates

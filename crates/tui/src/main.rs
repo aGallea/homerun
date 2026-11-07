@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
+    cursor::Show,
     event::KeyEventKind,
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -15,6 +16,16 @@ use homerun::app::{Action, App};
 use homerun::client::DaemonClient;
 use homerun::event::{start_event_loop, start_ws_forwarding, AppEvent};
 use homerun::ui;
+
+struct TerminalRestoreGuard;
+
+impl Drop for TerminalRestoreGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, LeaveAlternateScreen, Show);
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -37,19 +48,51 @@ enum Commands {
     /// List all runners
     List,
     /// Show runner and system status
-    Status,
+    Status {
+        /// Include the full runner table
+        #[arg(long)]
+        verbose: bool,
+    },
     /// Show version, author, and project information
     About,
+    /// Authenticate through GitHub Device Flow or a personal access token
+    Login {
+        /// Authenticate directly with a GitHub token instead of Device Flow
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Remove the stored GitHub authentication
+    Logout,
+    /// Create one or more runners
+    Add {
+        /// Runner name, or name prefix when --count is greater than one
+        name: String,
+        /// Repository in owner/name form
+        #[arg(long)]
+        repo: String,
+        /// Number of runners to create
+        #[arg(long, default_value_t = 1)]
+        count: u8,
+        /// Comma-separated runner labels
+        #[arg(long, value_delimiter = ',')]
+        labels: Option<Vec<String>>,
+        /// Runner mode: app or service; create container runners in the desktop app
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    /// Start a runner by ID, technical name, or display name
+    Start { runner: String },
+    /// Stop a runner by ID, technical name, or display name
+    Stop { runner: String },
+    /// Restart a runner by ID, technical name, or display name
+    Restart { runner: String },
+    /// Delete a runner by ID, technical name, or display name
+    Remove { runner: String },
+    /// Change a stopped runner's mode
+    SetMode { runner: String, mode: String },
     /// Scan for repos that use self-hosted runners
-    ///
-    /// Examples:
-    ///   homerun --no-tui scan ~/workspace
-    ///   homerun --no-tui scan --remote
-    ///   homerun --no-tui scan ~/workspace --remote
     Scan {
-        /// Local workspace directory to scan for self-hosted workflows
         path: Option<String>,
-        /// Also scan GitHub repos via the API (requires authentication)
         #[arg(long)]
         remote: bool,
     },
@@ -62,12 +105,21 @@ enum Commands {
 
 #[derive(clap::Subcommand)]
 enum DaemonAction {
-    /// Start the daemon
     Start,
-    /// Stop the daemon
     Stop,
-    /// Restart the daemon
     Restart,
+    /// Manage launch-at-login registration
+    Autostart {
+        #[command(subcommand)]
+        action: AutostartAction,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum AutostartAction {
+    Enable,
+    Disable,
+    Status,
 }
 
 #[tokio::main]
@@ -77,13 +129,42 @@ async fn main() -> Result<()> {
     if cli.no_tui || cli.command.is_some() {
         return homerun::cli::run(cli.command.map(|c| match c {
             Commands::List => homerun::cli::CliCommand::List,
-            Commands::Status => homerun::cli::CliCommand::Status,
+            Commands::Status { verbose } => homerun::cli::CliCommand::Status { verbose },
             Commands::About => homerun::cli::CliCommand::About,
+            Commands::Login { token } => homerun::cli::CliCommand::Login { token },
+            Commands::Logout => homerun::cli::CliCommand::Logout,
+            Commands::Add {
+                name,
+                repo,
+                count,
+                labels,
+                mode,
+            } => homerun::cli::CliCommand::Add {
+                name,
+                repo,
+                count,
+                labels,
+                mode,
+            },
+            Commands::Start { runner } => homerun::cli::CliCommand::Start { runner },
+            Commands::Stop { runner } => homerun::cli::CliCommand::Stop { runner },
+            Commands::Restart { runner } => homerun::cli::CliCommand::Restart { runner },
+            Commands::Remove { runner } => homerun::cli::CliCommand::Remove { runner },
+            Commands::SetMode { runner, mode } => {
+                homerun::cli::CliCommand::SetMode { runner, mode }
+            }
             Commands::Scan { path, remote } => homerun::cli::CliCommand::Scan { path, remote },
             Commands::Daemon { action } => homerun::cli::CliCommand::Daemon(match action {
                 DaemonAction::Start => homerun::cli::DaemonAction::Start,
                 DaemonAction::Stop => homerun::cli::DaemonAction::Stop,
                 DaemonAction::Restart => homerun::cli::DaemonAction::Restart,
+                DaemonAction::Autostart { action } => {
+                    homerun::cli::DaemonAction::Autostart(match action {
+                        AutostartAction::Enable => homerun::cli::AutostartAction::Enable,
+                        AutostartAction::Disable => homerun::cli::AutostartAction::Disable,
+                        AutostartAction::Status => homerun::cli::AutostartAction::Status,
+                    })
+                }
             }),
         }))
         .await;
@@ -93,7 +174,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_tui() -> Result<()> {
-    let client = DaemonClient::default_socket();
+    let client = DaemonClient::default_socket()?;
     let mut app = App::new();
 
     // Check daemon connectivity
@@ -125,6 +206,7 @@ async fn run_tui() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
+    let terminal_restore = TerminalRestoreGuard;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -134,17 +216,20 @@ async fn run_tui() -> Result<()> {
 
     // Try to connect WebSocket for real-time updates
     if let Ok(ws_read) = client.connect_events().await {
-        start_ws_forwarding(event_tx, ws_read);
+        start_ws_forwarding(event_tx.clone(), ws_read);
     }
 
     if auto_login {
         if let Ok(flow) = client.start_device_flow().await {
+            let device_code = flow.device_code.clone();
+            let interval = flow.interval;
             app.login_state = Some(homerun::app::LoginState::Polling {
                 device_code: flow.device_code,
                 user_code: flow.user_code,
                 verification_uri: flow.verification_uri,
-                interval: flow.interval,
+                interval,
             });
+            start_login_polling(event_tx.clone(), device_code, interval);
         }
     }
 
@@ -160,7 +245,7 @@ async fn run_tui() -> Result<()> {
                         continue;
                     }
                     if let Some(action) = app.handle_key(key.code, key.modifiers) {
-                        handle_action(&client, &mut app, action).await;
+                        handle_action(&client, &mut app, action, event_tx.clone()).await;
                     }
                 }
                 AppEvent::Tick => {
@@ -218,35 +303,6 @@ async fn run_tui() -> Result<()> {
                             app.repos = repos;
                         }
                     }
-                    // Poll device flow if login is in progress
-                    if let Some(homerun::app::LoginState::Polling {
-                        ref device_code,
-                        interval,
-                        ..
-                    }) = app.login_state
-                    {
-                        let dc = device_code.clone();
-                        match client.poll_device_flow(&dc, interval).await {
-                            Ok(Some(auth)) => {
-                                let username = auth
-                                    .user
-                                    .as_ref()
-                                    .map(|u| u.login.clone())
-                                    .unwrap_or_else(|| "unknown".to_string());
-                                app.auth_status = Some(auth);
-                                app.login_state =
-                                    Some(homerun::app::LoginState::Success { username });
-                            }
-                            Ok(None) => {
-                                // Still pending, keep polling
-                            }
-                            Err(e) => {
-                                app.login_state = Some(homerun::app::LoginState::Error {
-                                    message: e.to_string(),
-                                });
-                            }
-                        }
-                    }
                 }
                 AppEvent::DaemonEvent(_json) => {
                     // Real-time event received — refresh runner list
@@ -255,6 +311,20 @@ async fn run_tui() -> Result<()> {
                         app.rebuild_display_items();
                     }
                 }
+                AppEvent::LoginCompleted(result) => match result {
+                    Ok(auth) => {
+                        let username = auth
+                            .user
+                            .as_ref()
+                            .map(|user| user.login.clone())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        app.auth_status = Some(auth);
+                        app.login_state = Some(homerun::app::LoginState::Success { username });
+                    }
+                    Err(message) => {
+                        app.login_state = Some(homerun::app::LoginState::Error { message });
+                    }
+                },
             }
         }
 
@@ -270,13 +340,61 @@ async fn run_tui() -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
+    std::mem::forget(terminal_restore);
 
     // Force exit — spawn_blocking tasks can keep the tokio runtime alive
     std::process::exit(0);
 }
 
-async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
+fn start_login_polling(
+    event_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+    device_code: String,
+    interval: u64,
+) {
+    tokio::spawn(async move {
+        let client = match DaemonClient::default_socket() {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = event_tx.send(AppEvent::LoginCompleted(Err(error.to_string())));
+                return;
+            }
+        };
+        loop {
+            match client.poll_device_flow(&device_code, interval).await {
+                Ok(Some(auth)) => {
+                    let _ = event_tx.send(AppEvent::LoginCompleted(Ok(auth)));
+                    break;
+                }
+                Ok(None) => continue,
+                Err(error) => {
+                    let _ = event_tx.send(AppEvent::LoginCompleted(Err(error.to_string())));
+                    break;
+                }
+            }
+        }
+    });
+}
+
+async fn handle_action(
+    client: &DaemonClient,
+    app: &mut App,
+    action: Action,
+    event_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+) {
     let result: anyhow::Result<()> = match &action {
+        Action::AddRunner(repo) => client
+            .create_runner(&homerun::client::CreateRunnerRequest {
+                repo_full_name: repo.clone(),
+                name: None,
+                labels: None,
+                mode: None,
+            })
+            .await
+            .map(|_| ()),
+        Action::LoadRunnerLogs(id) => client.get_runner_logs(id).await.map(|logs| {
+            app.runner_logs = logs;
+            app.show_runner_logs = true;
+        }),
         Action::StartRunner(id) => client.start_runner(id).await,
         Action::StopRunner(id) => client.stop_runner(id).await,
         Action::RestartRunner(id) => client.restart_runner(id).await,
@@ -368,12 +486,15 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
         Action::StartLogin => {
             match client.start_device_flow().await {
                 Ok(flow) => {
+                    let device_code = flow.device_code.clone();
+                    let interval = flow.interval;
                     app.login_state = Some(homerun::app::LoginState::Polling {
                         device_code: flow.device_code,
                         user_code: flow.user_code,
                         verification_uri: flow.verification_uri,
-                        interval: flow.interval,
+                        interval,
                     });
+                    start_login_polling(event_tx, device_code, interval);
                 }
                 Err(e) => {
                     app.login_state = Some(homerun::app::LoginState::Error {
@@ -390,7 +511,8 @@ async fn handle_action(client: &DaemonClient, app: &mut App, action: Action) {
             app.status_message = Some(format!("{:?} succeeded", action));
             // Refresh runners after any runner/group mutation action
             match &action {
-                Action::StartRunner(_)
+                Action::AddRunner(_)
+                | Action::StartRunner(_)
                 | Action::StopRunner(_)
                 | Action::RestartRunner(_)
                 | Action::DeleteRunner(_)

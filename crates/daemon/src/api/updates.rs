@@ -20,7 +20,10 @@ pub async fn check_updates(
         .await
         .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e.to_string()))?;
 
-    let update_available = current.as_deref() != Some(latest.as_str());
+    let update_available = current
+        .as_deref()
+        .map(|version| updater::is_newer_runner_version(version, &latest))
+        .unwrap_or(true);
 
     Ok(Json(UpdateCheckResponse {
         update_available,

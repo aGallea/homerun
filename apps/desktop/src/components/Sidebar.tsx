@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router";
 import { useAuth } from "../hooks/useAuth";
 import type { RunnerInfo } from "../api/types";
 import { ActiveRunners } from "./ActiveRunners";

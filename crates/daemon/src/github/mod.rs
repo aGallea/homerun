@@ -118,16 +118,12 @@ impl GitHubClient {
                 Err(_) => continue,
             };
 
-            let file_matched = labels
-                .iter()
-                .any(|label| content.contains(&format!("runs-on: {}", label)));
-            if file_matched {
+            let file_matches = crate::workflow::matching_runs_on_labels(&content, labels);
+            if !file_matches.is_empty() {
                 matching.push(format!(".github/workflows/{}", item.name));
-                for label in labels {
-                    if content.contains(&format!("runs-on: {}", label))
-                        && !matched_labels.contains(label)
-                    {
-                        matched_labels.push(label.clone());
+                for label in file_matches {
+                    if !matched_labels.contains(&label) {
+                        matched_labels.push(label);
                     }
                 }
             }
@@ -151,6 +147,26 @@ impl GitHubClient {
 
         let route = format!("/repos/{owner}/{repo}/actions/runners/registration-token");
         let response: RegistrationTokenResponse = self.octocrab.post(route, None::<&()>).await?;
+
+        Ok(RunnerRegistration {
+            token: response.token,
+            expires_at: response.expires_at,
+        })
+    }
+
+    pub async fn get_runner_remove_token(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<RunnerRegistration> {
+        #[derive(Deserialize)]
+        struct RemoveTokenResponse {
+            token: String,
+            expires_at: String,
+        }
+
+        let route = format!("/repos/{owner}/{repo}/actions/runners/remove-token");
+        let response: RemoveTokenResponse = self.octocrab.post(route, None::<&()>).await?;
 
         Ok(RunnerRegistration {
             token: response.token,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate, Link, useOutletContext } from "react-router-dom";
+import { useParams, useNavigate, Link, useOutletContext } from "react-router";
 import type { RunnersContextType } from "../hooks/useRunners";
 import { useMetrics } from "../hooks/useMetrics";
 import { useAuth } from "../hooks/useAuth";
@@ -228,7 +228,7 @@ export function RunnerDetail() {
   const navigate = useNavigate();
   const { auth, handleUnauthorized } = useAuth();
   const isAuthenticated = auth.authenticated;
-  const { runners, loading, startRunner, stopRunner, restartRunner, deleteRunner } =
+  const { runners, loading, pendingActions, startRunner, stopRunner, restartRunner, deleteRunner } =
     useOutletContext<RunnersContextType>();
   const { metrics } = useMetrics();
   const runner = runners.find((r) => r.config.id === id);
@@ -312,20 +312,33 @@ export function RunnerDetail() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [followLogs, setFollowLogs] = useState(true);
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const logsGeneration = useRef(0);
 
   useEffect(() => {
     if (!id) return;
+    const generation = ++logsGeneration.current;
+    let cancelled = false;
+    let timer: number | undefined;
+
     async function fetchLogs() {
       try {
         const entries = await api.getRunnerLogs(id!);
-        setLogs(entries);
+        if (!cancelled && generation === logsGeneration.current) setLogs(entries);
       } catch {
-        // ignore errors (runner may be offline)
+        // Ignore errors while the runner is offline or transitioning.
+      } finally {
+        if (!cancelled && generation === logsGeneration.current) {
+          timer = window.setTimeout(() => void fetchLogs(), 2000);
+        }
       }
     }
-    fetchLogs();
-    const timer = setInterval(fetchLogs, 2000);
-    return () => clearInterval(timer);
+
+    void fetchLogs();
+    return () => {
+      cancelled = true;
+      logsGeneration.current += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -365,9 +378,10 @@ export function RunnerDetail() {
     state === "creating" || state === "registering" || state === "stopping" || state === "deleting";
   const canRestart = isRunning || isStopped;
   const canDelete = !isTransient && state !== "busy";
+  const actionPending = pendingActions.has(config.id);
 
   async function doAction(fn: () => Promise<void>) {
-    if (deleting) return;
+    if (deleting || actionPending) return;
     setActionError(null);
     try {
       await fn();
@@ -401,7 +415,13 @@ export function RunnerDetail() {
             Runners
           </Link>
           <span className="breadcrumb-sep">›</span>
-          <span className="breadcrumb-current">{config.name}</span>
+          <span
+            className="breadcrumb-current"
+            title={config.display_name ? `GitHub runner: ${config.name}` : undefined}
+          >
+            {config.display_name ?? config.name}
+          </span>
+          {config.mode === "container" && <DockerBadge />}
           <span
             title={config.id}
             style={{
@@ -415,7 +435,6 @@ export function RunnerDetail() {
           </span>
         </div>
         <div className="flex items-center gap-16">
-          {config.mode === "container" && <DockerBadge />}
           <StatusPill state={state} currentJob={current_job} />
           {uptime_secs != null && (
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
@@ -440,7 +459,7 @@ export function RunnerDetail() {
             {/* Action buttons */}
             {isAuthenticated && (
               <div className="flex items-center gap-8" style={{ marginBottom: 16 }}>
-                {(isTransient || deleting) && (
+                {(isTransient || deleting || actionPending) && (
                   <span
                     style={{
                       display: "inline-block",
@@ -462,7 +481,7 @@ export function RunnerDetail() {
                   <button
                     className="btn btn-primary"
                     onClick={() => doAction(() => startRunner(config.id))}
-                    disabled={deleting}
+                    disabled={deleting || actionPending}
                   >
                     ▶ Start
                   </button>
@@ -471,7 +490,7 @@ export function RunnerDetail() {
                   <button
                     className="runner-action-btn"
                     onClick={() => doAction(() => stopRunner(config.id))}
-                    disabled={deleting}
+                    disabled={deleting || actionPending}
                   >
                     ■ Stop
                   </button>
@@ -479,14 +498,14 @@ export function RunnerDetail() {
                 <button
                   className="runner-action-btn"
                   onClick={() => doAction(() => restartRunner(config.id))}
-                  disabled={!canRestart || deleting}
+                  disabled={!canRestart || deleting || actionPending}
                 >
                   ↺ Restart
                 </button>
                 <button
                   className="runner-action-btn runner-action-btn-danger"
                   onClick={() => setConfirmDelete(true)}
-                  disabled={!canDelete || deleting}
+                  disabled={!canDelete || deleting || actionPending}
                 >
                   Delete
                 </button>

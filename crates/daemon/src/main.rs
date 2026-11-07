@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     // Parse CLI args (handles --version and --help automatically)
     Cli::parse();
 
-    let mut config = homerund::config::Config::default();
+    let mut config = homerund::config::Config::try_default()?;
     let config_path = config.config_path();
     if config_path.exists() {
         match homerund::config::Config::load(&config_path) {

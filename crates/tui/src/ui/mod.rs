@@ -84,6 +84,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     if let Some(ref login_state) = app.login_state {
         draw_login_popup(f, login_state);
     }
+
+    if app.show_runner_logs {
+        draw_runner_logs_popup(f, app);
+    }
 }
 
 fn draw_horizontal_divider(f: &mut Frame, area: Rect) {
@@ -113,8 +117,7 @@ fn draw_help_popup(f: &mut Frame) {
   s          Start/Stop runner
   r          Restart runner
   d          Delete runner
-  l          View logs
-  e          Edit labels
+  l          View recent logs
   a          Add runner
   +/-        Scale group up/down
   ?          Toggle this help
@@ -125,6 +128,44 @@ fn draw_help_popup(f: &mut Frame) {
         Paragraph::new(help_text)
             .block(Block::default().borders(Borders::ALL).title(" Help "))
             .style(Style::default().fg(Color::White)),
+        popup_area,
+    );
+}
+
+fn draw_runner_logs_popup(f: &mut Frame, app: &App) {
+    use ratatui::widgets::{Clear, Paragraph, Wrap};
+
+    let area = f.area();
+    let popup_width = area.width.saturating_sub(8).min(110);
+    let popup_height = area.height.saturating_sub(6).min(28);
+    let popup_area = Rect::new(
+        (area.width.saturating_sub(popup_width)) / 2,
+        (area.height.saturating_sub(popup_height)) / 2,
+        popup_width,
+        popup_height,
+    );
+    let text = if app.runner_logs.is_empty() {
+        "No recent logs for this runner.".to_string()
+    } else {
+        app.runner_logs
+            .iter()
+            .rev()
+            .take(popup_height.saturating_sub(4) as usize)
+            .rev()
+            .map(|entry| format!("{} [{}] {}", entry.timestamp, entry.stream, entry.line))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(
+        Paragraph::new(text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Runner Logs — Esc/l to close "),
+            )
+            .wrap(Wrap { trim: false }),
         popup_area,
     );
 }

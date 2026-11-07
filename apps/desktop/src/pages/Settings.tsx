@@ -4,6 +4,7 @@ import { api } from "../api/commands";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import type { DeviceFlowResponse, Preferences } from "../api/types";
+import { openExternal } from "../utils/openExternal";
 
 type DeviceFlowState =
   | { stage: "idle" }
@@ -12,7 +13,7 @@ type DeviceFlowState =
   | { stage: "error"; message: string };
 
 export function Settings() {
-  const { auth, loading, loginWithToken, logout, refresh } = useAuth();
+  const { auth, loading, error: authError, loginWithToken, logout, refresh } = useAuth();
 
   // Device flow state
   const [deviceFlow, setDeviceFlow] = useState<DeviceFlowState>({ stage: "idle" });
@@ -31,7 +32,9 @@ export function Settings() {
   // App version
   const [appVersion, setAppVersion] = useState<string>("");
   useEffect(() => {
-    getVersion().then(setAppVersion);
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion("unknown"));
   }, []);
 
   // PAT section
@@ -43,6 +46,12 @@ export function Settings() {
 
   // Settings toggles
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [launchAtLoginSaving, setLaunchAtLoginSaving] = useState(false);
+  const [launchAtLoginError, setLaunchAtLoginError] = useState<string | null>(null);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const [workspaceInput, setWorkspaceInput] = useState("");
   const [preferences, setPreferences] = useState<Preferences>({
     start_runners_on_launch: false,
     notify_status_changes: true,
@@ -50,17 +59,38 @@ export function Settings() {
     scan_labels: [],
     workspace_path: null,
     auto_scan: false,
+    hide_offline_runners_in_mini_view: false,
+    sort_runners_by_activity: false,
   });
+
+  const desiredPreferencesRef = useRef(preferences);
+  const persistedPreferencesRef = useRef(preferences);
+  const preferenceVersionRef = useRef(0);
+  const preferenceSavePromiseRef = useRef<Promise<void> | null>(null);
+  const settingsMountedRef = useRef(true);
+
+  useEffect(() => {
+    settingsMountedRef.current = true;
+    return () => {
+      settingsMountedRef.current = false;
+    };
+  }, []);
 
   // Check launch-at-login status on mount
   useEffect(() => {
     invoke<boolean>("service_status")
       .then(setLaunchAtLogin)
-      .catch(() => {});
+      .catch((error) => setLaunchAtLoginError(String(error)));
     api
       .getPreferences()
-      .then(setPreferences)
-      .catch(() => {});
+      .then((saved) => {
+        desiredPreferencesRef.current = saved;
+        persistedPreferencesRef.current = saved;
+        setPreferences(saved);
+        setWorkspaceInput(saved.workspace_path ?? "");
+      })
+      .catch((error) => setPreferencesError(String(error)))
+      .finally(() => setPreferencesLoading(false));
   }, []);
 
   // Labels input local state (synced with preferences)
@@ -70,32 +100,63 @@ export function Settings() {
     setLabelsInput(preferences.scan_labels.join(", "));
   }, [preferences.scan_labels]);
 
-  function updatePreference(key: keyof Preferences, value: boolean) {
-    setPreferences((prev) => {
-      const updated = { ...prev, [key]: value };
-      api
-        .updatePreferences(updated)
-        .then(setPreferences)
-        .catch((e) => {
-          console.error("Failed to update preference:", e);
-          setPreferences(prev);
-        });
-      return updated;
+  const flushPreferences = useCallback((): Promise<void> => {
+    const existing = preferenceSavePromiseRef.current;
+    if (existing) return existing;
+
+    const promise = (async () => {
+      if (settingsMountedRef.current) {
+        setPreferencesSaving(true);
+        setPreferencesError(null);
+      }
+      try {
+        while (desiredPreferencesRef.current !== persistedPreferencesRef.current) {
+          const version = preferenceVersionRef.current;
+          const snapshot = desiredPreferencesRef.current;
+          const saved = await api.updatePreferences(snapshot);
+          persistedPreferencesRef.current = saved;
+
+          if (version === preferenceVersionRef.current) {
+            desiredPreferencesRef.current = saved;
+            if (settingsMountedRef.current) {
+              setPreferences(saved);
+              setWorkspaceInput(saved.workspace_path ?? "");
+            }
+          }
+        }
+      } catch (error) {
+        preferenceVersionRef.current += 1;
+        desiredPreferencesRef.current = persistedPreferencesRef.current;
+        if (settingsMountedRef.current) {
+          setPreferences(persistedPreferencesRef.current);
+          setWorkspaceInput(persistedPreferencesRef.current.workspace_path ?? "");
+          setPreferencesError(String(error));
+        }
+      } finally {
+        if (settingsMountedRef.current) setPreferencesSaving(false);
+      }
+    })();
+
+    preferenceSavePromiseRef.current = promise;
+    void promise.finally(() => {
+      if (preferenceSavePromiseRef.current === promise) {
+        preferenceSavePromiseRef.current = null;
+      }
     });
+    return promise;
+  }, []);
+
+  function updatePreference(key: keyof Preferences, value: boolean) {
+    updatePreferences({ [key]: value });
   }
 
   function updatePreferences(updates: Partial<Preferences>) {
-    setPreferences((prev) => {
-      const updated = { ...prev, ...updates };
-      api
-        .updatePreferences(updated)
-        .then(setPreferences)
-        .catch((e) => {
-          console.error("Failed to update preference:", e);
-          setPreferences(prev);
-        });
-      return updated;
-    });
+    if (preferencesLoading) return;
+    const updated = { ...desiredPreferencesRef.current, ...updates };
+    desiredPreferencesRef.current = updated;
+    preferenceVersionRef.current += 1;
+    setPreferences(updated);
+    void flushPreferences();
   }
 
   const pollInBackground = useCallback(
@@ -159,9 +220,13 @@ export function Settings() {
   }
 
   async function handleLogout() {
-    await logout();
-    setTokenSuccess(false);
-    setDeviceFlow({ stage: "idle" });
+    try {
+      await logout();
+      setTokenSuccess(false);
+      setDeviceFlow({ stage: "idle" });
+    } catch (error) {
+      setTokenError(String(error));
+    }
   }
 
   return (
@@ -169,6 +234,12 @@ export function Settings() {
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
       </div>
+
+      {(authError || preferencesError || launchAtLoginError) && (
+        <div className="error-banner" style={{ marginBottom: 16 }}>
+          {authError || preferencesError || launchAtLoginError}
+        </div>
+      )}
 
       {/* Auth section */}
       <section style={{ marginBottom: 32 }}>
@@ -511,16 +582,19 @@ export function Settings() {
             label="Launch at login"
             description="Automatically start the HomeRun daemon when you log in."
             checked={launchAtLogin}
+            disabled={launchAtLoginSaving}
             onChange={async (checked) => {
+              if (launchAtLoginSaving) return;
+              setLaunchAtLoginSaving(true);
+              setLaunchAtLoginError(null);
               try {
-                if (checked) {
-                  await invoke("install_service");
-                } else {
-                  await invoke("uninstall_service");
-                }
+                if (checked) await invoke("install_service");
+                else await invoke("uninstall_service");
                 setLaunchAtLogin(checked);
-              } catch (e) {
-                console.error("Failed to toggle launch at login:", e);
+              } catch (error) {
+                setLaunchAtLoginError(String(error));
+              } finally {
+                setLaunchAtLoginSaving(false);
               }
             }}
           />
@@ -529,6 +603,7 @@ export function Settings() {
             label="Restore runners on launch"
             description="Automatically start runners that were running when the daemon was last stopped."
             checked={preferences.start_runners_on_launch}
+            disabled={preferencesLoading || preferencesSaving}
             onChange={(checked) => updatePreference("start_runners_on_launch", checked)}
           />
         </div>
@@ -542,6 +617,7 @@ export function Settings() {
             label="Runner status changes"
             description="Notify when a runner goes online, offline, or encounters an error."
             checked={preferences.notify_status_changes}
+            disabled={preferencesLoading || preferencesSaving}
             onChange={(checked) => updatePreference("notify_status_changes", checked)}
           />
           <Divider />
@@ -549,7 +625,30 @@ export function Settings() {
             label="Job completions"
             description="Notify when a job completes or fails on a self-hosted runner."
             checked={preferences.notify_job_completions}
+            disabled={preferencesLoading || preferencesSaving}
             onChange={(checked) => updatePreference("notify_job_completions", checked)}
+          />
+        </div>
+      </section>
+
+      {/* Runner Lists */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionHeader title="Runner Lists" />
+        <div className="card">
+          <ToggleSetting
+            label="Hide offline runners in Mini View"
+            description="Hide offline and error runners from the compact Mini View list. The main Runners page is unchanged."
+            checked={preferences.hide_offline_runners_in_mini_view}
+            disabled={preferencesLoading || preferencesSaving}
+            onChange={(checked) => updatePreference("hide_offline_runners_in_mini_view", checked)}
+          />
+          <Divider />
+          <ToggleSetting
+            label="Sort runners by recent activity"
+            description="Show currently busy and most recently active runners first in both the main and compact lists. Offline runners stay at the bottom."
+            checked={preferences.sort_runners_by_activity}
+            disabled={preferencesLoading || preferencesSaving}
+            onChange={(checked) => updatePreference("sort_runners_by_activity", checked)}
           />
         </div>
       </section>
@@ -567,8 +666,13 @@ export function Settings() {
               </p>
               <input
                 type="text"
-                value={preferences.workspace_path ?? ""}
-                onChange={(e) => updatePreferences({ workspace_path: e.target.value || null })}
+                value={workspaceInput}
+                disabled={preferencesLoading || preferencesSaving}
+                onChange={(e) => setWorkspaceInput(e.target.value)}
+                onBlur={() => updatePreferences({ workspace_path: workspaceInput.trim() || null })}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
                 placeholder="/path/to/workspace"
                 style={{ width: "100%", maxWidth: 400 }}
               />
@@ -598,6 +702,7 @@ export function Settings() {
               <input
                 type="text"
                 value={labelsInput}
+                disabled={preferencesLoading || preferencesSaving}
                 onChange={(e) => setLabelsInput(e.target.value)}
                 onBlur={() => {
                   const labels = labelsInput
@@ -637,6 +742,7 @@ export function Settings() {
             label="Auto-scan on page load"
             description="Automatically scan when opening the Repositories page."
             checked={preferences.auto_scan}
+            disabled={preferencesLoading || preferencesSaving}
             onChange={(checked) => updatePreferences({ auto_scan: checked })}
           />
         </div>
@@ -677,17 +783,17 @@ export function Settings() {
               flexWrap: "wrap",
             }}
           >
-            <AboutLink href="https://github.com/aGallea/homerun" icon={<GitHubIcon />}>
+            <AboutLink href="https://github.com/lgg/homerun" icon={<GitHubIcon />}>
               Repository
             </AboutLink>
             <AboutLink
-              href="https://github.com/aGallea/homerun/issues/new?template=bug_report.md"
+              href="https://github.com/lgg/homerun/issues/new?template=bug_report.md"
               icon={<BugIcon />}
             >
               Report Bug
             </AboutLink>
             <AboutLink
-              href="https://github.com/aGallea/homerun/issues/new?template=feature_request.md"
+              href="https://github.com/lgg/homerun/issues/new?template=feature_request.md"
               icon={<FeatureIcon />}
             >
               Feature Request
@@ -721,8 +827,10 @@ function AboutLink({
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      onClick={(event) => {
+        event.preventDefault();
+        void openExternal(href);
+      }}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -824,11 +932,13 @@ function ToggleSetting({
   label,
   description,
   checked,
+  disabled = false,
   onChange,
 }: {
   label: string;
   description: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
@@ -839,21 +949,29 @@ function ToggleSetting({
           {description}
         </p>
       </div>
-      <div
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         style={{
           width: 40,
           height: 22,
+          padding: 0,
           background: checked ? "var(--accent-green)" : "var(--bg-tertiary)",
           border: `1px solid ${checked ? "var(--accent-green)" : "var(--border)"}`,
           borderRadius: 11,
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : 1,
           flexShrink: 0,
           position: "relative",
           transition: "background 0.2s, border-color 0.2s",
         }}
       >
-        <div
+        <span
+          aria-hidden="true"
           style={{
             width: 18,
             height: 18,
@@ -865,7 +983,7 @@ function ToggleSetting({
             transition: "left 0.2s, background 0.2s",
           }}
         />
-      </div>
+      </button>
     </div>
   );
 }

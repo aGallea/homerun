@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { Outlet, useNavigate } from "react-router";
 import { listen } from "@tauri-apps/api/event";
 import { Sidebar } from "./Sidebar";
 import { api } from "../api/commands";
@@ -15,27 +15,36 @@ export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => window.innerWidth < SIDEBAR_COLLAPSE_WIDTH,
   );
-  const [daemonConnected, setDaemonConnected] = useState(true);
+  const [daemonConnected, setDaemonConnected] = useState<boolean | null>(null);
   const [dotCount, setDotCount] = useState(0);
   const [starting, setStarting] = useState(false);
-  const wasDisconnectedRef = useRef(false);
   const runnersHook = useRunners();
   const [notifPrefs, setNotifPrefs] = useState<Preferences | null>(null);
-  useTrayIcon(runnersHook.runners, daemonConnected);
+  useTrayIcon(runnersHook.runners, daemonConnected === true);
   useNotifications(runnersHook.runners, notifPrefs);
 
   useEffect(() => {
-    api
-      .getPreferences()
-      .then(setNotifPrefs)
-      .catch(() => {});
-    const interval = setInterval(() => {
-      api
-        .getPreferences()
-        .then(setNotifPrefs)
-        .catch(() => {});
-    }, 2000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const pollPreferences = async () => {
+      try {
+        const preferences = await api.getPreferences();
+        if (!cancelled) setNotifPrefs(preferences);
+      } catch {
+        // Keep the last known notification preferences while the daemon transitions.
+      } finally {
+        if (!cancelled) {
+          timer = window.setTimeout(() => void pollPreferences(), 2000);
+        }
+      }
+    };
+
+    void pollPreferences();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, []);
 
   const handleStartDaemon = useCallback(async () => {
@@ -61,11 +70,27 @@ export function Layout() {
   }, []);
 
   useEffect(() => {
-    const unlisten = listen<string>("navigate", (event) => {
-      navigate(event.payload);
-    });
+    let disposed = false;
+    let removeListener: (() => void) | undefined;
+
+    try {
+      void listen<string>("navigate", (event) => {
+        if (!disposed) navigate(event.payload);
+      })
+        .then((unlisten) => {
+          if (disposed) unlisten();
+          else removeListener = unlisten;
+        })
+        .catch(() => {
+          // Browser previews and unit tests do not provide a Tauri event bridge.
+        });
+    } catch {
+      // Treat a synchronously unavailable bridge like an unavailable stream.
+    }
+
     return () => {
-      unlisten.then((fn) => fn());
+      disposed = true;
+      removeListener?.();
     };
   }, [navigate]);
 
@@ -78,7 +103,7 @@ export function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!daemonConnected) {
+    if (daemonConnected === false) {
       const timer = setInterval(() => setDotCount((n) => (n + 1) % 4), 1500);
       return () => clearInterval(timer);
     }
@@ -87,29 +112,25 @@ export function Layout() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: number | undefined;
+
     async function check() {
       try {
         const ok = await api.healthCheck();
-        if (!cancelled) {
-          if (ok) {
-            wasDisconnectedRef.current = false;
-          } else {
-            wasDisconnectedRef.current = true;
-          }
-          setDaemonConnected(ok);
-        }
+        if (!cancelled) setDaemonConnected(ok);
       } catch {
+        if (!cancelled) setDaemonConnected(false);
+      } finally {
         if (!cancelled) {
-          wasDisconnectedRef.current = true;
-          setDaemonConnected(false);
+          timer = window.setTimeout(() => void check(), 10000);
         }
       }
     }
-    check();
-    const timer = setInterval(check, 10000);
+
+    void check();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, []);
 
@@ -126,7 +147,7 @@ export function Layout() {
         </button>
       </div>
       <main className="main-content">
-        {!daemonConnected && (
+        {daemonConnected === false && (
           <div
             className="error-banner"
             style={{

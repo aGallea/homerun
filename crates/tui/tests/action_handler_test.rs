@@ -7,6 +7,7 @@ fn make_runner(id: &str, state: &str) -> homerun::client::RunnerInfo {
         config: homerun::client::RunnerConfig {
             id: id.to_string(),
             name: format!("runner-{id}"),
+            display_name: None,
             repo_owner: "test".to_string(),
             repo_name: "repo".to_string(),
             labels: vec!["self-hosted".to_string()],

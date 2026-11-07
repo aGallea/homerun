@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from "react";
 import type { AuthStatus } from "../api/types";
 import { api } from "../api/commands";
 
@@ -22,34 +30,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const operationGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
+    const generation = ++operationGeneration.current;
     try {
-      setError(null);
       const status = await api.getAuthStatus();
+      if (generation !== operationGeneration.current) return;
+      setError(null);
       setAuth(status);
     } catch (e) {
-      setError(String(e));
+      if (generation === operationGeneration.current) setError(String(e));
     } finally {
-      setLoading(false);
+      if (generation === operationGeneration.current) setLoading(false);
     }
   }, []);
 
   const handleUnauthorized = useCallback(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   useEffect(() => {
-    refresh();
-    // Poll auth status to stay in sync with daemon (e.g. after daemon restart)
-    const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const poll = async () => {
+      await refresh();
+      if (!cancelled) {
+        timer = window.setTimeout(() => void poll(), 5000);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      operationGeneration.current += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [refresh]);
 
   const loginWithToken = useCallback(async (token: string) => {
     try {
       setError(null);
       const status = await api.loginWithToken(token);
+      operationGeneration.current += 1;
       setAuth(status);
       return status;
     } catch (e) {
@@ -61,10 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
+      setError(null);
       await api.logout();
+      operationGeneration.current += 1;
       setAuth({ authenticated: false, user: null });
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      operationGeneration.current += 1;
+      setAuth({ authenticated: false, user: null });
+      setError(message);
+      throw new Error(message);
     }
   }, []);
 

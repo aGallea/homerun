@@ -1,25 +1,29 @@
-import { useState, useMemo, useEffect } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate, useOutletContext } from "react-router";
 import { useRepos } from "../hooks/useRepos";
 import { useScan } from "../hooks/useScan";
 import type { RunnersContextType } from "../hooks/useRunners";
-import type { Preferences, DiscoveredRepo } from "../api/types";
+import type { Preferences, DiscoveredRepo, RepoInfo } from "../api/types";
 import { useAuth } from "../hooks/useAuth";
 import { NewRunnerWizard } from "../components/NewRunnerWizard";
 import { api } from "../api/commands";
+import { isLaunchableRepository } from "../utils/repository";
 
 export function Repositories() {
-  const { auth } = useAuth();
+  const { auth, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const { repos, loading: reposLoading, error: reposError } = useRepos();
+  const { repos, loading: reposLoading, error: reposError } = useRepos(auth.authenticated);
   const { runners, createRunner, createBatch } = useOutletContext<RunnersContextType>();
-  const { discoveredRepos, scanning, lastScanAt, scanError, progressText, runScan } = useScan();
+  const { discoveredRepos, scanning, lastScanAt, scanError, progressText, runScan, cancelScan } =
+    useScan();
   const [search, setSearch] = useState("");
   const [showEnriched, setShowEnriched] = useState(true);
-  const [wizardRepo, setWizardRepo] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardRepo, setWizardRepo] = useState<RepoInfo | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
+  const autoScanAttempted = useRef(false);
 
   // Load preferences on mount
   useEffect(() => {
@@ -29,15 +33,23 @@ export function Repositories() {
       .catch(() => {});
   }, []);
 
-  // Auto-scan on mount if enabled
+  // Auto-scan at most once for this page mount. Depending directly on the
+  // scanning state without this latch would start a new scan after every finish.
   useEffect(() => {
-    if (preferences?.auto_scan && auth.authenticated) {
-      runScan({
+    if (!preferences || authLoading || autoScanAttempted.current) return;
+    if (scanning) {
+      autoScanAttempted.current = true;
+      return;
+    }
+
+    autoScanAttempted.current = true;
+    if (preferences.auto_scan && (preferences.workspace_path || auth.authenticated)) {
+      void runScan({
         workspacePath: preferences.workspace_path,
         authenticated: auth.authenticated,
       });
     }
-  }, [preferences?.auto_scan]);
+  }, [scanning, preferences, auth.authenticated, authLoading, runScan]);
 
   // Count runners per repo full_name
   const runnerCountByRepo = useMemo(() => {
@@ -142,27 +154,6 @@ export function Repositories() {
     });
   }
 
-  if (!auth.authenticated) {
-    return (
-      <div className="page">
-        <div className="page-header">
-          <h1 className="page-title">Repositories</h1>
-        </div>
-        <div className="card" style={{ textAlign: "center", padding: "60px 40px" }}>
-          <p style={{ fontSize: 15, color: "var(--text-primary)", marginBottom: 8 }}>
-            Sign in to view your repositories
-          </p>
-          <p className="text-muted" style={{ fontSize: 13, marginBottom: 20 }}>
-            Connect your GitHub account to browse repositories and add runners.
-          </p>
-          <button className="btn btn-primary" onClick={() => navigate("/settings")}>
-            Sign in with GitHub
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="page">
       <div className="page-header">
@@ -177,14 +168,42 @@ export function Repositories() {
               {showEnriched ? "Plain view" : "Enriched view"}
             </button>
           )}
-          <button className="btn btn-secondary" onClick={handleScan} disabled={scanning}>
-            {scanning ? "Scanning..." : "Scan"}
-          </button>
-          <button className="btn btn-primary" onClick={() => setWizardRepo("")}>
-            + Add Runner
-          </button>
+          {scanning ? (
+            <button className="btn btn-secondary" onClick={() => void cancelScan()}>
+              Cancel scan
+            </button>
+          ) : (
+            <button className="btn btn-secondary" onClick={handleScan}>
+              Scan
+            </button>
+          )}
+          {auth.authenticated ? (
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setWizardRepo(null);
+                setWizardOpen(true);
+              }}
+            >
+              + Add Runner
+            </button>
+          ) : (
+            <button className="btn btn-primary" onClick={() => navigate("/settings")}>
+              Sign in for remote repos
+            </button>
+          )}
         </div>
       </div>
+
+      {!auth.authenticated && (
+        <div className="card" style={{ marginBottom: 16, padding: "14px 18px" }}>
+          <strong style={{ fontSize: 13 }}>Local discovery is available without signing in.</strong>
+          <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            Configure a workspace path and scan local repositories. Sign in only to browse GitHub
+            repositories or create runners.
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div style={{ marginBottom: 20 }}>
@@ -309,13 +328,13 @@ export function Repositories() {
         </div>
       )}
 
-      {reposError && (
+      {auth.authenticated && reposError && (
         <div className="error-banner" style={{ marginBottom: 16 }}>
           {reposError}
         </div>
       )}
 
-      {reposLoading ? (
+      {auth.authenticated && reposLoading ? (
         <p className="text-muted">Loading repositories...</p>
       ) : filteredRepos.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: "40px" }}>
@@ -323,7 +342,11 @@ export function Repositories() {
             {search ? "No repositories match your search." : "No repositories found."}
           </p>
           <p className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Make sure you are authenticated with a GitHub token that has repo access.
+            {auth.authenticated
+              ? "Check repository access or run discovery again."
+              : preferences?.workspace_path
+                ? "Run a local scan, or sign in to include GitHub repositories."
+                : "Configure a workspace path in Settings to discover local repositories."}
           </p>
         </div>
       ) : (
@@ -338,6 +361,7 @@ export function Repositories() {
             const count = runnerCountByRepo.get(repo.full_name) ?? 0;
             const discovered = discoveryMap.get(repo.full_name);
             const isDimmed = hasScanned && showEnriched && !discovered;
+            const canCreateRunner = isLaunchableRepository(repo.full_name);
             return (
               <div
                 key={repo.id || repo.full_name}
@@ -373,13 +397,21 @@ export function Repositories() {
                           fontSize: 11,
                           padding: "2px 8px",
                           borderRadius: 10,
-                          background: repo.private
-                            ? "rgba(210, 153, 34, 0.2)"
-                            : "rgba(63, 185, 80, 0.2)",
-                          color: repo.private ? "var(--accent-yellow)" : "var(--accent-green)",
+                          background:
+                            repo.id === 0
+                              ? "rgba(31, 111, 235, 0.2)"
+                              : repo.private
+                                ? "rgba(210, 153, 34, 0.2)"
+                                : "rgba(63, 185, 80, 0.2)",
+                          color:
+                            repo.id === 0
+                              ? "var(--accent-blue)"
+                              : repo.private
+                                ? "var(--accent-yellow)"
+                                : "var(--accent-green)",
                         }}
                       >
-                        {repo.private ? "Private" : "Public"}
+                        {repo.id === 0 ? "Local" : repo.private ? "Private" : "Public"}
                       </span>
                       {repo.is_org && (
                         <span
@@ -466,9 +498,26 @@ export function Repositories() {
                   <button
                     className="btn btn-primary"
                     style={{ fontSize: 12, padding: "4px 12px" }}
-                    onClick={() => setWizardRepo(repo.full_name)}
+                    disabled={auth.authenticated && !canCreateRunner}
+                    title={
+                      auth.authenticated && !canCreateRunner
+                        ? "Add a GitHub remote in owner/repository form before creating a runner"
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (auth.authenticated && canCreateRunner) {
+                        setWizardRepo(repo);
+                        setWizardOpen(true);
+                      } else if (!auth.authenticated) {
+                        navigate("/settings");
+                      }
+                    }}
                   >
-                    + Add Runner
+                    {auth.authenticated
+                      ? canCreateRunner
+                        ? "+ Add Runner"
+                        : "GitHub remote required"
+                      : "Sign in to add"}
                   </button>
                 </div>
               </div>
@@ -477,12 +526,16 @@ export function Repositories() {
         </div>
       )}
 
-      {wizardRepo !== null && (
+      {wizardOpen && (
         <NewRunnerWizard
-          onClose={() => setWizardRepo(null)}
+          onClose={() => {
+            setWizardOpen(false);
+            setWizardRepo(null);
+          }}
           onCreate={createRunner}
           onCreateBatch={createBatch}
-          preselectedRepo={wizardRepo || undefined}
+          preselectedRepo={wizardRepo?.full_name}
+          preselectedRepoDetails={wizardRepo ?? undefined}
         />
       )}
     </div>
@@ -499,7 +552,9 @@ function FilterPill({
   onClick: () => void;
 }) {
   return (
-    <span
+    <button
+      type="button"
+      aria-pressed={active}
       onClick={onClick}
       style={{
         fontSize: 12,
@@ -509,9 +564,10 @@ function FilterPill({
         color: active ? "var(--accent-blue)" : "var(--text-secondary)",
         cursor: "pointer",
         border: `1px solid ${active ? "rgba(31, 111, 235, 0.4)" : "var(--border)"}`,
+        fontFamily: "inherit",
       }}
     >
       {label}
-    </span>
+    </button>
   );
 }

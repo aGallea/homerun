@@ -11,167 +11,117 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: homerun-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
-  # NOTE: CI runs on self-hosted runners. External contributors will need a
-  # maintainer to approve and run CI on their PRs.
+  RUST_BACKTRACE: "1"
 
 jobs:
-  pre-commit:
-    name: Pre-commit checks
-    runs-on: [self-hosted, rust]
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Add Rust toolchain and Git to PATH
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          TOOLCHAIN_BIN="$(dirname "$(rustup which rustc)")"
-          echo "$TOOLCHAIN_BIN" >> $GITHUB_PATH
-          # Ensure git.exe is in PATH for pre-commit on Windows
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            echo "/c/Program Files/Git/cmd" >> $GITHUB_PATH
-          fi
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        id: setup-python
-        continue-on-error: true
-        with:
-          python-version: "3.x"
-
-      - name: Fallback Python (Windows)
-        if: steps.setup-python.outcome == 'failure' && runner.os == 'Windows'
-        run: |
-          # setup-python may fail on self-hosted Windows due to registry
-          # permissions.  Search all runner tool caches for a cached Python.
-          for dir in "$HOME/.homerun/runners"/*/_work/_tool/Python/*/x64; do
-            if [[ -x "$dir/python.exe" ]]; then
-              echo "Found Python at $dir"
-              echo "$dir" >> $GITHUB_PATH
-              echo "$dir/Scripts" >> $GITHUB_PATH
-              break
-            fi
-          done
-
-      - name: Install pre-commit
-        run: |
-          # macOS self-hosted runners may only have python3
-          if command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
-            python3 -m pip install pre-commit --quiet --break-system-packages 2>/dev/null \
-              || python3 -m pip install pre-commit --quiet
-          else
-            python -m pip install pre-commit --quiet
-          fi
-
-      - name: Install Node dependencies
-        run: cd apps/desktop && npm ci
-
-      - name: Run pre-commit
-        run: |
-          if command -v pre-commit &>/dev/null; then
-            pre-commit run --all-files --show-diff-on-failure
-          else
-            python3 -m pre_commit run --all-files --show-diff-on-failure
-          fi
-        env:
-          SKIP: no-commit-to-branch,cargo-test,cargo-clippy
-
-  react-test:
-    name: React (test + coverage)
-    runs-on: [self-hosted, docker]
-    defaults:
-      run:
-        shell: bash
-        working-directory: apps/desktop
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests with coverage
-        run: npm run test:coverage
-
-      - name: Upload React coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: react-lcov
-          path: apps/desktop/coverage/lcov.info
-
-  rust:
-    name: Rust (fmt + clippy + test + coverage)
-    needs: [react-test]
-    runs-on: [self-hosted, rust]
-    defaults:
-      run:
-        shell: bash
+  ubuntu-quality:
+    name: Ubuntu quality gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Add Rust toolchain to PATH
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Tauri Linux dependencies
         run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          echo "$(dirname "$(rustup which rustc)")" >> $GITHUB_PATH
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
-      - name: Ensure Rust is available
+      - name: Install quality tools
         run: |
-          rustc --version
-          cargo --version
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+          python -m pip install --disable-pip-version-check pre-commit
 
       - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --quiet 2>/dev/null || true
+        uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Run tests with coverage (daemon)
-        run: cargo llvm-cov -p homerund --all-features --lcov --output-path daemon-lcov.info
+      - name: Install locked frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
 
-      - name: Run tests with coverage (tui)
-        run: cargo llvm-cov -p homerun --all-features --lcov --output-path tui-lcov.info
+      - name: Audit frontend dependencies
+        working-directory: apps/desktop
+        run: npm audit --audit-level=high
 
-      - name: Clean Rust build artifacts
-        if: always()
-        run: cargo clean
+      - name: Run pre-commit checks
+        env:
+          SKIP: no-commit-to-branch,cargo-test,cargo-clippy
+        run: pre-commit run --all-files --show-diff-on-failure
 
-      - name: Download React coverage
-        uses: actions/download-artifact@v4
-        with:
-          name: react-lcov
-          path: react-coverage/
+      - name: Run React tests with coverage
+        working-directory: apps/desktop
+        run: npm run test:coverage
 
-      - name: Merge coverage
+      - name: Type check
+        working-directory: apps/desktop
+        run: npm exec -- tsc --noEmit
+
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Verify Rust lockfiles
         run: |
-          # Prefix React lcov paths with apps/desktop/ so they match repo-root-relative paths
-          sed 's|^SF:src/|SF:apps/desktop/src/|' react-coverage/lcov.info > react-lcov-fixed.info
-          cat daemon-lcov.info tui-lcov.info react-lcov-fixed.info > lcov.info
+          cargo metadata --locked --no-deps --format-version 1 > /dev/null
+          cargo metadata --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
 
-      - name: Coverage Report
-        if: always()
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check Tauri formatting
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+
+      - name: Run Rust tests
+        run: cargo test --locked --workspace --all-targets
+
+      - name: Run Rust clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Build release binaries
+        run: cargo build --locked --release -p homerun -p homerund
+
+      - name: Smoke-test CLI
+        run: ./target/release/homerun --help
+
+      - name: Run Rust tests with coverage
+        run: cargo llvm-cov -p homerund -p homerun --all-features --lcov --output-path rust-lcov.info
+
+      - name: Prepare Tauri sidecar
+        working-directory: apps/desktop
+        run: npm run prepare-sidecar
+
+      - name: Test Tauri crate
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
+
+      - name: Lint Tauri crate
+        run: cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Merge coverage reports
+        run: |
+          sed 's|^SF:src/|SF:apps/desktop/src/|' apps/desktop/coverage/lcov.info > react-lcov-fixed.info
+          cat rust-lcov.info react-lcov-fixed.info > lcov.info
+
+      - name: Coverage report
+        if: always() && hashFiles('lcov.info') != ''
         continue-on-error: true
         uses: aGallea/tests-coverage-report@1.3.14
         with:
@@ -183,26 +133,59 @@ jobs:
           min-coverage-percentage: "80"
           fail-under-coverage-percentage: "false"
 
-  typescript:
-    name: TypeScript (type check + build)
-    runs-on: [self-hosted, docker]
-    defaults:
-      run:
-        shell: bash
-        working-directory: apps/desktop
+      - name: Clean generated artifacts
+        if: always()
+        run: |
+          cargo clean
+          cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml
+          rm -rf apps/desktop/src-tauri/binaries
+
+  windows-quality:
+    name: Windows quality gate
+    runs-on: windows-2025
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: 22
+          components: rustfmt, clippy
 
-      - name: Install dependencies
-        run: npm ci
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Verify Rust lockfiles
+        shell: pwsh
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 > $null
+          cargo metadata --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > $null
 
-      - name: Build
-        run: npm run build
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check Tauri formatting
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+
+      - name: Run Rust tests
+        run: cargo test --locked --workspace --all-targets
+
+      - name: Run Rust clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Build release binaries
+        run: cargo build --locked --release -p homerun -p homerund
+
+      - name: Smoke-test CLI
+        shell: pwsh
+        run: .\target\release\homerun.exe --help
+
+      - name: Prepare Tauri sidecar
+        working-directory: apps/desktop
+        run: npm run prepare-sidecar
+
+      - name: Test Tauri crate
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
+
+      - name: Lint Tauri crate
+        run: cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings

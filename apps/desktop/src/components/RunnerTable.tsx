@@ -1,13 +1,18 @@
 import { Fragment, useState, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import type { RunnerInfo } from "../api/types";
 import { StatusBadge } from "./StatusBadge";
 import { RunnerActions } from "./RunnerActions";
 import { RunnerGroupRow } from "./RunnerGroupRow";
 import { DockerBadge } from "./DockerBadge";
+import { compareRunnersByActivity } from "../utils/runnerOrdering";
 
 // Persists across navigations (module-level)
 const persistedExpandedGroups = new Set<string>();
+
+type RunnerListEntry =
+  | { kind: "group"; groupKey: string; groupRunners: RunnerInfo[] }
+  | { kind: "solo"; runner: RunnerInfo };
 
 interface RunnerTableProps {
   runners: RunnerInfo[];
@@ -24,6 +29,7 @@ interface RunnerTableProps {
   forceExpandedGroups?: Set<string>;
   pendingActions?: Set<string>;
   readOnly?: boolean;
+  sortByActivity?: boolean;
 }
 
 function SvcBadge() {
@@ -102,6 +108,7 @@ export function RunnerTable({
   forceExpandedGroups,
   pendingActions,
   readOnly = false,
+  sortByActivity = false,
 }: RunnerTableProps) {
   const navigate = useNavigate();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
@@ -129,9 +136,11 @@ export function RunnerTable({
     return merged;
   }, [expandedGroups, forceExpandedGroups]);
 
-  const { groups, soloRunners } = useMemo(() => {
+  const displayEntries = useMemo<RunnerListEntry[]>(() => {
     const byName = (a: RunnerInfo, b: RunnerInfo) =>
       a.config.name.localeCompare(b.config.name, undefined, { numeric: true });
+    const orderRunners = (items: RunnerInfo[]) =>
+      items.sort(sortByActivity ? compareRunnersByActivity : byName);
 
     // Group by name prefix + repo (merges runners from separate batch creates)
     const mergedMap = new Map<string, RunnerInfo[]>();
@@ -148,11 +157,33 @@ export function RunnerTable({
         solo.push(runner);
       }
     }
-    // Sort runners within each group and solo runners by name (numeric-aware)
-    for (const group of mergedMap.values()) group.sort(byName);
-    solo.sort(byName);
-    return { groups: mergedMap, soloRunners: solo };
-  }, [runners]);
+
+    for (const group of mergedMap.values()) orderRunners(group);
+    orderRunners(solo);
+
+    const entries: RunnerListEntry[] = [
+      ...Array.from(mergedMap.entries()).map(([groupKey, groupRunners]) => ({
+        kind: "group" as const,
+        groupKey,
+        groupRunners,
+      })),
+      ...solo.map((runner) => ({ kind: "solo" as const, runner })),
+    ];
+
+    if (sortByActivity) {
+      entries.sort((a, b) => {
+        const aRunner = a.kind === "group" ? a.groupRunners[0] : a.runner;
+        const bRunner = b.kind === "group" ? b.groupRunners[0] : b.runner;
+        const byActivity = compareRunnersByActivity(aRunner, bRunner);
+        if (byActivity !== 0) return byActivity;
+        const aKey = a.kind === "group" ? a.groupKey : a.runner.config.name;
+        const bKey = b.kind === "group" ? b.groupKey : b.runner.config.name;
+        return aKey.localeCompare(bKey, undefined, { numeric: true });
+      });
+    }
+
+    return entries;
+  }, [runners, sortByActivity]);
 
   if (runners.length === 0) {
     return (
@@ -167,8 +198,26 @@ export function RunnerTable({
 
   return (
     <div className="runner-list">
-      {/* Groups */}
-      {Array.from(groups.entries()).map(([groupKey, groupRunners]) => {
+      {displayEntries.map((entry) => {
+        if (entry.kind === "solo") {
+          const runner = entry.runner;
+          return (
+            <RunnerRow
+              key={runner.config.id}
+              runner={runner}
+              cpuValue={metrics?.get(runner.config.id)}
+              loading={pendingActions?.has(runner.config.id)}
+              readOnly={readOnly}
+              onStart={onStart}
+              onStop={onStop}
+              onRestart={onRestart}
+              onDelete={onDelete}
+              onClick={() => navigate(`/runners/${runner.config.id}`)}
+            />
+          );
+        }
+
+        const { groupKey, groupRunners } = entry;
         const isExpanded = effectiveExpanded.has(groupKey);
         const groupIds = [
           ...new Set(groupRunners.map((r) => r.config.group_id).filter(Boolean)),
@@ -217,22 +266,6 @@ export function RunnerTable({
           </Fragment>
         );
       })}
-
-      {/* Solo runners */}
-      {soloRunners.map((runner) => (
-        <RunnerRow
-          key={runner.config.id}
-          runner={runner}
-          cpuValue={metrics?.get(runner.config.id)}
-          loading={pendingActions?.has(runner.config.id)}
-          readOnly={readOnly}
-          onStart={onStart}
-          onStop={onStop}
-          onRestart={onRestart}
-          onDelete={onDelete}
-          onClick={() => navigate(`/runners/${runner.config.id}`)}
-        />
-      ))}
     </div>
   );
 }
@@ -360,6 +393,8 @@ function RunnerRow({
   onDelete: (id: string) => void;
   onClick: () => void;
 }) {
+  const displayName = runner.config.display_name ?? runner.config.name;
+
   return (
     <div
       className={`runner-row ${indented ? "runner-row-indented" : ""}`}
@@ -389,6 +424,9 @@ function RunnerRow({
             {!indented && runner.config.mode === "service" && <SvcBadge />}
             <span
               className="font-mono"
+              title={
+                runner.config.display_name ? `GitHub runner: ${runner.config.name}` : undefined
+              }
               style={{
                 fontSize: 14,
                 fontWeight: 500,
@@ -397,24 +435,28 @@ function RunnerRow({
                 whiteSpace: "nowrap",
               }}
             >
-              {runner.config.name}
+              {displayName}
             </span>
+            {runner.config.mode === "container" && <DockerBadge />}
           </div>
-          {(runner.config.mode === "container" || !inGroup) && (
+          {(runner.config.display_name || !inGroup) && (
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                marginTop: 3,
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginTop: 1,
                 paddingLeft: indented ? 28 : runner.config.mode === "service" ? 32 : 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
             >
-              {runner.config.mode === "container" && <DockerBadge />}
+              {runner.config.display_name && <>GitHub: {runner.config.name}</>}
+              {runner.config.display_name && !inGroup && <span> · </span>}
               {!inGroup && (
-                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                <>
                   {runner.config.repo_owner}/{runner.config.repo_name}
-                </span>
+                </>
               )}
             </div>
           )}

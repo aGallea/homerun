@@ -232,6 +232,107 @@ describe("NewRunnerWizard", () => {
     expect(screen.getByPlaceholderText("Search repositories...")).toBeInTheDocument();
   });
 
+  it("does not close when the backdrop is clicked", async () => {
+    const { container, props } = await renderWizard();
+    const overlay = container.querySelector(".dialog-overlay");
+    expect(overlay).not.toBeNull();
+
+    fireEvent.click(overlay!);
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("resolves a preselected repository and generates a runner name", async () => {
+    await renderWizard({ preselectedRepo: "org/frontend" });
+
+    const nameInput = await screen.findByLabelText("Name");
+    await waitFor(() => expect((nameInput as HTMLInputElement).value).toMatch(/^frontend-runner-/));
+  });
+
+  it("resolves a changed preselected repository while remaining mounted", async () => {
+    const { rerender, props } = await renderWizard({ preselectedRepo: "org/frontend" });
+    const firstName = (await screen.findByLabelText("Name")) as HTMLInputElement;
+    await waitFor(() => expect(firstName.value).toMatch(/^frontend-runner-/));
+
+    rerender(
+      <AuthProvider>
+        <NewRunnerWizard {...props} preselectedRepo="org/backend" />
+      </AuthProvider>,
+    );
+    const changedName = (await screen.findByLabelText("Name")) as HTMLInputElement;
+    await waitFor(() => expect(changedName.value).toMatch(/^backend-runner-/));
+  });
+
+  it("returns to repository selection when preselection is cleared", async () => {
+    const { rerender, props } = await renderWizard({ preselectedRepo: "org/frontend" });
+    expect(await screen.findByLabelText("Name")).toBeInTheDocument();
+
+    rerender(
+      <AuthProvider>
+        <NewRunnerWizard {...props} preselectedRepo={undefined} />
+      </AuthProvider>,
+    );
+    expect(await screen.findByPlaceholderText("Search repositories...")).toBeInTheDocument();
+  });
+
+  it("keeps a locally discovered repository that is absent from the remote list", async () => {
+    vi.mocked(api.listRepos).mockResolvedValue([]);
+    const localRepo = makeRepo({
+      id: 0,
+      full_name: "local/project",
+      owner: "local",
+      name: "project",
+      html_url: "",
+    });
+    const { props } = await renderWizard({
+      preselectedRepo: localRepo.full_name,
+      preselectedRepoDetails: localRepo,
+    });
+
+    const nameInput = await screen.findByLabelText("Name");
+    expect((nameInput as HTMLInputElement).value).toMatch(/^project-runner-/);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launch Runner" }));
+
+    await waitFor(() => expect(props.onCreate).toHaveBeenCalledTimes(1));
+    expect(props.onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ repo_full_name: "local/project" }),
+    );
+  });
+
+  it("falls back to repository selection when a preselected repository is stale", async () => {
+    await renderWizard({ preselectedRepo: "org/removed" });
+
+    expect(await screen.findByPlaceholderText("Search repositories...")).toBeInTheDocument();
+    expect(screen.queryByText("Loading repository...")).not.toBeInTheDocument();
+  });
+
+  it("resolves a stale preselection when repository polling later finds it", async () => {
+    vi.useFakeTimers();
+    let unmount: (() => void) | undefined;
+    try {
+      vi.mocked(api.listRepos)
+        .mockResolvedValueOnce(mockRepos.filter((repo) => repo.full_name !== "org/frontend"))
+        .mockResolvedValue(mockRepos);
+
+      const rendered = await renderWizard({ preselectedRepo: "org/frontend" });
+      unmount = rendered.unmount;
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByPlaceholderText("Search repositories...")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+
+      const nameInput = screen.getByLabelText("Name") as HTMLInputElement;
+      expect(nameInput.value).toMatch(/^frontend-runner-/);
+    } finally {
+      unmount?.();
+      vi.useRealTimers();
+    }
+  });
+
   it("Cancel button calls onClose", async () => {
     const { props } = await renderWizard();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

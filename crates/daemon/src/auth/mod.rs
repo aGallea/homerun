@@ -2,8 +2,9 @@ pub mod keychain;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 const KEYCHAIN_SERVICE: &str = "com.homerun.daemon";
 const KEYCHAIN_ACCOUNT: &str = "github-token";
@@ -51,6 +52,8 @@ struct AuthState {
 #[derive(Clone)]
 pub struct AuthManager {
     state: Arc<RwLock<Option<AuthState>>>,
+    generation: Arc<AtomicU64>,
+    commit_lock: Arc<Mutex<()>>,
 }
 
 impl Default for AuthManager {
@@ -63,6 +66,8 @@ impl AuthManager {
     pub fn new() -> Self {
         Self {
             state: Arc::new(RwLock::new(None)),
+            generation: Arc::new(AtomicU64::new(0)),
+            commit_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -77,70 +82,82 @@ impl AuthManager {
                     avatar_url: "https://example.com/avatar.png".to_string(),
                 },
             }))),
+            generation: Arc::new(AtomicU64::new(0)),
+            commit_lock: Arc::new(Mutex::new(())),
         }
     }
 
-    /// Attempt to restore a previously saved token from the keychain on startup.
+    fn begin_auth_attempt(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn is_current_attempt(&self, generation: u64) -> bool {
+        self.generation.load(Ordering::SeqCst) == generation
+    }
+
+    /// Attempt to restore a previously saved token from the credential store on startup.
     pub async fn try_restore(&self) -> Result<()> {
-        if let Some(token) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)? {
-            match self.validate_token(&token).await {
-                Ok(user) => {
-                    tracing::info!("Restored GitHub authentication from keychain");
-                    let mut state = self.state.write().await;
-                    *state = Some(AuthState { token, user });
+        let Some(token) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)? else {
+            return Ok(());
+        };
+        let generation = self.begin_auth_attempt();
+        match self.validate_token(&token).await {
+            Ok(user) => {
+                let _commit = self.commit_lock.lock().await;
+                if !self.is_current_attempt(generation) {
+                    return Ok(());
                 }
-                Err(e) => {
-                    // Don't delete the token — it might be a transient network error.
-                    // Just log it and leave the token in keychain for next restart.
-                    tracing::warn!("Could not validate stored token (keeping it): {e}");
-                    // Still load the token into memory so API calls can try it
-                    let mut state = self.state.write().await;
-                    *state = Some(AuthState {
-                        token,
-                        user: GitHubUser {
-                            login: "unknown".to_string(),
-                            avatar_url: String::new(),
-                        },
-                    });
+                tracing::info!("Restored GitHub authentication from the credential store");
+                *self.state.write().await = Some(AuthState { token, user });
+            }
+            Err(error) => {
+                // Keep the credential file because this can be a transient network failure,
+                // but do not let an older restore attempt erase a newer login.
+                let _commit = self.commit_lock.lock().await;
+                if self.is_current_attempt(generation) {
+                    tracing::warn!(
+                        "Could not validate stored token (keeping it for the next restart): {error}"
+                    );
+                    *self.state.write().await = None;
                 }
             }
         }
         Ok(())
     }
 
-    /// Validate the PAT via the GitHub API, store it in the keychain, and update state.
+    /// Validate the PAT via the GitHub API, store it in the credential store, and update state.
     pub async fn login_with_pat(&self, token: &str) -> Result<GitHubUser> {
+        let generation = self.begin_auth_attempt();
         let user = self.validate_token(token).await?;
+        let _commit = self.commit_lock.lock().await;
+        if !self.is_current_attempt(generation) {
+            return Err(anyhow!("Authentication attempt was superseded"));
+        }
         keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, token)?;
-        let mut state = self.state.write().await;
-        *state = Some(AuthState {
+        *self.state.write().await = Some(AuthState {
             token: token.to_string(),
             user: user.clone(),
         });
         Ok(user)
     }
 
-    /// Remove the token from keychain and clear in-memory state.
+    /// Remove the token from the credential store and clear in-memory state.
     pub async fn logout(&self) -> Result<()> {
-        // Clear in-memory state first, then try keychain cleanup
-        let mut state = self.state.write().await;
-        *state = None;
-        drop(state);
-        // Best-effort keychain cleanup — don't fail if token wasn't in keychain
-        let _ = keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
-        Ok(())
+        // Invalidate every in-flight PAT/device-flow attempt before touching state.
+        self.begin_auth_attempt();
+        let _commit = self.commit_lock.lock().await;
+        let delete_result = keychain::delete_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+        *self.state.write().await = None;
+        delete_result
     }
 
     pub async fn status(&self) -> AuthStatus {
-        // Try to ensure token is loaded (triggers lazy keychain restore if needed)
-        let has_token = self.token().await.is_some();
-        let state = self.state.read().await;
-        match &*state {
-            Some(s) if has_token => AuthStatus {
+        match &*self.state.read().await {
+            Some(state) => AuthStatus {
                 authenticated: true,
-                user: Some(s.user.clone()),
+                user: Some(state.user.clone()),
             },
-            _ => AuthStatus {
+            None => AuthStatus {
                 authenticated: false,
                 user: None,
             },
@@ -148,43 +165,19 @@ impl AuthManager {
     }
 
     pub async fn token(&self) -> Option<String> {
-        // Fast path: token already in memory
-        {
-            let state = self.state.read().await;
-            if let Some(ref s) = *state {
-                return Some(s.token.clone());
-            }
-        }
-
-        // Slow path: try to restore from keychain (local-only, no network call).
-        // Skip in tests to avoid picking up real keychain tokens.
-        // The #[cfg(test)] guard only works for unit tests within this crate;
-        // integration tests (separate binaries) use the env var instead.
-        #[cfg(not(test))]
-        if std::env::var("HOMERUN_SKIP_KEYCHAIN").is_err() {
-            if let Ok(Some(token)) = keychain::get_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-                tracing::info!("Lazily restored auth token from keychain");
-                let mut state = self.state.write().await;
-                // Only set if still None (another task may have restored it)
-                if state.is_none() {
-                    *state = Some(AuthState {
-                        token: token.clone(),
-                        user: GitHubUser {
-                            login: "unknown".to_string(),
-                            avatar_url: String::new(),
-                        },
-                    });
-                }
-                return Some(state.as_ref().map(|s| s.token.clone()).unwrap_or(token));
-            }
-        }
-
-        None
+        self.state
+            .read()
+            .await
+            .as_ref()
+            .map(|state| state.token.clone())
     }
 
     /// Initiate a GitHub Device Flow. Returns the user_code and verification_uri
     /// that should be shown to the user.
     pub async fn start_device_flow(&self) -> Result<DeviceFlowResponse> {
+        // A newly requested code supersedes any older poll immediately, even
+        // while GitHub is still returning this new code.
+        self.begin_auth_attempt();
         let client = reqwest::Client::new();
         let response = client
             .post(DEVICE_CODE_URL)
@@ -205,19 +198,26 @@ impl AuthManager {
     }
 
     /// Poll GitHub until the device is authorized or until timeout.
-    /// On success, stores the token in the keychain and returns the GitHubUser.
+    /// On success, stores the token in the credential store and returns the GitHubUser.
     pub async fn poll_device_flow(&self, device_code: &str, interval: u64) -> Result<GitHubUser> {
+        let generation = self.begin_auth_attempt();
         let client = reqwest::Client::new();
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_secs(DEVICE_FLOW_TIMEOUT_SECS);
         let mut poll_interval = interval;
 
         loop {
+            if !self.is_current_attempt(generation) {
+                return Err(anyhow!("Device flow was cancelled or superseded"));
+            }
             if std::time::Instant::now() > deadline {
                 return Err(anyhow!("Device flow authorization timed out"));
             }
 
             tokio::time::sleep(std::time::Duration::from_secs(poll_interval)).await;
+            if !self.is_current_attempt(generation) {
+                return Err(anyhow!("Device flow was cancelled or superseded"));
+            }
 
             let response = client
                 .post(ACCESS_TOKEN_URL)
@@ -234,13 +234,13 @@ impl AuthManager {
 
             if let Some(token) = poll.access_token {
                 let user = self.validate_token(&token).await?;
-                if let Err(e) = keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token) {
-                    tracing::error!("Failed to store token in keychain: {e}");
-                } else {
-                    tracing::info!("Token stored in macOS Keychain");
+                let _commit = self.commit_lock.lock().await;
+                if !self.is_current_attempt(generation) {
+                    return Err(anyhow!("Device flow was cancelled or superseded"));
                 }
-                let mut state = self.state.write().await;
-                *state = Some(AuthState {
+                keychain::store_token(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &token)?;
+                tracing::info!("Token stored in the HomeRun credential store");
+                *self.state.write().await = Some(AuthState {
                     token,
                     user: user.clone(),
                 });
@@ -248,11 +248,8 @@ impl AuthManager {
             }
 
             match poll.error.as_deref() {
-                Some("authorization_pending") => {
-                    // Normal — keep polling
-                }
+                Some("authorization_pending") => {}
                 Some("slow_down") => {
-                    // GitHub wants us to poll slower
                     poll_interval = poll.interval.unwrap_or(poll_interval + 5);
                 }
                 Some("expired_token") => {
@@ -261,12 +258,8 @@ impl AuthManager {
                 Some("access_denied") => {
                     return Err(anyhow!("Authorization denied by user."));
                 }
-                Some(other) => {
-                    return Err(anyhow!("Device flow error: {other}"));
-                }
-                None => {
-                    return Err(anyhow!("Unexpected empty response from GitHub"));
-                }
+                Some(other) => return Err(anyhow!("Device flow error: {other}")),
+                None => return Err(anyhow!("Unexpected empty response from GitHub")),
             }
         }
     }
@@ -301,6 +294,8 @@ mod tests {
                 token: "ghp_fake_test_token".to_string(),
                 user,
             }))),
+            generation: Arc::new(AtomicU64::new(0)),
+            commit_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -371,8 +366,7 @@ mod tests {
         let manager = authenticated_manager("octocat");
         // Verify authenticated first
         assert!(manager.status().await.authenticated);
-        // Logout — may fail on keychain, but state should still be cleared
-        let _ = manager.logout().await;
+        manager.logout().await.unwrap();
         let status = manager.status().await;
         assert!(!status.authenticated);
     }
@@ -508,5 +502,14 @@ mod tests {
         let manager = authenticated_manager("specific_login_name");
         let status = manager.status().await;
         assert_eq!(status.user.unwrap().login, "specific_login_name");
+    }
+
+    #[tokio::test]
+    async fn test_logout_invalidates_in_flight_auth_attempt() {
+        let manager = authenticated_manager("octocat");
+        let attempt = manager.begin_auth_attempt();
+        manager.logout().await.unwrap();
+        assert!(!manager.is_current_attempt(attempt));
+        assert!(manager.token().await.is_none());
     }
 }

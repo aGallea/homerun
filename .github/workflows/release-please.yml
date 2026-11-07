@@ -3,48 +3,229 @@ name: Release Please
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release-please:
-    runs-on: [self-hosted, rust]
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RELEASE_TOKEN_CONFIGURED: ${{ secrets.RELEASE_TOKEN != '' }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          token: ${{ secrets.RELEASE_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          # This repository currently disallows pull-request creation by the
+          # built-in GITHUB_TOKEN. When no dedicated RELEASE_TOKEN is present,
+          # still allow Release Please to tag an already-merged release PR but
+          # do not let it fail while attempting to open a new one.
+          skip-github-pull-request: ${{ secrets.RELEASE_TOKEN == '' }}
 
-      # When release-please creates/updates a PR, regenerate Cargo.lock files
-      # so they stay in sync with the version bump in Cargo.toml
+      - name: Report disabled automatic release PR creation
+        if: ${{ env.RELEASE_TOKEN_CONFIGURED != 'true' && steps.release.outputs.release_created != 'true' }}
+        run: echo "::notice::RELEASE_TOKEN is not configured; automatic release PR creation is skipped because repository Actions policy blocks GITHUB_TOKEN from creating pull requests."
+
+      # Resources created with GITHUB_TOKEN do not recursively trigger normal
+      # tag/release workflows. A dedicated RELEASE_TOKEN does trigger them, so
+      # only dispatch explicitly when the built-in token created the release.
+      - name: Dispatch workflows for a newly created release
+        if: ${{ steps.release.outputs.release_created == 'true' && env.RELEASE_TOKEN_CONFIGURED != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run release-build.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG_NAME"
+          gh workflow run docker-runner-image.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG_NAME"
+
+      # A manually merged release PR can update the manifest while Release
+      # Please fails to create the corresponding tag/release (for example when
+      # repository policy prevents the built-in token from creating PRs). Fetch
+      # full first-parent history so recovery can tag the exact commit where the
+      # manifest version changed, rather than a later unrelated master commit.
+      - uses: actions/checkout@v6
+        if: ${{ steps.release.outputs.release_created != 'true' }}
+        with:
+          fetch-depth: 0
+
+      # Self-heal both the release object itself and its downstream pipelines.
+      # Matching downstream runs by the release commit SHA works whether a run
+      # was started by tag push or by workflow_dispatch.
+      - name: Recover missing release and downstream pipelines
+        if: ${{ steps.release.outputs.release_created != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          CURRENT_VERSION=$(jq -r '.["."] // empty' .release-please-manifest.json)
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "::error::.release-please-manifest.json does not contain a root package version."
+            exit 1
+          fi
+
+          EXPECTED_TAG="v${CURRENT_VERSION}"
+          LATEST_TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq '.tagName' 2>/dev/null || true)
+
+          version_is_newer_than() {
+            local candidate="$1"
+            local baseline="$2"
+            [ "$candidate" != "$baseline" ] && \
+              [ "$(printf '%s\n%s\n' "$baseline" "$candidate" | sort -V | tail -n 1)" = "$candidate" ]
+          }
+
+          # Refuse to manufacture an old/regressed release. A missing expected
+          # release is recoverable only when the manifest is ahead of the latest
+          # published release (or when no release has ever been published).
+          if [ -n "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$EXPECTED_TAG" ]; then
+            LATEST_VERSION="${LATEST_TAG#v}"
+            if ! version_is_newer_than "$CURRENT_VERSION" "$LATEST_VERSION"; then
+              echo "::error::Manifest version $CURRENT_VERSION is not newer than latest release $LATEST_TAG; refusing to create $EXPECTED_TAG."
+              exit 1
+            fi
+          fi
+
+          find_version_bump_commit() {
+            local sha version parent_version
+            while read -r sha; do
+              version=$(git show "$sha:.release-please-manifest.json" 2>/dev/null | jq -r '.["."] // empty' || true)
+              [ "$version" = "$CURRENT_VERSION" ] || continue
+
+              parent_version=$(git show "$sha^1:.release-please-manifest.json" 2>/dev/null | jq -r '.["."] // empty' || true)
+              if [ "$parent_version" != "$CURRENT_VERSION" ]; then
+                printf '%s\n' "$sha"
+                return 0
+              fi
+            done < <(git log --first-parent --format=%H -- .release-please-manifest.json)
+            return 1
+          }
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$EXPECTED_TAG" >/dev/null 2>&1; then
+            TARGET_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$EXPECTED_TAG" --jq '.sha')
+            echo "$EXPECTED_TAG already exists at $TARGET_SHA."
+          else
+            TARGET_SHA=$(find_version_bump_commit || true)
+            if [ -z "$TARGET_SHA" ]; then
+              echo "::error::Could not find the first-parent commit that bumped the manifest to $CURRENT_VERSION."
+              exit 1
+            fi
+
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$EXPECTED_TAG" \
+              -f "sha=$TARGET_SHA" >/dev/null
+            echo "Created $EXPECTED_TAG at $TARGET_SHA."
+          fi
+
+          TARGET_VERSION=$(git show "$TARGET_SHA:.release-please-manifest.json" 2>/dev/null | jq -r '.["."] // empty' || true)
+          if [ "$TARGET_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "::error::$EXPECTED_TAG resolves to $TARGET_SHA with manifest version '${TARGET_VERSION:-missing}', expected $CURRENT_VERSION."
+            exit 1
+          fi
+
+          if gh release view "$EXPECTED_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $EXPECTED_TAG already exists."
+          else
+            gh release create "$EXPECTED_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "$EXPECTED_TAG" \
+              --generate-notes
+            echo "Created release $EXPECTED_TAG."
+          fi
+
+          TAG_NAME="$EXPECTED_TAG"
+          TARGET_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG_NAME" --jq '.sha')
+
+          recover_workflow() {
+            local workflow="$1"
+            local label="$2"
+            local state status conclusion
+
+            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?per_page=50" \
+              --jq ".workflow_runs[] | select(.head_sha == \"$TARGET_SHA\") | [.status, (.conclusion // \"\")] | @tsv" \
+              | head -n 1 || true)
+
+            if [ -z "$state" ]; then
+              echo "$label has no run for $TAG_NAME; dispatching."
+              gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$TAG_NAME"
+              return
+            fi
+
+            status=$(printf '%s\n' "$state" | cut -f1)
+            conclusion=$(printf '%s\n' "$state" | cut -f2)
+
+            case "$status" in
+              queued|in_progress|requested|waiting|pending)
+                echo "$label is already $status for $TAG_NAME; recovery not needed."
+                ;;
+              completed)
+                if [ "$conclusion" = "success" ]; then
+                  echo "$label already succeeded for $TAG_NAME."
+                else
+                  echo "$label completed with ${conclusion:-unknown}; dispatching one recovery run."
+                  gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$TAG_NAME"
+                fi
+                ;;
+              *)
+                echo "$label has unexpected status '$status'; dispatching recovery run."
+                gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$TAG_NAME"
+                ;;
+            esac
+          }
+
+          recover_workflow release-build.yml "Release Build"
+          recover_workflow docker-runner-image.yml "Docker Runner Image"
+
+      # When release-please creates or updates a PR, check out that branch so
+      # all generated lockfiles stay synchronized with the version bumps.
       - uses: actions/checkout@v6
         if: ${{ steps.release.outputs.pr }}
         with:
           ref: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
-          token: ${{ secrets.RELEASE_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - name: Add Rust to PATH
+      - name: Install Rust toolchain
         if: ${{ steps.release.outputs.pr }}
-        run: |
-          source "$HOME/.cargo/env" 2>/dev/null || true
-          echo "$(dirname "$(rustup which rustc)")" >> $GITHUB_PATH
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        if: ${{ steps.release.outputs.pr }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
 
       - name: Regenerate Cargo.lock files
         if: ${{ steps.release.outputs.pr }}
         run: |
+          set -euo pipefail
           cargo generate-lockfile
-          cd apps/desktop/src-tauri && cargo generate-lockfile
+          cargo generate-lockfile --manifest-path apps/desktop/src-tauri/Cargo.toml
 
-      - name: Commit updated Cargo.lock files
+      - name: Regenerate package-lock.json
+        if: ${{ steps.release.outputs.pr }}
+        working-directory: apps/desktop
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Commit updated lockfiles
         if: ${{ steps.release.outputs.pr }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock apps/desktop/src-tauri/Cargo.lock
-          git diff --cached --quiet || git commit -m "chore: update Cargo.lock files for version bump"
-          git push
+          git add Cargo.lock apps/desktop/src-tauri/Cargo.lock apps/desktop/package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update lockfiles for version bump"
+            git push
+          fi

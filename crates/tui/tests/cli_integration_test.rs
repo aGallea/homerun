@@ -9,6 +9,7 @@ fn make_runner(id: &str, name: &str, state: &str) -> RunnerInfo {
         config: RunnerConfig {
             id: id.to_string(),
             name: name.to_string(),
+            display_name: None,
             repo_owner: "octocat".to_string(),
             repo_name: "hello-world".to_string(),
             labels: vec!["self-hosted".to_string()],
@@ -95,14 +96,14 @@ async fn test_cmd_status_authenticated() {
         .build()
         .await;
     let client = DaemonClient::new(mock.socket_path().clone());
-    cli::cmd_status(&client).await.unwrap();
+    cli::cmd_status(&client, false).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_cmd_status_unauthenticated() {
     let mock = MockDaemon::builder().build().await;
     let client = DaemonClient::new(mock.socket_path().clone());
-    cli::cmd_status(&client).await.unwrap();
+    cli::cmd_status(&client, false).await.unwrap();
 }
 
 #[tokio::test]

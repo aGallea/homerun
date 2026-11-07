@@ -26,6 +26,22 @@ pub async fn fetch_latest_version() -> Result<String> {
     crate::runner::binary::get_latest_runner_version().await
 }
 
+fn parse_runner_version(version: &str) -> Option<Vec<u64>> {
+    let trimmed = version.trim().trim_start_matches('v');
+    let parsed: Option<Vec<u64>> = trimmed
+        .split('.')
+        .map(|part| part.parse::<u64>().ok())
+        .collect();
+    parsed.filter(|parts| !parts.is_empty())
+}
+
+pub fn is_newer_runner_version(current: &str, latest: &str) -> bool {
+    match (parse_runner_version(current), parse_runner_version(latest)) {
+        (Some(current), Some(latest)) => latest > current,
+        _ => false,
+    }
+}
+
 /// Checks whether a newer GitHub Actions runner version is available.
 ///
 /// Compares the version recorded in `cache_dir/cached_runner_version.txt`
@@ -36,7 +52,7 @@ pub async fn fetch_latest_version() -> Result<String> {
 pub async fn check_for_update(cache_dir: &Path) -> Option<String> {
     let current = read_cached_version(cache_dir)?;
     let latest = fetch_latest_version().await.ok()?;
-    if latest != current {
+    if is_newer_runner_version(&current, &latest) {
         Some(latest)
     } else {
         None
@@ -46,6 +62,15 @@ pub async fn check_for_update(cache_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_runner_version_comparison_only_flags_newer_versions() {
+        assert!(is_newer_runner_version("2.321.0", "2.322.0"));
+        assert!(!is_newer_runner_version("2.322.0", "2.322.0"));
+        assert!(!is_newer_runner_version("2.323.0", "2.322.0"));
+        assert!(is_newer_runner_version("v2.321.9", "2.322.0"));
+        assert!(!is_newer_runner_version("not-a-version", "2.322.0"));
+    }
 
     #[test]
     fn test_read_cached_version_missing_file() {

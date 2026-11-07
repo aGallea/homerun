@@ -23,6 +23,8 @@ function makePrefs(overrides?: Partial<Preferences>): Preferences {
     scan_labels: [],
     workspace_path: null,
     auto_scan: false,
+    hide_offline_runners_in_mini_view: false,
+    sort_runners_by_activity: false,
     ...overrides,
   };
 }
@@ -281,6 +283,24 @@ describe("useNotifications", () => {
       expect(mockInvoke).toHaveBeenCalledWith("send_notification", {
         title: "Runner Deleted",
         body: "r2 was removed",
+        icon_path: "/resolved/resources/notifications/offline.png",
+      });
+    });
+  });
+
+  it("sends Runner Deleted when the final runner disappears", async () => {
+    const prefs = makePrefs();
+    const initial = [makeRunner({ name: "last-runner", state: "online" })];
+    const { rerender } = renderHook(({ runners, prefs }) => useNotifications(runners, prefs), {
+      initialProps: { runners: initial, prefs },
+    });
+
+    rerender({ runners: [], prefs });
+
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("send_notification", {
+        title: "Runner Deleted",
+        body: "last-runner was removed",
         icon_path: "/resolved/resources/notifications/offline.png",
       });
     });

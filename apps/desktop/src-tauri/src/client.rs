@@ -1,7 +1,9 @@
+use futures::{stream::SplitStream, StreamExt};
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
+use tokio_tungstenite::WebSocketStream;
 
 /// Percent-encode a string for use in a URL query parameter.
 fn url_encode(s: &str) -> String {
@@ -19,7 +21,8 @@ fn url_encode(s: &str) -> String {
     encoded
 }
 
-use hyper::Request;
+use http_body_util::BodyExt;
+use hyper::{body::Incoming, Request, Response};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 
@@ -36,6 +39,8 @@ pub struct ContainerConfig {
 pub struct RunnerConfig {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
     pub repo_owner: String,
     pub repo_name: String,
     pub labels: Vec<String>,
@@ -65,6 +70,8 @@ pub struct RunnerInfo {
     #[serde(default)]
     pub container_id: Option<String>,
     pub uptime_secs: Option<u64>,
+    #[serde(default)]
+    pub started_at: Option<String>,
     pub jobs_completed: u32,
     pub jobs_failed: u32,
     pub current_job: Option<String>,
@@ -222,6 +229,8 @@ pub struct CreateRunnerRequest {
 pub struct CreateBatchRequest {
     pub repo_full_name: String,
     pub count: u8,
+    #[serde(default)]
+    pub name_prefix: Option<String>,
     pub labels: Option<Vec<String>>,
     pub mode: Option<String>,
     #[serde(default)]
@@ -233,6 +242,12 @@ pub struct DockerStatusResponse {
     pub available: bool,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunStatusResponse {
+    pub status: String,
+    pub conclusion: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,6 +298,10 @@ pub struct Preferences {
     pub workspace_path: Option<String>,
     #[serde(default)]
     pub auto_scan: bool,
+    #[serde(default)]
+    pub hide_offline_runners_in_mini_view: bool,
+    #[serde(default)]
+    pub sort_runners_by_activity: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -386,8 +405,7 @@ impl tower::Service<hyper::Uri> for NamedPipeConnector {
     fn call(&mut self, _uri: hyper::Uri) -> Self::Future {
         let pipe_name = self.pipe_name.clone();
         Box::pin(async move {
-            let client =
-                tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name)?;
+            let client = tokio::net::windows::named_pipe::ClientOptions::new().open(&pipe_name)?;
             Ok(hyper_util::rt::TokioIo::new(client))
         })
     }
@@ -413,15 +431,22 @@ impl DaemonClient {
         Self { pipe_name }
     }
 
-    pub fn default_socket() -> Self {
+    #[cfg(unix)]
+    fn default_socket_from_home(home: Option<PathBuf>) -> Result<Self, String> {
+        let home = home.ok_or_else(|| {
+            "Cannot determine home directory for HomeRun daemon socket".to_string()
+        })?;
+        Ok(Self::new(home.join(".homerun/daemon.sock")))
+    }
+
+    pub fn default_socket() -> Result<Self, String> {
         #[cfg(unix)]
         {
-            let home = dirs::home_dir().expect("no home directory");
-            Self::new(home.join(".homerun/daemon.sock"))
+            Self::default_socket_from_home(dirs::home_dir())
         }
         #[cfg(windows)]
         {
-            Self::new_pipe(r"\\.\pipe\homerun-daemon".to_string())
+            Ok(Self::new_pipe(r"\\.\pipe\homerun-daemon".to_string()))
         }
     }
 
@@ -457,12 +482,12 @@ impl DaemonClient {
         }
     }
 
-    pub async fn request(
+    async fn send_request(
         &self,
         method: &str,
         path: &str,
         body: Option<String>,
-    ) -> Result<String, String> {
+    ) -> Result<Response<Incoming>, String> {
         // hyper requires a valid URI — the host is ignored for Unix sockets / named pipes.
         let uri = format!("http://localhost{path}");
         let mut builder = Request::builder().method(method).uri(&uri);
@@ -497,18 +522,86 @@ impl DaemonClient {
                 .await
                 .map_err(|e| format!("Failed to connect to daemon — is homerund running? {e}"))?
         };
+        Ok(response)
+    }
 
+    pub async fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+    ) -> Result<String, String> {
+        let response = self.send_request(method, path, body).await?;
         let status = response.status();
-        let collected = http_body_util::BodyExt::collect(response.into_body())
+        let collected = response
+            .into_body()
+            .collect()
             .await
             .map_err(|e| format!("Failed to read response body: {e}"))?;
-        let bytes = collected.to_bytes();
-        let text = String::from_utf8_lossy(&bytes).to_string();
+        let text = String::from_utf8_lossy(&collected.to_bytes()).to_string();
 
         if !status.is_success() && status.as_u16() != 204 {
             return Err(format!("Daemon returned {status}: {text}"));
         }
         Ok(text)
+    }
+
+    /// Consume an SSE response incrementally and invoke `on_data` for every
+    /// complete data payload. This deliberately does not buffer the response,
+    /// allowing scan progress and cancellation to remain live.
+    pub async fn stream_sse<F>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+        mut on_data: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(String) + Send,
+    {
+        let response = self.send_request(method, path, body).await?;
+        let status = response.status();
+        if !status.is_success() {
+            let collected = response
+                .into_body()
+                .collect()
+                .await
+                .map_err(|e| format!("Failed to read scan error response: {e}"))?;
+            let text = String::from_utf8_lossy(&collected.to_bytes()).to_string();
+            return Err(format!("Daemon returned {status}: {text}"));
+        }
+
+        let mut body = response.into_body();
+        let mut buffer = String::new();
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(|e| format!("Failed to read scan stream: {e}"))?;
+            let Ok(data) = frame.into_data() else {
+                continue;
+            };
+            buffer.push_str(&String::from_utf8_lossy(&data));
+
+            loop {
+                let boundary = buffer
+                    .find("\n\n")
+                    .map(|index| (index, 2))
+                    .or_else(|| buffer.find("\r\n\r\n").map(|index| (index, 4)));
+                let Some((index, delimiter_len)) = boundary else {
+                    break;
+                };
+                let event = buffer[..index].to_string();
+                buffer.drain(..index + delimiter_len);
+                let data = event
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data:"))
+                    .map(str::trim_start)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !data.is_empty() {
+                    on_data(data);
+                }
+            }
+        }
+        Ok(())
     }
 
     // --- API methods ---
@@ -525,7 +618,7 @@ impl DaemonClient {
 
     pub async fn login_with_token(&self, token: &str) -> Result<AuthStatus, String> {
         let payload = serde_json::json!({ "token": token }).to_string();
-        let body = self.request("POST", "/auth/login", Some(payload)).await?;
+        let body = self.request("POST", "/auth/token", Some(payload)).await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
@@ -546,6 +639,18 @@ impl DaemonClient {
                 "/runners",
                 Some(serde_json::to_string(req).map_err(|e| e.to_string())?),
             )
+            .await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    pub async fn update_runner_display_name(
+        &self,
+        id: &str,
+        display_name: Option<&str>,
+    ) -> Result<RunnerInfo, String> {
+        let payload = serde_json::json!({ "display_name": display_name }).to_string();
+        let body = self
+            .request("PATCH", &format!("/runners/{id}"), Some(payload))
             .await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
@@ -629,34 +734,82 @@ impl DaemonClient {
     }
 
     pub async fn get_runner_steps(&self, runner_id: &str) -> Result<StepsResponse, String> {
-        let body = self.request("GET", &format!("/runners/{runner_id}/steps"), None).await?;
+        let body = self
+            .request("GET", &format!("/runners/{runner_id}/steps"), None)
+            .await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    pub async fn get_step_logs(&self, runner_id: &str, step_number: u16) -> Result<StepLogsResponse, String> {
-        let body = self.request("GET", &format!("/runners/{runner_id}/steps/{step_number}/logs"), None).await?;
+    pub async fn get_step_logs(
+        &self,
+        runner_id: &str,
+        step_number: u16,
+    ) -> Result<StepLogsResponse, String> {
+        let body = self
+            .request(
+                "GET",
+                &format!("/runners/{runner_id}/steps/{step_number}/logs"),
+                None,
+            )
+            .await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    pub async fn get_runner_history(&self, runner_id: &str) -> Result<Vec<JobHistoryEntry>, String> {
-        let body = self.request("GET", &format!("/runners/{runner_id}/history"), None).await?;
+    pub async fn get_runner_history(
+        &self,
+        runner_id: &str,
+    ) -> Result<Vec<JobHistoryEntry>, String> {
+        let body = self
+            .request("GET", &format!("/runners/{runner_id}/history"), None)
+            .await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
     pub async fn rerun_workflow(&self, runner_id: &str, run_url: &str) -> Result<(), String> {
         let payload = serde_json::json!({ "run_url": run_url }).to_string();
-        self.request("POST", &format!("/runners/{runner_id}/rerun"), Some(payload)).await?;
+        self.request(
+            "POST",
+            &format!("/runners/{runner_id}/rerun"),
+            Some(payload),
+        )
+        .await?;
         Ok(())
+    }
+
+    pub async fn get_run_status(
+        &self,
+        runner_id: &str,
+        run_url: &str,
+    ) -> Result<RunStatusResponse, String> {
+        let payload = serde_json::json!({ "run_url": run_url }).to_string();
+        let body = self
+            .request(
+                "POST",
+                &format!("/runners/{runner_id}/run-status"),
+                Some(payload),
+            )
+            .await?;
+        serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
     pub async fn clear_runner_history(&self, runner_id: &str) -> Result<(), String> {
-        self.request("DELETE", &format!("/runners/{runner_id}/history"), None).await?;
+        self.request("DELETE", &format!("/runners/{runner_id}/history"), None)
+            .await?;
         Ok(())
     }
 
-    pub async fn delete_history_entry(&self, runner_id: &str, started_at: &str) -> Result<(), String> {
+    pub async fn delete_history_entry(
+        &self,
+        runner_id: &str,
+        started_at: &str,
+    ) -> Result<(), String> {
         let payload = serde_json::json!({ "started_at": started_at }).to_string();
-        self.request("DELETE", &format!("/runners/{runner_id}/history/entry"), Some(payload)).await?;
+        self.request(
+            "DELETE",
+            &format!("/runners/{runner_id}/history/entry"),
+            Some(payload),
+        )
+        .await?;
         Ok(())
     }
 
@@ -667,35 +820,52 @@ impl DaemonClient {
         serde_json::from_str(&body).map_err(|e| e.to_string())
     }
 
-    pub async fn create_batch(&self, req: &CreateBatchRequest) -> Result<BatchCreateResponse, String> {
+    pub async fn create_batch(
+        &self,
+        req: &CreateBatchRequest,
+    ) -> Result<BatchCreateResponse, String> {
         let body = serde_json::to_string(req).map_err(|e| e.to_string())?;
         let text = self.request("POST", "/runners/batch", Some(body)).await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
     pub async fn start_group(&self, group_id: &str) -> Result<GroupActionResponse, String> {
-        let text = self.request("POST", &format!("/runners/groups/{group_id}/start"), None).await?;
+        let text = self
+            .request("POST", &format!("/runners/groups/{group_id}/start"), None)
+            .await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
     pub async fn stop_group(&self, group_id: &str) -> Result<GroupActionResponse, String> {
-        let text = self.request("POST", &format!("/runners/groups/{group_id}/stop"), None).await?;
+        let text = self
+            .request("POST", &format!("/runners/groups/{group_id}/stop"), None)
+            .await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
     pub async fn restart_group(&self, group_id: &str) -> Result<GroupActionResponse, String> {
-        let text = self.request("POST", &format!("/runners/groups/{group_id}/restart"), None).await?;
+        let text = self
+            .request("POST", &format!("/runners/groups/{group_id}/restart"), None)
+            .await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
     pub async fn delete_group(&self, group_id: &str) -> Result<GroupActionResponse, String> {
-        let text = self.request("DELETE", &format!("/runners/groups/{group_id}"), None).await?;
+        let text = self
+            .request("DELETE", &format!("/runners/groups/{group_id}"), None)
+            .await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
-    pub async fn scale_group(&self, group_id: &str, count: u8) -> Result<ScaleGroupResponse, String> {
+    pub async fn scale_group(
+        &self,
+        group_id: &str,
+        count: u8,
+    ) -> Result<ScaleGroupResponse, String> {
         let body = serde_json::json!({ "count": count }).to_string();
-        let text = self.request("PATCH", &format!("/runners/groups/{group_id}"), Some(body)).await?;
+        let text = self
+            .request("PATCH", &format!("/runners/groups/{group_id}"), Some(body))
+            .await?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
     }
 
@@ -724,8 +894,7 @@ impl DaemonClient {
     /// Returns the number of active runners being stopped during shutdown.
     pub async fn shutdown(&self) -> Result<usize, String> {
         let body = self.request("POST", "/daemon/shutdown", None).await?;
-        let json: serde_json::Value =
-            serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
         Ok(json["active_runners"].as_u64().unwrap_or(0) as usize)
     }
 
@@ -765,5 +934,54 @@ impl DaemonClient {
             .request("GET", &format!("/daemon/logs/recent{}", query), None)
             .await?;
         serde_json::from_str(&body).map_err(|e| e.to_string())
+    }
+
+    /// Connect to the daemon WebSocket for immediate runner lifecycle updates.
+    #[cfg(unix)]
+    pub async fn connect_events(
+        &self,
+    ) -> Result<SplitStream<WebSocketStream<tokio::net::UnixStream>>, String> {
+        let stream = tokio::net::UnixStream::connect(&self.socket_path)
+            .await
+            .map_err(|e| format!("Failed to connect to daemon event stream: {e}"))?;
+        let (ws_stream, _) = tokio_tungstenite::client_async("ws://localhost/events", stream)
+            .await
+            .map_err(|e| format!("Failed to open daemon event stream: {e}"))?;
+        let (_, read) = ws_stream.split();
+        Ok(read)
+    }
+
+    /// Connect to the daemon WebSocket for immediate runner lifecycle updates.
+    #[cfg(windows)]
+    pub async fn connect_events(
+        &self,
+    ) -> Result<
+        SplitStream<WebSocketStream<tokio::net::windows::named_pipe::NamedPipeClient>>,
+        String,
+    > {
+        let stream = tokio::net::windows::named_pipe::ClientOptions::new()
+            .open(&self.pipe_name)
+            .map_err(|e| format!("Failed to connect to daemon event stream: {e}"))?;
+        let (ws_stream, _) = tokio_tungstenite::client_async("ws://localhost/events", stream)
+            .await
+            .map_err(|e| format!("Failed to open daemon event stream: {e}"))?;
+        let (_, read) = ws_stream.split();
+        Ok(read)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(unix)]
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn test_default_socket_reports_missing_home() {
+        let error = match DaemonClient::default_socket_from_home(None) {
+            Ok(_) => panic!("missing HOME should fail"),
+            Err(error) => error,
+        };
+        assert!(error.contains("Cannot determine home directory"));
     }
 }

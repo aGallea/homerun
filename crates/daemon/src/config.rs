@@ -1,4 +1,5 @@
-use anyhow::Result;
+use crate::persistence::atomic_write;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,10 @@ pub struct Preferences {
     pub workspace_path: Option<String>,
     #[serde(default)]
     pub auto_scan: bool,
+    #[serde(default)]
+    pub hide_offline_runners_in_mini_view: bool,
+    #[serde(default)]
+    pub sort_runners_by_activity: bool,
 }
 
 impl Default for Preferences {
@@ -29,6 +34,8 @@ impl Default for Preferences {
             scan_labels: default_scan_labels(),
             workspace_path: None,
             auto_scan: false,
+            hide_offline_runners_in_mini_view: false,
+            sort_runners_by_activity: false,
         }
     }
 }
@@ -40,17 +47,18 @@ pub struct Config {
     pub preferences: Preferences,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        let home = dirs::home_dir().expect("no home directory");
-        Self {
+impl Config {
+    fn from_home(home: Option<PathBuf>) -> Result<Self> {
+        let home = home.context("Cannot determine home directory for HomeRun configuration")?;
+        Ok(Self {
             base_dir: home.join(".homerun"),
             preferences: Preferences::default(),
-        }
+        })
     }
-}
 
-impl Config {
+    pub fn try_default() -> Result<Self> {
+        Self::from_home(dirs::home_dir())
+    }
     pub fn with_base_dir(base_dir: PathBuf) -> Self {
         Self {
             base_dir,
@@ -106,11 +114,8 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, toml::to_string_pretty(self)?)?;
-        Ok(())
+        let serialized = toml::to_string_pretty(self)?;
+        atomic_write(path, serialized.as_bytes(), Some(0o600))
     }
 
     pub fn ensure_dirs(&self) -> Result<()> {
@@ -129,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = Config::default();
+        let config = Config::try_default().unwrap();
         assert_eq!(
             config.socket_path(),
             dirs::home_dir().unwrap().join(".homerun/daemon.sock")
@@ -150,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_scan_results_path() {
-        let config = Config::default();
+        let config = Config::try_default().unwrap();
         assert_eq!(
             config.scan_results_path(),
             dirs::home_dir().unwrap().join(".homerun/scan-results.json")
@@ -185,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_preferences_backward_compat_defaults() {
-        // Simulate an existing config.toml that has no scan fields
+        // Simulate a legacy config.toml that is missing newer preference fields.
         let toml_str = r#"
             base_dir = "/tmp/.homerun"
 
@@ -199,6 +204,8 @@ mod tests {
         assert_eq!(prefs.scan_labels, vec!["self-hosted".to_string()]);
         assert_eq!(prefs.workspace_path, None);
         assert!(!prefs.auto_scan);
+        assert!(!prefs.hide_offline_runners_in_mini_view);
+        assert!(!prefs.sort_runners_by_activity);
         // Existing fields preserved
         assert!(prefs.start_runners_on_launch);
         assert!(!prefs.notify_status_changes);
@@ -207,13 +214,21 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_pipe_name() {
-        let config = Config::default();
+        let config = Config::try_default().unwrap();
         let name = config.pipe_name();
         assert!(
             name.starts_with(r"\\.\pipe\"),
             "pipe name should start with \\\\.\\pipe\\"
         );
         assert!(name.contains("homerun"));
+    }
+
+    #[test]
+    fn test_missing_home_is_reported_without_panicking() {
+        let error = Config::from_home(None).expect_err("missing HOME should fail");
+        assert!(error
+            .to_string()
+            .contains("Cannot determine home directory"));
     }
 
     #[test]

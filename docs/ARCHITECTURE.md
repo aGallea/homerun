@@ -74,11 +74,11 @@ Two methods are supported:
 1. **GitHub Device Flow** (recommended) — user authorizes via browser, no token to copy-paste
 2. **Personal Access Token** — user provides a PAT directly
 
-The token is stored in the **macOS Keychain** and restored automatically on daemon restart.
+The token is stored in `~/.homerun/auth.json` and restored automatically on daemon restart. Unix builds restrict the file to the current user.
 
 ## Communication
 
-The daemon exposes an HTTP API over a Unix socket at `~/.homerun/daemon.sock`.
+The daemon exposes its HTTP API over `~/.homerun/daemon.sock` on macOS/Linux and a named pipe on Windows.
 
 | Protocol  | Purpose            | Example                                   |
 | --------- | ------------------ | ----------------------------------------- |
@@ -133,5 +133,5 @@ All GitHub communication from the runner processes is outbound HTTPS. No inbound
 - **Low overhead daemon** — runs 24/7 managing child processes; Rust's zero-cost abstractions and no GC mean minimal resource usage
 - **Reliable concurrency** — tokio async runtime handles multiple runner processes, log streams, WebSocket connections, and metrics collection without thread-safety bugs
 - **Single language** — daemon, TUI, and CLI share code and types; no serialization boundaries between them
-- **Native macOS integration** — FFI to macOS Keychain (`security-framework`), launchd, and system notifications without a runtime
+- **Platform integration** — launchd on macOS, current-user Registry startup and named-pipe IPC on Windows, plus Tauri desktop notifications
 - **Tauri backend** — the desktop app's Rust backend is a thin IPC layer that reuses the same Unix socket client pattern as the TUI

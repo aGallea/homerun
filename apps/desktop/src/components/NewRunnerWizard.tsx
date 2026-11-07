@@ -21,6 +21,7 @@ interface NewRunnerWizardProps {
   onCreate: (req: CreateRunnerRequest) => Promise<RunnerInfo>;
   onCreateBatch: (req: CreateBatchRequest) => Promise<BatchCreateResponse>;
   preselectedRepo?: string;
+  preselectedRepoDetails?: RepoInfo;
 }
 
 // Empty default — the daemon sets platform-appropriate labels (e.g. self-hosted, Windows, X64)
@@ -44,6 +45,7 @@ export function NewRunnerWizard({
   onCreate,
   onCreateBatch,
   preselectedRepo,
+  preselectedRepoDetails,
 }: NewRunnerWizardProps) {
   const { repos, loading: reposLoading } = useRepos();
   const [step, setStep] = useState<0 | 1 | 2>(preselectedRepo ? 1 : 0);
@@ -51,19 +53,63 @@ export function NewRunnerWizard({
   const [selectedRepo, setSelectedRepo] = useState<RepoInfo | null>(() => {
     return null; // will be resolved once repos load if preselectedRepo is set
   });
-  const [resolvedPreselect, setResolvedPreselect] = useState(false);
-
-  // Resolve preselected repo once repos load
-  useMemo(() => {
-    if (preselectedRepo && !resolvedPreselect && repos.length > 0) {
-      const found = repos.find((r) => r.full_name === preselectedRepo) ?? null;
-      setSelectedRepo(found);
-      setResolvedPreselect(true);
-    }
-  }, [preselectedRepo, repos, resolvedPreselect]);
-
+  const [resolvedPreselectFor, setResolvedPreselectFor] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [labelsInput, setLabelsInput] = useState(DEFAULT_LABELS.join(", "));
+
+  // Resolve a repository passed from the repositories page after loading completes.
+  // This must be an effect (not useMemo): setting state while rendering can cause
+  // re-entrant renders and an intermittently disappearing wizard.
+  useEffect(() => {
+    if (!preselectedRepo) {
+      if (resolvedPreselectFor !== null) {
+        setSelectedRepo(null);
+        setName("");
+        setStep(0);
+      }
+      setResolvedPreselectFor(null);
+      return;
+    }
+    if (reposLoading) return;
+
+    const provided =
+      preselectedRepoDetails?.full_name === preselectedRepo ? preselectedRepoDetails : null;
+    const found = repos.find((r) => r.full_name === preselectedRepo) ?? provided;
+    if (resolvedPreselectFor === preselectedRepo) {
+      if (selectedRepo?.full_name === preselectedRepo) {
+        if (found) return;
+        // The repository disappeared after it had been selected.
+        setSelectedRepo(null);
+        setName("");
+        setStep(0);
+        return;
+      }
+      // Do not override a repository the user selected manually after a stale
+      // preselection, but retry an unresolved preselection when polling finds it.
+      if (selectedRepo || !found) return;
+    }
+
+    setSelectedRepo(found);
+    setResolvedPreselectFor(preselectedRepo);
+
+    if (found) {
+      setName(generateName(found.name));
+      setStep(1);
+    } else {
+      // A stale/deleted repository must not leave the wizard stuck on an
+      // unresolvable "Loading repository..." screen.
+      setName("");
+      setStep(0);
+    }
+  }, [
+    preselectedRepo,
+    preselectedRepoDetails,
+    repos,
+    reposLoading,
+    resolvedPreselectFor,
+    selectedRepo,
+  ]);
+
   const [mode, setMode] = useState<RunnerModeChoice>("app");
   const [containerImage, setContainerImage] = useState(DEFAULT_CONTAINER_IMAGE);
   const [preset, setPreset] = useState<ContainerPreset>("base");
@@ -193,8 +239,8 @@ export function NewRunnerWizard({
     (count === 1 ? !name.trim() : false) || (mode === "container" && !containerImage.trim());
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="wizard" onClick={(e) => e.stopPropagation()}>
+    <div className="dialog-overlay" role="presentation">
+      <div className="wizard" role="dialog" aria-modal="true" aria-label="Create runner">
         {/* Step indicators */}
         <div className="wizard-progress">
           {STEPS.map((label, i) => (
@@ -593,7 +639,7 @@ function StepConfigure({
                   {m === "app"
                     ? "Runs as a foreground process. Stops with daemon."
                     : m === "service"
-                      ? "Runs as a background service. Survives restarts."
+                      ? "Runs persistently and can be reattached after daemon crashes."
                       : disabled
                         ? "Docker isn't reachable right now."
                         : "Runs inside a Docker container for isolation."}
@@ -650,13 +696,13 @@ function StepConfigure({
           <p className="form-hint">
             Defaults to HomeRun's base image. Any image with glibc and bash works — see{" "}
             <a
-              href="https://github.com/aGallea/homerun/blob/master/docs/DOCKER_RUNNERS.md"
+              href="https://github.com/lgg/homerun/blob/master/docs/DOCKER_RUNNERS.md"
               target="_blank"
               rel="noreferrer"
               onClick={(e) => {
                 e.preventDefault();
                 void openExternal(
-                  "https://github.com/aGallea/homerun/blob/master/docs/DOCKER_RUNNERS.md",
+                  "https://github.com/lgg/homerun/blob/master/docs/DOCKER_RUNNERS.md",
                 );
               }}
             >

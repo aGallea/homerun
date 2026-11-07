@@ -15,7 +15,11 @@ pub struct ScanResults {
 
 pub async fn save_scan_results(path: &Path, results: &ScanResults) -> Result<()> {
     let json = serde_json::to_string_pretty(results)?;
-    tokio::fs::write(path, json).await?;
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        crate::persistence::atomic_write(&path, json.as_bytes(), Some(0o600))
+    })
+    .await??;
     Ok(())
 }
 

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::client::{
-    AuthStatus, DaemonLogEntry, JobHistoryEntry, MetricsResponse, RepoInfo, RunnerInfo,
+    AuthStatus, DaemonLogEntry, JobHistoryEntry, LogEntry, MetricsResponse, RepoInfo, RunnerInfo,
     StepsResponse,
 };
 
@@ -28,6 +28,8 @@ pub enum Action {
     StopDaemon,
     RestartDaemon,
     StartLogin,
+    AddRunner(String),
+    LoadRunnerLogs(String),
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +128,8 @@ pub struct App {
     pub daemon_searching: bool,
     pub selected_runner_steps: Option<StepsResponse>,
     pub selected_runner_history: Vec<JobHistoryEntry>,
+    pub runner_logs: Vec<LogEntry>,
+    pub show_runner_logs: bool,
     pub login_state: Option<LoginState>,
     pub repo_search: String,
     pub repo_searching: bool,
@@ -162,6 +166,8 @@ impl App {
             daemon_searching: false,
             selected_runner_steps: None,
             selected_runner_history: Vec::new(),
+            runner_logs: Vec::new(),
+            show_runner_logs: false,
             login_state: None,
             repo_search: String::new(),
             repo_searching: false,
@@ -314,12 +320,7 @@ impl App {
                     ("d", "Delete"),
                     ("+", "Scale Up"),
                 ],
-                vec![
-                    ("a", "Add Runner"),
-                    ("l", "Logs"),
-                    ("e", "Edit Labels"),
-                    ("-", "Scale Down"),
-                ],
+                vec![("a", "Add Runner"), ("l", "Logs"), ("-", "Scale Down")],
                 if is_authenticated {
                     vec![("?", "Help"), ("q", "Quit")]
                 } else {
@@ -386,6 +387,14 @@ impl App {
             match code {
                 KeyCode::Char('?') | KeyCode::Esc => self.show_help = false,
                 _ => {}
+            }
+            return None;
+        }
+
+        // Runner logs popup captures all keys except Esc/l.
+        if self.show_runner_logs {
+            if matches!(code, KeyCode::Esc | KeyCode::Char('l')) {
+                self.show_runner_logs = false;
             }
             return None;
         }
@@ -665,6 +674,32 @@ impl App {
                 }
                 None
             }
+            KeyCode::Char('a') => {
+                let is_authenticated = self.auth_status.as_ref().is_some_and(|a| a.authenticated);
+                if !is_authenticated {
+                    self.status_message = Some("Authenticate before creating runners".to_string());
+                    return None;
+                }
+                let repo = match self.active_tab {
+                    Tab::Repos => self
+                        .repos
+                        .get(self.selected_repo_index)
+                        .map(|repo| repo.full_name.clone()),
+                    Tab::Runners => self.selected_runner().map(|runner| {
+                        format!("{}/{}", runner.config.repo_owner, runner.config.repo_name)
+                    }),
+                    _ => None,
+                };
+                repo.map(Action::AddRunner)
+            }
+            KeyCode::Char('l') => {
+                if self.active_tab == Tab::Runners {
+                    return self
+                        .selected_runner()
+                        .map(|runner| Action::LoadRunnerLogs(runner.config.id.clone()));
+                }
+                None
+            }
             KeyCode::Char('/') => {
                 if self.active_tab == Tab::Repos {
                     self.repo_searching = true;
@@ -722,6 +757,7 @@ mod tests {
             config: crate::client::RunnerConfig {
                 id: id.to_string(),
                 name: format!("runner-{id}"),
+                display_name: None,
                 repo_owner: "test".to_string(),
                 repo_name: "repo".to_string(),
                 labels: vec!["self-hosted".to_string()],

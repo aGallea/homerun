@@ -1,6 +1,6 @@
 {
   "productName": "HomeRun",
-  "version": "0.9.1",
+  "version": "0.11.2",
   "identifier": "com.homerun.app",
   "build": {
     "frontendDist": "../dist",
@@ -12,6 +12,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
         "title": "HomeRun",
         "width": 1200,
         "height": 800,
@@ -35,7 +36,7 @@
       "icons/icon.png"
     ],
     "category": "DeveloperTool",
-    "copyright": "© 2026 HomeRun contributors",
+    "copyright": "\u00a9 2026 HomeRun contributors",
     "resources": [
       "resources/notifications/*.png"
     ],

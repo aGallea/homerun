@@ -17,10 +17,12 @@ export function useJobSteps(runnerId: string | undefined, isBusy: boolean): UseJ
   const [loading, setLoading] = useState(false);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
   const [stepLogs, setStepLogs] = useState<Record<number, string[]>>({});
-  const logCacheRef = useRef<Record<number, string[]>>({});
+  const logCacheRef = useRef<Record<string, string[]>>({});
+  const stepsGeneration = useRef(0);
+  const logsGeneration = useRef(0);
 
-  // Poll steps every 1s when busy
   useEffect(() => {
+    const generation = ++stepsGeneration.current;
     if (!isBusy || !runnerId) {
       setStepsResponse(null);
       setExpandedStep(null);
@@ -30,66 +32,104 @@ export function useJobSteps(runnerId: string | undefined, isBusy: boolean): UseJ
       return;
     }
 
+    let cancelled = false;
+    let timer: number | undefined;
     setLoading(true);
 
     const fetchSteps = async () => {
       try {
         const data = await api.getRunnerSteps(runnerId);
-        setStepsResponse(data);
+        if (!cancelled && generation === stepsGeneration.current) setStepsResponse(data);
       } catch {
-        // ignore errors during polling
+        // Ignore polling errors while the runner/job transitions.
       } finally {
-        setLoading(false);
+        if (!cancelled && generation === stepsGeneration.current) {
+          setLoading(false);
+          timer = window.setTimeout(() => void fetchSteps(), 1000);
+        }
       }
     };
 
-    fetchSteps();
-    const interval = setInterval(fetchSteps, 1000);
-    return () => clearInterval(interval);
+    void fetchSteps();
+    return () => {
+      cancelled = true;
+      stepsGeneration.current += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [isBusy, runnerId]);
 
-  // Fetch step logs when a step is expanded, re-fetch every 5s if running
+  const expandedStepInfo =
+    expandedStep === null
+      ? null
+      : (stepsResponse?.steps.find((step) => step.number === expandedStep) ?? null);
+  const expandedStepStatus = expandedStepInfo?.status ?? null;
+  const expandedStepCacheKey =
+    expandedStep === null || !runnerId || !expandedStepInfo
+      ? null
+      : JSON.stringify({
+          runnerId,
+          jobName: stepsResponse?.job_name ?? null,
+          number: expandedStepInfo.number,
+          name: expandedStepInfo.name,
+          startedAt: expandedStepInfo.started_at,
+          completedAt: expandedStepInfo.completed_at,
+        });
+
   useEffect(() => {
+    const generation = ++logsGeneration.current;
     if (expandedStep === null || !runnerId) return;
 
-    const currentStep = stepsResponse?.steps.find((s) => s.number === expandedStep);
-    const isRunning = currentStep?.status === "running";
-    const isCached = logCacheRef.current[expandedStep] !== undefined;
+    const isTerminal =
+      expandedStepStatus !== null &&
+      expandedStepStatus !== "pending" &&
+      expandedStepStatus !== "running";
+    const cachedLines =
+      expandedStepCacheKey === null ? undefined : logCacheRef.current[expandedStepCacheKey];
+    if (cachedLines !== undefined && isTerminal) {
+      setStepLogs((previous) => ({ ...previous, [expandedStep]: cachedLines }));
+      return;
+    }
 
-    // Skip if cached and not running
-    if (isCached && !isRunning) return;
+    // Do not display a previous job's step logs while the current identity is
+    // being resolved or fetched. Cache entries are scoped to a concrete job
+    // execution rather than only the step number.
+    setStepLogs((previous) => ({ ...previous, [expandedStep]: [] }));
 
+    let cancelled = false;
+    let timer: number | undefined;
     const fetchLogs = async () => {
       try {
         const data = await api.getStepLogs(runnerId, expandedStep);
+        if (cancelled || generation !== logsGeneration.current) return;
         const lines = data.lines;
-
-        // Cache only if step is completed (not running)
-        const step = stepsResponse?.steps.find((s) => s.number === expandedStep);
-        if (step && step.status !== "running") {
-          logCacheRef.current[expandedStep] = lines;
+        // A null/pending status is not final. Caching at that point can freeze
+        // an early partial response and prevent the completed log from ever
+        // being fetched after the step transitions to a terminal state.
+        if (isTerminal && expandedStepCacheKey !== null) {
+          logCacheRef.current[expandedStepCacheKey] = lines;
         }
-
-        setStepLogs((prev) => ({ ...prev, [expandedStep]: lines }));
+        setStepLogs((previous) => ({ ...previous, [expandedStep]: lines }));
       } catch {
-        // GitHub API only returns logs for completed steps.
-        // Set empty array so UI shows "No log output" instead of "Fetching logs..." forever.
-        if (!logCacheRef.current[expandedStep]) {
-          setStepLogs((prev) => ({ ...prev, [expandedStep]: [] }));
+        if (!cancelled && generation === logsGeneration.current && cachedLines === undefined) {
+          setStepLogs((previous) => ({ ...previous, [expandedStep]: [] }));
+        }
+      } finally {
+        if (!cancelled && generation === logsGeneration.current && !isTerminal) {
+          timer = window.setTimeout(() => void fetchLogs(), 5000);
         }
       }
     };
 
-    fetchLogs();
-
-    if (!isRunning) return;
-
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
-  }, [expandedStep, runnerId, stepsResponse]);
+    void fetchLogs();
+    return () => {
+      cancelled = true;
+      logsGeneration.current += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [expandedStep, expandedStepCacheKey, expandedStepStatus, runnerId]);
 
   const toggleStep = useCallback((stepNumber: number) => {
-    setExpandedStep((prev) => (prev === stepNumber ? null : stepNumber));
+    setExpandedStep((previous) => (previous === stepNumber ? null : stepNumber));
   }, []);
 
   return {

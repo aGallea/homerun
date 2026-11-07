@@ -161,6 +161,7 @@ mod tests {
             config: RunnerConfig {
                 id: format!("id-{name}"),
                 name: name.to_string(),
+                display_name: None,
                 repo_owner: "owner".to_string(),
                 repo_name: "repo".to_string(),
                 labels: vec!["self-hosted".to_string()],

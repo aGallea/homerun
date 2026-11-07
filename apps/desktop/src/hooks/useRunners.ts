@@ -8,6 +8,7 @@ import type {
   ScaleGroupResponse,
 } from "../api/types";
 import { api } from "../api/commands";
+import { useEvents } from "./useEvents";
 
 export function useRunners() {
   const [runners, setRunners] = useState<RunnerInfo[]>([]);
@@ -15,40 +16,78 @@ export function useRunners() {
   const [error, setError] = useState<string | null>(null);
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const initialFetch = useRef(true);
+  const refreshGeneration = useRef(0);
+  const refreshPromise = useRef<Promise<void> | null>(null);
+  const refreshQueued = useRef(false);
+  const actionPromises = useRef(new Map<string, Promise<unknown>>());
 
-  const addPending = (id: string) => setPendingActions((prev) => new Set(prev).add(id));
-  const removePending = (id: string) =>
-    setPendingActions((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await api.listRunners();
-      setRunners(data);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      setRunners([]);
-    } finally {
-      if (initialFetch.current) {
-        initialFetch.current = false;
-        setLoading(false);
-      }
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshPromise.current) {
+      refreshQueued.current = true;
+      return refreshPromise.current;
     }
+
+    const promise = (async () => {
+      do {
+        refreshQueued.current = false;
+        const generation = ++refreshGeneration.current;
+        try {
+          const data = await api.listRunners();
+          if (generation !== refreshGeneration.current) continue;
+          setRunners(data);
+          setError(null);
+        } catch (cause) {
+          if (generation === refreshGeneration.current) setError(String(cause));
+        } finally {
+          if (generation === refreshGeneration.current && initialFetch.current) {
+            initialFetch.current = false;
+            setLoading(false);
+          }
+        }
+      } while (refreshQueued.current);
+    })();
+
+    refreshPromise.current = promise;
+    void promise.finally(() => {
+      if (refreshPromise.current === promise) refreshPromise.current = null;
+    });
+    return promise;
   }, []);
 
   useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 2000);
-    return () => clearInterval(interval);
+    void refresh();
+    const interval = setInterval(() => void refresh(), 2000);
+    return () => {
+      clearInterval(interval);
+      refreshGeneration.current += 1;
+    };
   }, [refresh]);
 
+  useEvents(refresh);
+
+  const runPending = useCallback(function runPending<T>(
+    id: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const existing = actionPromises.current.get(id) as Promise<T> | undefined;
+    if (existing) return existing;
+
+    setPendingActions((previous) => new Set(previous).add(id));
+    const promise = operation().finally(() => {
+      actionPromises.current.delete(id);
+      setPendingActions((previous) => {
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
+    });
+    actionPromises.current.set(id, promise);
+    return promise;
+  }, []);
+
   const createRunner = useCallback(
-    async (req: CreateRunnerRequest) => {
-      const runner = await api.createRunner(req);
+    async (request: CreateRunnerRequest) => {
+      const runner = await api.createRunner(request);
       await refresh();
       return runner;
     },
@@ -56,60 +95,44 @@ export function useRunners() {
   );
 
   const deleteRunner = useCallback(
-    async (id: string) => {
-      addPending(id);
-      try {
+    (id: string) =>
+      runPending(id, async () => {
         await api.deleteRunner(id);
         await refresh();
-      } finally {
-        removePending(id);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const startRunner = useCallback(
-    async (id: string) => {
-      addPending(id);
-      try {
+    (id: string) =>
+      runPending(id, async () => {
         await api.startRunner(id);
         await refresh();
-      } finally {
-        removePending(id);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const stopRunner = useCallback(
-    async (id: string) => {
-      addPending(id);
-      try {
+    (id: string) =>
+      runPending(id, async () => {
         await api.stopRunner(id);
         await refresh();
-      } finally {
-        removePending(id);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const restartRunner = useCallback(
-    async (id: string) => {
-      addPending(id);
-      try {
+    (id: string) =>
+      runPending(id, async () => {
         await api.restartRunner(id);
         await refresh();
-      } finally {
-        removePending(id);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const createBatch = useCallback(
-    async (req: CreateBatchRequest): Promise<BatchCreateResponse> => {
-      const result = await api.createBatch(req);
+    async (request: CreateBatchRequest): Promise<BatchCreateResponse> => {
+      const result = await api.createBatch(request);
       await refresh();
       return result;
     },
@@ -117,73 +140,53 @@ export function useRunners() {
   );
 
   const startGroup = useCallback(
-    async (groupId: string): Promise<GroupActionResponse> => {
-      addPending(groupId);
-      try {
+    (groupId: string): Promise<GroupActionResponse> =>
+      runPending(groupId, async () => {
         const result = await api.startGroup(groupId);
         await refresh();
         return result;
-      } finally {
-        removePending(groupId);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const stopGroup = useCallback(
-    async (groupId: string): Promise<GroupActionResponse> => {
-      addPending(groupId);
-      try {
+    (groupId: string): Promise<GroupActionResponse> =>
+      runPending(groupId, async () => {
         const result = await api.stopGroup(groupId);
         await refresh();
         return result;
-      } finally {
-        removePending(groupId);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const restartGroup = useCallback(
-    async (groupId: string): Promise<GroupActionResponse> => {
-      addPending(groupId);
-      try {
+    (groupId: string): Promise<GroupActionResponse> =>
+      runPending(groupId, async () => {
         const result = await api.restartGroup(groupId);
         await refresh();
         return result;
-      } finally {
-        removePending(groupId);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const deleteGroup = useCallback(
-    async (groupId: string): Promise<GroupActionResponse> => {
-      addPending(groupId);
-      try {
+    (groupId: string): Promise<GroupActionResponse> =>
+      runPending(groupId, async () => {
         const result = await api.deleteGroup(groupId);
         await refresh();
         return result;
-      } finally {
-        removePending(groupId);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   const scaleGroup = useCallback(
-    async (groupId: string, count: number): Promise<ScaleGroupResponse> => {
-      addPending(groupId);
-      try {
+    (groupId: string, count: number): Promise<ScaleGroupResponse> =>
+      runPending(groupId, async () => {
         const result = await api.scaleGroup(groupId, count);
         await refresh();
         return result;
-      } finally {
-        removePending(groupId);
-      }
-    },
-    [refresh],
+      }),
+    [refresh, runPending],
   );
 
   return {

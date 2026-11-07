@@ -101,6 +101,7 @@ async fn create_runner(
         config: homerun::client::RunnerConfig {
             id: id.clone(),
             name: req.name.unwrap_or_else(|| format!("runner-{id}")),
+            display_name: None,
             repo_owner: owner,
             repo_name: name,
             labels: req

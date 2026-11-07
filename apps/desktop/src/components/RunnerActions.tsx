@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { RunnerInfo } from "../api/types";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { RenameRunnerDialog } from "./RenameRunnerDialog";
 
 interface RunnerActionsProps {
   runner: RunnerInfo;
@@ -21,8 +22,8 @@ export function RunnerActions({
   loading = false,
   readOnly = false,
 }: RunnerActionsProps) {
-  if (readOnly) return null;
   const [confirm, setConfirm] = useState<"delete" | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -46,6 +47,8 @@ export function RunnerActions({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menuOpen]);
+
+  if (readOnly) return null;
 
   return (
     <>
@@ -79,6 +82,14 @@ export function RunnerActions({
           disabled={loading || !canRestart}
         >
           ↻
+        </button>
+        <button
+          className="icon-btn"
+          onClick={() => setRenameOpen(true)}
+          title="Rename display name"
+          disabled={loading}
+        >
+          ✎
         </button>
         <button
           className="icon-btn icon-btn-danger"
@@ -130,6 +141,15 @@ export function RunnerActions({
               ↻ Restart
             </button>
             <button
+              className="actions-dropdown-item"
+              onClick={() => {
+                setRenameOpen(true);
+                setMenuOpen(false);
+              }}
+            >
+              ✎ Rename display name
+            </button>
+            <button
               className="actions-dropdown-item actions-dropdown-item-danger"
               disabled={!canDelete}
               onClick={() => {
@@ -143,10 +163,12 @@ export function RunnerActions({
         )}
       </div>
 
+      {renameOpen && <RenameRunnerDialog runner={runner} onClose={() => setRenameOpen(false)} />}
+
       {confirm === "delete" && (
         <ConfirmDialog
           title="Delete Runner"
-          message={`Are you sure you want to delete "${runner.config.name}"? This will stop the runner, deregister it from GitHub, and remove its local data.`}
+          message={`Are you sure you want to delete "${runner.config.display_name ?? runner.config.name}"? This will stop the runner, deregister it from GitHub, and remove its local data.`}
           confirmLabel="Delete Runner"
           danger
           onConfirm={() => {

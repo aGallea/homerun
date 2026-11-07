@@ -5,16 +5,20 @@ import { api } from "../api/commands";
 import type { RunnerInfo } from "../api/types";
 import { jobProgress, formatJobElapsed } from "../utils/runnerHelpers";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { useRunnerDisplayPreferences } from "../hooks/useRunnerDisplayPreferences";
+import { sortRunnersByActivity } from "../utils/runnerOrdering";
 
 function countByState(runners: RunnerInfo[]): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const r of runners) {
+  for (const runner of runners) {
     const key =
-      r.state === "busy"
+      runner.state === "busy"
         ? "busy"
-        : r.state === "offline" || r.state === "error"
-          ? "offline"
-          : "online";
+        : runner.state === "online"
+          ? "online"
+          : runner.state === "offline" || runner.state === "error"
+            ? "offline"
+            : "transitioning";
     counts[key] = (counts[key] || 0) + 1;
   }
   return counts;
@@ -23,7 +27,8 @@ function countByState(runners: RunnerInfo[]): Record<string, number> {
 const MINI_WIDTH = 280;
 
 export function MiniView() {
-  const { runners, error } = useRunners();
+  const { runners, loading, error } = useRunners();
+  const { sortRunnersByActivity: sortByRecentActivity } = useRunnerDisplayPreferences();
   const positionSaved = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -36,16 +41,17 @@ export function MiniView() {
       .catch(() => {});
   }, []);
 
-  const busy = runners
-    .filter((r) => r.state === "busy")
-    .sort((a, b) => {
-      const aTime = a.job_started_at ? new Date(a.job_started_at).getTime() : -Infinity;
-      const bTime = b.job_started_at ? new Date(b.job_started_at).getTime() : -Infinity;
-      return bTime - aTime;
-    });
+  const busyRunners = runners.filter((runner) => runner.state === "busy");
+  const busy = sortByRecentActivity
+    ? sortRunnersByActivity(busyRunners)
+    : busyRunners.sort((a, b) => {
+        const aTime = a.job_started_at ? new Date(a.job_started_at).getTime() : -Infinity;
+        const bTime = b.job_started_at ? new Date(b.job_started_at).getTime() : -Infinity;
+        return bTime - aTime;
+      });
 
   const counts = countByState(runners);
-  const daemonOk = error === null;
+  const daemonOk = !loading && error === null;
   useTrayIcon(runners, daemonOk);
 
   // Resize window when content changes
@@ -91,6 +97,9 @@ export function MiniView() {
           {(counts.offline || 0) > 0 && (
             <span className="mini-count offline">{counts.offline} off</span>
           )}
+          {(counts.transitioning || 0) > 0 && (
+            <span className="mini-count">{counts.transitioning} changing</span>
+          )}
         </div>
       </div>
 
@@ -99,7 +108,14 @@ export function MiniView() {
         return (
           <div key={runner.config.id} className="mini-runner-card">
             <div className="mini-runner-top">
-              <span className="mini-runner-name">{runner.config.name}</span>
+              <span
+                className="mini-runner-name"
+                title={
+                  runner.config.display_name ? `GitHub runner: ${runner.config.name}` : undefined
+                }
+              >
+                {runner.config.display_name ?? runner.config.name}
+              </span>
               <span className="mini-runner-time">{formatJobElapsed(runner.job_started_at)}</span>
             </div>
             <div className="mini-runner-job">{runner.current_job ?? "Starting..."}</div>

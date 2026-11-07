@@ -1,26 +1,52 @@
-/// Resolve the full PATH from the user's login shell.
-/// This picks up paths added by nvm, fnm, Homebrew, etc. that aren't
-/// available in a bare launchd environment.
+/// Resolve PATH by asking one concrete Unix shell.
 #[cfg(unix)]
-pub fn resolve_shell_path() -> Option<String> {
+fn shell_path_from(shell: &str) -> Option<String> {
     use std::process::Stdio;
 
-    // Fall back to /bin/sh (guaranteed on any Unix) rather than a specific
-    // shell like zsh — zsh is the macOS default but is absent on minimal Linux
-    // (e.g. a container), where the fallback would otherwise fail to spawn.
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let output = std::process::Command::new(&shell)
+    let output = std::process::Command::new(shell)
         .args(["-l", "-c", "echo $PATH"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
         .ok()?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
+    if !output.status.success() {
+        return None;
     }
+
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!path.is_empty()).then_some(path)
+}
+
+#[cfg(unix)]
+fn resolve_shell_path_with(
+    configured_shell: Option<&str>,
+    inherited_path: Option<&str>,
+) -> Option<String> {
+    if let Some(shell) = configured_shell {
+        if let Some(path) = shell_path_from(shell) {
+            return Some(path);
+        }
+    }
+
+    if configured_shell != Some("/bin/sh") {
+        if let Some(path) = shell_path_from("/bin/sh") {
+            return Some(path);
+        }
+    }
+
+    inherited_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// Resolve the full PATH from the user's login shell, retrying /bin/sh
+/// when SHELL points at a stale or removed executable.
+#[cfg(unix)]
+pub fn resolve_shell_path() -> Option<String> {
+    let shell = std::env::var("SHELL").ok();
+    let inherited_path = std::env::var("PATH").ok();
+    resolve_shell_path_with(shell.as_deref(), inherited_path.as_deref())
 }
 
 /// On Windows the system PATH is usually inherited from the environment,
@@ -74,22 +100,21 @@ fn find_git_install_dir() -> Option<std::path::PathBuf> {
     use std::process::{Command, Stdio};
 
     // Try the Windows registry (works from native Windows processes).
-    let output = Command::new("reg")
+    if let Ok(output) = Command::new("reg")
         .args(["query", r"HKLM\SOFTWARE\GitForWindows", "/v", "InstallPath"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
-        .ok()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        // Output line looks like: "    InstallPath    REG_SZ    C:\Program Files\Git"
-        if let Some(pos) = line.find("REG_SZ") {
-            let path = line[pos + "REG_SZ".len()..].trim();
-            if !path.is_empty() {
-                let p = PathBuf::from(path);
-                if p.is_dir() {
-                    return Some(p);
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if let Some(pos) = line.find("REG_SZ") {
+                let path = line[pos + "REG_SZ".len()..].trim();
+                if !path.is_empty() {
+                    let p = PathBuf::from(path);
+                    if p.is_dir() {
+                        return Some(p);
+                    }
                 }
             }
         }
@@ -138,6 +163,23 @@ mod tests {
         assert!(result.is_some(), "expected Some on Windows, got None");
         let path = result.unwrap();
         assert!(!path.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_configured_shell_falls_back_to_bin_sh() {
+        let path = resolve_shell_path_with(
+            Some("/definitely/missing/homerun-shell"),
+            Some("/inherited/fallback"),
+        )
+        .expect("/bin/sh should provide a fallback PATH");
+        assert_ne!(path, "/inherited/fallback");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_shell_command_is_reported_as_unavailable() {
+        assert!(shell_path_from("/definitely/missing/homerun-shell").is_none());
     }
 
     #[cfg(unix)]

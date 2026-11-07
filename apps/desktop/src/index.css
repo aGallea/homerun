@@ -680,6 +680,9 @@ p {
   flex-direction: column;
   gap: 4px;
   padding: 12px 16px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .stats-card-label {
